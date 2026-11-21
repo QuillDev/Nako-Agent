@@ -240,7 +240,7 @@ def default_channel(project_root: Optional[Path] = None) -> str:
     root = Path(project_root) if project_root is not None else install_root()
     stamp = _read_stamp(root)
     if not _package_channel(stamp):
-        return CHANNEL_STABLE if _tracks_official_origin(root) else CHANNEL_MAIN
+        return CHANNEL_MAIN  # this fork publishes no releases
     if stamp.get("source") == "channel-build":
         request = stamp.get("channelBuild")
         if not isinstance(request, dict):
