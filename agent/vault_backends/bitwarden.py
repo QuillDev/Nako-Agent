@@ -9,11 +9,13 @@ a URI. Resolve: ``bw get password <id>``.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -27,6 +29,33 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = 30.0
 _ENV_KEEP = ("PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot",
              "TMPDIR", "TMP", "TEMP", "XDG_CONFIG_HOME", "BITWARDENCLI_APPDATA_DIR")
+
+
+def _b64url_bytes(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _std_b64(raw: bytes) -> str:
+    return base64.b64encode(raw).decode()
+
+
+def _credential_id_bytes(cred_id: str) -> bytes:
+    # Bitwarden stores ids of passkeys it created as GUIDs, imported ones as "b64.<base64url>".
+    return _b64url_bytes(cred_id[4:]) if cred_id.startswith("b64.") else uuid.UUID(cred_id).bytes
+
+
+def _passkey_to_cdp(cred: dict) -> dict:
+    """A Bitwarden ``fido2Credentials`` entry (PKCS#8 P-256 key) as a CDP ``WebAuthn.Credential``."""
+    out = {"credentialId": _std_b64(_credential_id_bytes(cred["credentialId"])),
+           "isResidentCredential": str(cred.get("discoverable")).lower() == "true",
+           "rpId": cred["rpId"], "privateKey": _std_b64(_b64url_bytes(cred["keyValue"])),
+           "signCount": int(cred.get("counter") or 0), "backupEligibility": True, "backupState": True}
+    if cred.get("userHandle"):
+        out["userHandle"] = _std_b64(_b64url_bytes(cred["userHandle"]))
+    for key in ("userName", "userDisplayName"):
+        if cred.get(key):
+            out[key] = cred[key]
+    return out
 
 
 class BitwardenLoginBackend(LoginBackend):
@@ -105,15 +134,24 @@ class BitwardenLoginBackend(LoginBackend):
         if not _unlock.store_session_token(self.name, token, generation):
             raise RuntimeError("Bitwarden was locked while unlocking; try again")
 
-    def _run(self, *args: str) -> str:
+    def _run(self, *args: str, input: Optional[str] = None) -> str:
         token = _unlock.get_session_token(self.name)
         if not token and self._password_command():
             self._unlock_unattended()
             token = _unlock.get_session_token(self.name)
         if not token:
             raise UnlockRequired(self)
-        proc = run_cli([str(self._bw()), *args, "--nointeraction"], env=self._env(token), timeout=_TIMEOUT,
-                       label="bw", timeout_message="bw timed out", stdin=subprocess.DEVNULL)
+        argv = [str(self._bw()), *args, "--nointeraction"]
+        if input is None:
+            proc = run_cli(argv, env=self._env(token), timeout=_TIMEOUT, label="bw", timeout_message="bw timed out",
+                           stdin=subprocess.DEVNULL)
+        else:
+            # Item payloads carry key material: stdin only, never argv.
+            try:
+                proc = subprocess.run(argv, env=self._env(token), input=input, capture_output=True,
+                                      text=True, encoding="utf-8", errors="replace", timeout=_TIMEOUT, check=False)
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError("bw timed out") from exc
         if proc.returncode != 0:
             err = scrub_ansi(proc.stderr or "")
             if "locked" in err.lower() or "session" in err.lower():
@@ -153,7 +191,9 @@ class BitwardenLoginBackend(LoginBackend):
                 id=f"{self.prefix}{item.get('id')}", kind="login", label=str(item.get("name") or origins[0]),
                 origin=origins[0], created_at=str(item.get("creationDate") or ""),
                 identifier_type="username" if username else None, identifier=username,
-                allowed_origins=web_origins))
+                allowed_origins=web_origins,
+                passkey_rp_ids=tuple(dict.fromkeys(str(c.get("rpId")) for c in login.get("fido2Credentials") or []
+                                                   if c.get("rpId")))))
         return out
 
     def get_meta(self, handle: str) -> Optional[VaultItemMeta]:
@@ -161,6 +201,25 @@ class BitwardenLoginBackend(LoginBackend):
 
     def resolve_password(self, handle: str) -> str:
         return self._run("get", "password", handle[len(self.prefix):]).rstrip("\r\n")
+
+    def _item(self, handle: str) -> dict:
+        return json.loads(self._run("get", "item", handle[len(self.prefix):]))
+
+    def resolve_passkeys(self, handle: str, rp_id: str) -> list[dict]:
+        login = self._item(handle).get("login") or {}
+        return [_passkey_to_cdp(c) for c in login.get("fido2Credentials") or [] if c.get("rpId") == rp_id]
+
+    def record_passkey_counters(self, handle: str, counters: dict[str, int]) -> None:
+        item = self._item(handle)
+        changed = False
+        for cred in (item.get("login") or {}).get("fido2Credentials") or []:
+            count = counters.get(_std_b64(_credential_id_bytes(cred["credentialId"])))
+            if count is not None and count > int(cred.get("counter") or 0):
+                cred["counter"] = str(count)  # bw stores the counter as a string
+                changed = True
+        if changed:
+            encoded = base64.b64encode(json.dumps(item).encode()).decode()
+            self._run("edit", "item", item["id"], input=encoded)
 
     def resolve_otp(self, handle: str) -> Optional[str]:
         # `bw get totp <id>` mints the current code from the item's TOTP seed; "No TOTP available" otherwise.

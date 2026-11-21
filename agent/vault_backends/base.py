@@ -59,6 +59,14 @@ class LoginBackend(ABC):
         Server-side only, like resolve_password."""
         return None
 
+    def resolve_passkeys(self, handle: str, rp_id: str) -> list[dict]:
+        """The item's passkeys for ``rp_id`` as CDP ``WebAuthn.Credential`` dicts (private keys included).
+        Server-side only, like resolve_password; backends that store no passkeys return []."""
+        return []
+
+    def record_passkey_counters(self, handle: str, counters: dict[str, int]) -> None:
+        """Store the sign counts a sign-in advanced (CDP credential id -> count), so the next one is accepted."""
+
     def resolve_secret(self, handle: str) -> dict[str, str]:
         """Full payload of a payment/address item (server-side only). External managers list only
         logins, so the base returns the password-only shape."""
