@@ -186,6 +186,8 @@ class VaultItemMeta:
     # ``origin`` is the first/primary one). Fill matching stays exact-origin against
     # this list — no wildcard or subdomain inference is ever derived from it.
     allowed_origins: tuple = ()
+    # WebAuthn relying-party ids of the passkeys stored on this item (manager backends only).
+    passkey_rp_ids: tuple = ()
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -202,6 +204,8 @@ class VaultItemMeta:
             out["has_otp"] = True
         if len(self.allowed_origins) > 1:
             out["allowed_origins"] = list(self.allowed_origins)
+        if self.passkey_rp_ids:
+            out["passkey_rp_ids"] = list(self.passkey_rp_ids)
         return out
 
 

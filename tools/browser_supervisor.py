@@ -354,6 +354,29 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
             return _fail(f"Input.insertText failed: {response['error']}")
         return {"ok": True}
 
+    def send_webauthn(self, method: str, params: Optional[dict[str, Any]] = None, *, session_id: str,
+                      timeout: float = 5.0) -> dict[str, Any]:
+        """Send one ``WebAuthn.*`` command (virtual authenticators) on page session ``session_id``.
+
+        The vault's passkey sign-in loads a credential into the tab the origin check ran on and removes
+        it after; it addresses that session even once the supervisor has moved on, so cleanup still
+        reaches it. Returns ``{"ok": True, "result"}`` or ``{"ok": False, "error"}``. Never raises.
+        """
+        if not method.startswith("WebAuthn."):
+            return _fail("only WebAuthn.* commands are sent here")
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return _fail("supervisor loop is not running")
+        try:
+            response = _schedule(self._cdp(method, params or {}, session_id=session_id, timeout=timeout), loop,
+                                 timeout=timeout + 1)
+        except Exception as exc:  # health: allow BLE001 -- the caller reports a failed arm or cleanup
+            return _err(exc)
+        if isinstance(response, dict) and response.get("error"):
+            return _fail(f"{method} failed: {response['error'].get('message', response['error'])}"
+                         if isinstance(response["error"], dict) else f"{method} failed")
+        return {"ok": True, "result": (response or {}).get("result") or {}}
+
     def set_driven_target(self, target_id: Optional[str]) -> None:
         """Record the CDP target the task's browser_exec session drives (None: unknown)."""
         with self._state_lock:

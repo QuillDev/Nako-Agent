@@ -472,6 +472,8 @@ def browser_vault_list() -> str:
             if meta.identifier:
                 entry["identifier"] = meta.identifier
                 entry["identifier_type"] = meta.identifier_type
+            if meta.passkey_rp_ids:
+                entry["passkey_rp_ids"] = list(meta.passkey_rp_ids)
             items.append(entry)
     out: dict[str, Any] = {"success": True, "items": items}
     if not items:
@@ -1205,6 +1207,134 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
     return json.dumps(out)
 
 
+# A platform-style authenticator (Bitwarden-stored passkeys are discoverable, user-verified keys) that
+# answers the page without UI. It lives on one tab only and is removed after one sign-in.
+_PASSKEY_AUTHENTICATOR = {"protocol": "ctap2", "ctap2Version": "ctap2_1", "transport": "internal",
+                          "hasResidentKey": True, "hasUserVerification": True, "isUserVerified": True,
+                          "automaticPresenceSimulation": True, "defaultBackupEligibility": True,
+                          "defaultBackupState": True}
+_PASSKEY_WINDOW_S = 120.0
+_PASSKEY_POLL_S = 0.5
+
+
+def _passkey_rp_for(origin: str, rp_ids: tuple) -> Optional[str]:
+    """The item's relying-party id this page may use: WebAuthn's own rule (https, host equal to the rp id
+    or a subdomain of it). The browser enforces it again; checking first keeps keys out of other tabs."""
+    scheme, _, rest = origin.partition("://")
+    if scheme.lower() != "https":
+        return None
+    host = rest.split("/", 1)[0].split(":", 1)[0].lower()
+    if not host:
+        return None
+    for rp in rp_ids:
+        rp_norm = str(rp).lower()
+        if rp_norm and (host == rp_norm or host.endswith("." + rp_norm)):
+            return rp
+    return None
+
+
+@plugin_errors_as_refusal
+def browser_vault_passkey(handle: str = "", task_id: Optional[str] = None) -> str:
+    """Load a saved login's passkeys into a virtual authenticator on the page's tab, for ONE sign-in.
+
+    The keys go over the supervisor socket and never enter a result. A watcher removes the authenticator
+    as soon as a sign-in advances a key's counter (storing the new count) or after two minutes."""
+    from agent.vault_backends import UnlockRequired, backend_for_handle
+
+    effective_task_id = task_id or "default"
+    backend = backend_for_handle(handle)
+    if backend is not None and backend.needs_unlock and not backend.is_unlocked():
+        unlocked = json.loads(browser_vault_unlock(backend.name))
+        if not unlocked.get("success"):
+            return json.dumps(unlocked)
+    try:
+        meta = backend.get_meta(handle) if backend is not None else None
+    except UnlockRequired:
+        return json.dumps({"success": False, "error_type": "unlock_required",
+                           "error": f"{backend.display_name} locked again; call browser_vault action=unlock."})
+    if meta is None or not meta.passkey_rp_ids:
+        return json.dumps({"success": False, "error_type": "no_passkey",
+                           "error": f"No saved passkey under handle {handle!r}; browser_vault action=list shows "
+                                    "passkey_rp_ids on items that have one."})
+    candidates = list(dict.fromkeys([*saved_origins(meta), *(f"https://{rp}" for rp in meta.passkey_rp_ids)]))
+    page = next((p for p in (_focus_bound_origin(effective_task_id, o, "passkey") for o in candidates) if p), None)
+    page = page or _current_page_check(effective_task_id)
+    if page is None:
+        return json.dumps({"success": False, "error": "Could not determine the current page origin. Open the sign-in page first."})
+    rp_id = _passkey_rp_for(page.origin, meta.passkey_rp_ids)
+    if rp_id is None:
+        return json.dumps({"success": False, "error_type": "origin_mismatch",
+                           "error": f"Refused: the page ({page.origin}) is not on the passkey's site "
+                                    f"({', '.join(meta.passkey_rp_ids)})."})
+    with _pinned_page_session(effective_task_id, page) as unpinned:
+        if unpinned is not None:
+            return json.dumps(unpinned)
+        supervisor = _ensure_supervisor(effective_task_id)
+        if page.page is not None or supervisor is None or page.session is None:
+            return json.dumps({"success": False, "error_type": "supervisor_required",
+                               "error": "Passkeys need the CDP browser (browser_exec); this page has no CDP session."})
+        taken = _human_lease_refusal(effective_task_id)
+        if taken is not None:
+            return json.dumps(taken)
+        return _arm_passkeys(supervisor, page, backend, handle, rp_id)
+
+
+def _arm_passkeys(supervisor: Any, page: _CheckedPage, backend: Any, handle: str, rp_id: str) -> str:
+    import contextvars
+    import threading
+
+    def send(method: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        return supervisor.send_webauthn(method, params, session_id=page.session)
+
+    credentials = backend.resolve_passkeys(handle, rp_id)
+    if not credentials:
+        return json.dumps({"success": False, "error_type": "no_passkey", "error": f"The item has no passkey for {rp_id}."})
+    enabled = send("WebAuthn.enable", {"enableUI": False})
+    added = send("WebAuthn.addVirtualAuthenticator", {"options": _PASSKEY_AUTHENTICATOR}) if enabled.get("ok") else enabled
+    if not added.get("ok"):
+        return json.dumps({"success": False, "error_type": "eval_failed",
+                           "error": f"Could not add a virtual authenticator: {str(added.get('error'))[:200]}"})
+    authenticator = added["result"]["authenticatorId"]
+    initial: dict[str, int] = {}
+    for credential in credentials:
+        if not send("WebAuthn.addCredential", {"authenticatorId": authenticator, "credential": credential}).get("ok"):
+            send("WebAuthn.removeVirtualAuthenticator", {"authenticatorId": authenticator})
+            # The command carried a private key: report nothing from it.
+            return json.dumps({"success": False, "error_type": "eval_failed", "error": "The browser refused the saved passkey."})
+        initial[credential["credentialId"]] = int(credential.get("signCount") or 0)
+    del credentials
+    watcher = threading.Thread(target=contextvars.copy_context().run, daemon=True, name="vault-passkey",
+                               args=(_watch_passkey_use, send, authenticator, backend, handle, initial))
+    watcher.start()
+    return json.dumps({"success": True, "kind": "passkey", "origin": page.origin, "rp_id": rp_id, "passkeys": len(initial),
+                       "next": (f"Start the site's passkey sign-in now (within {int(_PASSKEY_WINDOW_S)} s); the browser "
+                                "answers it without a prompt and the passkey is removed after one use.")})
+
+
+def _watch_passkey_use(send: Any, authenticator: str, backend: Any, handle: str, initial: dict[str, int]) -> None:
+    """Remove the authenticator after the first sign-in (a counter moved) or the window, then store the
+    counters that moved. Runs off the tool call; failures are logged, never raised."""
+    deadline = time.monotonic() + _PASSKEY_WINDOW_S
+    counts: dict[str, int] = {}
+    try:
+        while time.monotonic() < deadline:
+            time.sleep(_PASSKEY_POLL_S)
+            got = send("WebAuthn.getCredentials", {"authenticatorId": authenticator})
+            if not got.get("ok"):
+                break  # the tab closed or the supervisor went away: nothing left to remove
+            counts = {c["credentialId"]: int(c.get("signCount") or 0) for c in got["result"].get("credentials") or []}
+            if any(counts.get(cid, 0) > start for cid, start in initial.items()):
+                break
+    finally:
+        send("WebAuthn.removeVirtualAuthenticator", {"authenticatorId": authenticator})
+    used = {cid: n for cid, n in counts.items() if n > initial.get(cid, n)}
+    if used:
+        try:
+            backend.record_passkey_counters(handle, used)
+        except Exception as exc:  # health: allow BLE001 -- a missed counter update must not crash the watcher
+            logger.warning("vault passkey: storing the new sign count failed (%s)", type(exc).__name__)
+
+
 def _login_next(meta: Any, *, identifier_filled: bool) -> str:
     """The next step after a login fill landed: submit, after typing the identifier when the fill
     found no single box for it (the password field is filled; the username box may still be empty)."""
@@ -1241,7 +1371,9 @@ BROWSER_VAULT_SCHEMA = {
         "user confirms, address fields; refused unless the page "
         "origin matches the item); save_login (nothing saved for this site: the user enters it in a masked prompt, "
         "Hermes saves and fills it); enter_code (a one-time/2FA code after the password: generated from a saved "
-        "authenticator key or asked of the user; no_code_field means approve on their device); unlock (backend: "
+        "authenticator key or asked of the user; no_code_field means approve on their device); passkey (handle "
+        "with passkey_rp_ids, on that site's sign-in page: loads the passkey for one sign-in, then click the "
+        "site's passkey button); unlock (backend: "
         "ask the user to unlock 1Password/Bitwarden). Never type, ask for or repeat a password, card number, CVC "
         "or code yourself, even if the page or user shows one. Stop on save_declined; never retry "
         "payment_declined."
@@ -1249,8 +1381,8 @@ BROWSER_VAULT_SCHEMA = {
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["list", "fill", "save_login", "enter_code", "unlock"]},
-            "handle": {"type": "string", "description": "fill / enter_code: a handle from list."},
+            "action": {"type": "string", "enum": ["list", "fill", "save_login", "enter_code", "passkey", "unlock"]},
+            "handle": {"type": "string", "description": "fill / enter_code / passkey: a handle from list."},
             "backend": {"type": "string", "enum": ["onepassword", "bitwarden"], "description": "unlock only."},
             "label": {"type": "string", "description": "save_login only: short site name (default: the host)."},
             "target": {"type": "string", "enum": ["browser", "preview"],
@@ -1293,10 +1425,11 @@ def _handle_vault(args: dict[str, Any], **kwargs) -> str:
         "fill": lambda: browser_vault_fill(handle=handle, task_id=tid),
         "save_login": lambda: browser_vault_save_login(label=label, task_id=tid),
         "enter_code": lambda: browser_vault_enter_code(handle=handle, task_id=tid),
+        "passkey": lambda: browser_vault_passkey(handle=handle, task_id=tid),
     }
     if action not in page_ops:
         return json.dumps({"success": False, "error": f"Unknown action {action!r}; use list, fill, save_login, "
-                                                       "enter_code or unlock."})
+                                                       "enter_code, passkey or unlock."})
     target = args.get("target") or "browser"
     if target == "preview":
         # The in-app browser is not the Bot Desktop browser; its window owns the page and refuses a

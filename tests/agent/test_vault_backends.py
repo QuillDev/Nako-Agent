@@ -14,11 +14,12 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 from unittest.mock import patch
 
 import pytest
 
-from agent.vault_backends import unlock as unlock_mod
+from agent.vault_backends import UnlockRequired, unlock as unlock_mod
 from agent.vault_backends.bitwarden import BitwardenLoginBackend
 
 # A stand-in `bw` that mimics the three commands the backend uses and the real CLI's password contract
@@ -290,3 +291,64 @@ def test_onepassword_service_account_refusals_name_the_real_cause(fake_op_servic
     assert all(json.loads(a)[:2] != ["item", "get"] for a in log.read_text(encoding="utf-8-sig").splitlines())
     with pytest.raises(RuntimeError, match="DecodeSACredentials"):
         new_backend().resolve_password("op:item-c")
+
+
+def test_bitwarden_unattended_retries_once_when_cached_session_expires(tmp_path):
+    """With master_password_command set, an expired cached bw session re-unlocks and retries once."""
+    state_file = tmp_path / "bw-state.txt"
+    bw_exe = tmp_path / "bw"
+    bw_exe.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        f"state = pathlib.Path({str(state_file)!r})\n"
+        "argv = sys.argv[1:]\n"
+        "if argv[:1] == ['unlock']:\n"
+        "    n = int(state.read_text()) + 1 if state.exists() else 1\n"
+        "    state.write_text(str(n))\n"
+        "    print(f'fresh-token-{n}')\n"
+        "    sys.exit(0)\n"
+        "if argv[:1] == ['sync']:\n"
+        "    sys.exit(0)\n"
+        "if argv[:2] == ['get', 'password']:\n"
+        "    tok = os.environ.get('BW_SESSION', '')\n"
+        "    if tok == 'stale-token':\n"
+        "        sys.stderr.write('Vault is locked.\\n')\n"
+        "        sys.exit(1)\n"
+        "    if tok == 'fresh-token-1':\n"
+        "        print('recovered-secret')\n"
+        "        sys.exit(0)\n"
+        "    sys.stderr.write('Vault is locked.\\n')\n"
+        "    sys.exit(1)\n"
+        "sys.exit(2)\n",
+        encoding="utf-8",
+    )
+    bw_exe.chmod(bw_exe.stat().st_mode | stat.S_IXUSR)
+
+    pw_cmd = [sys.executable, "-c", "print('master-pass')"]
+    backend = BitwardenLoginBackend({"binary_path": str(bw_exe), "master_password_command": pw_cmd})
+    unlock_mod.set_current_session_id("test-bw-retry")
+    try:
+        gen = unlock_mod.begin_unlock("bitwarden")
+        unlock_mod.store_session_token("bitwarden", "stale-token", gen)
+        assert backend.resolve_password("bw:item-1") == "recovered-secret"
+        assert state_file.read_text() == "1"
+
+        # If a newly minted token STILL fails with locked, raise UnlockRequired without looping.
+        gen2 = unlock_mod.begin_unlock("bitwarden")
+        unlock_mod.store_session_token("bitwarden", "stale-token", gen2)
+        with pytest.raises(UnlockRequired):
+            backend.resolve_password("bw:item-1")
+        assert state_file.read_text() == "2"
+    finally:
+        unlock_mod.lock("bitwarden")
+        unlock_mod.set_current_session_id(None)
+
+
+def test_passkey_rp_for_handles_case_ports_paths_and_boundaries():
+    """WebAuthn RP ID matching is case-insensitive, strips ports/paths, and enforces domain boundaries."""
+    from tools.browser_vault_tool import _passkey_rp_for
+
+    assert _passkey_rp_for("HTTPS://Sub.Example.COM:8443/login", ("Example.COM",)) == "Example.COM"
+    assert _passkey_rp_for("https://example.com/", ("example.com",)) == "example.com"
+    assert _passkey_rp_for("http://example.com", ("example.com",)) is None
+    assert _passkey_rp_for("https://evil-example.com", ("example.com",)) is None
