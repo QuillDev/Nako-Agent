@@ -695,7 +695,7 @@ stable_target() {
     case "$CHANNEL" in
         main) return 0 ;;
         stable) ;;
-        *) [ "$BRANCH" = main ] && is_official_repo "$1" || return 0 ;;
+        *) return 0 ;;  # this fork publishes no releases
     esac
     local release
     release="$(latest_stable_release "$1")"

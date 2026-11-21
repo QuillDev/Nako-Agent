@@ -992,10 +992,7 @@ function Get-LatestStableRelease([string]$Origin) {
 # releases; hermes_cli.update_channel.default_channel decides the same way).
 function Get-StableTarget([string]$Origin) {
     if ($Commit -or $Channel -ceq 'main') { return '' }
-    if ($Channel -cne 'stable') {
-        if ($Branch -cne 'main') { return '' }
-        if ($Origin -notmatch '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)NousResearch/hermes-agent(\.git)?/?$') { return '' }
-    }
+    if ($Channel -cne 'stable') { return '' }  # this fork publishes no releases
     $release = Get-LatestStableRelease $Origin
     if ($release) { return $release }
     return '-'
