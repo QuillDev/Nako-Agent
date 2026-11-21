@@ -872,7 +872,16 @@ def _call_goal_judge_llm(call_llm, system_prompt: str, user_prompt: str, timeout
         temperature=0, max_tokens=_goal_judge_max_tokens(), timeout=timeout,
     )
     try:
-        return resp.choices[0].message.content or ""
+        choice = resp.choices[0]
+        content = choice.message.content or ""
+        from gateway.slack_multiplayer import enabled as multiplayer_enabled
+
+        if not content.strip() and getattr(choice, "finish_reason", None) == "content_filter" and multiplayer_enabled():
+            return json.dumps({
+                "verdict": "blocked",
+                "reason": "the judge model's provider refused to evaluate this goal (content filter), so it can't be judged",
+            })
+        return content
     except Exception:
         return ""
 

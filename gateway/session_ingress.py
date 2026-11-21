@@ -73,6 +73,10 @@ async def admit_message(authority, event):
             # resolves to its row in ``reconcile_native_retry``): the earlier message is the one that runs.
             logger.warning('Native message %s refused: its id is already admitted with other content',
                            getattr(event, 'message_id', None))
+            from gateway.slack_multiplayer import enabled as multiplayer_enabled
+
+            if event.source.platform.value == "slack" and multiplayer_enabled():
+                return None  # Slack redelivers edits under the original message id.
             return ALREADY_ADMITTED_REPLY
         if exc.reason != 'queue_full':
             raise

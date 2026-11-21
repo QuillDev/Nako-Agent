@@ -41,6 +41,7 @@ from agent.compression_marker import ELISION_MARKER_MAX_LEN, elide
 from agent.i18n import t
 from agent.retry_utils import parse_retry_after_seconds
 from agent.secret_scope import get_secret
+from gateway import slack_multiplayer
 from gateway.config import Platform, PlatformConfig
 from gateway.approval_actor import approval_refusal, clarify_refusal, refusal_text, slash_confirm_refusal
 from gateway.platforms._shared import (
@@ -298,7 +299,10 @@ def _sdk_supports_agent_sessions() -> bool:
 
 
 def _session_status_method(client: Any):
-    """Return the status setter: Agent Sessions API when available, else legacy."""
+    """Return the Slack endpoint that accepts free-text thread statuses."""
+    legacy = getattr(client, "assistant_threads_setStatus", None)
+    if slack_multiplayer.enabled() and legacy is not None:
+        return legacy
     if _sdk_supports_agent_sessions():
         method = getattr(client, "agents_sessions_setStatus", None)
         if method is not None:
@@ -2046,6 +2050,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
         """Placement eligibility independent of connection/stream availability."""
         return self._native_task_card_key(chat_id, reply_to, metadata) is not None
 
+    @slack_multiplayer._make_send_native_task_card_progress
     async def send_native_task_card_progress(
         self, chat_id: str, tasks: list[dict[str, str]], *, title: Optional[str] = None,
         reply_to: Optional[str] = None, metadata: Optional[dict[str, Any]] = None,
@@ -2690,6 +2695,20 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
         await self.stop_typing(chat_id, metadata)
         return SendResult(success=True, message_id=ts)
 
+    def status_metadata_for_turn(self, chat_id: str, anchor: str, metadata: Optional[dict]) -> Optional[dict]:
+        if slack_multiplayer.enabled():
+            return slack_multiplayer.status_metadata_for_turn(self, chat_id, anchor, metadata)
+        return metadata
+
+    @slack_multiplayer._make_start_typing_refresh
+    def _start_typing_refresh(self, event, interrupt_event, metadata):
+        return super()._start_typing_refresh(event, interrupt_event, metadata)
+
+    @slack_multiplayer._make_set_status_text
+    def set_status_text(self, chat_id: str, text: Optional[str]) -> None:
+        super().set_status_text(chat_id, text)
+
+    @slack_multiplayer._make_send_typing
     async def send_typing(self, chat_id: str, metadata=None) -> None:
         """Show a thread status via assistant.threads.setStatus.
         Needs assistant:write or chat:write scope; auto-clears on reply."""
@@ -2733,6 +2752,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
         _status = _status or self._default_status_text(_status_started)
         await self._set_thread_status(chat_id, team_id, thread_ts, _status, "failed")
 
+    @slack_multiplayer._make_set_thread_status
     async def _set_thread_status(
         self, chat_id: str, team_id: str, thread_ts: str, status: str, fail_label: str) -> None:
         """``assistant.threads.setStatus`` (empty ``status`` clears); failures are debug-logged."""
@@ -2753,6 +2773,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
         return t("platform.slack.status.still_working",
                  elapsed=f"{mins}m{secs:02d}s" if mins else f"{secs}s")
 
+    @slack_multiplayer._make_stop_typing
     async def stop_typing(self, chat_id: str, metadata=None) -> None:
         """Clear the assistant thread status indicator."""
         if self._suppressed_ignored(chat_id, "status clear in", level=logging.DEBUG):
@@ -3209,6 +3230,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
         marker = self._workspace_message_marker(team_id, ts) if ts else None
         return (ts, team_id, marker) if ts and marker in self._reacting_message_ids else None
 
+    @slack_multiplayer._make_on_processing_start
     async def on_processing_start(self, event: MessageEvent) -> None:
         """Add an in-progress reaction when message processing begins."""
         target = self._reacting_target(event)
@@ -3295,6 +3317,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
         self._trim_oldest_dict_entries(self._channel_name_cache, self._CHANNEL_NAME_CACHE_MAX)
         return name
 
+    @slack_multiplayer.humanize_mentions
     async def _humanize_user_mentions(self, text: str, chat_id: str = "", team_id: str = "") -> str:
         """``<@UID>`` → ``@DisplayName`` (opaque IDs make the agent confuse a human's mention with
         its own). The bot's own mention is stripped before this runs."""
@@ -3309,6 +3332,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
             text = re.sub(rf"<@{uid}(?:\|[^>]*)?>", lambda _m, _name=f"@{display}": _name, text)
         return text
 
+    @slack_multiplayer._make_build_identity_prompt
     def _build_identity_prompt(self, team_id: str = "") -> str:
         """Ephemeral system-prompt line naming the bot's handle, injected via the per-turn
         ``channel_prompt`` seam (never persisted, so prompt caching holds): a "that's me" anchor."""
@@ -4151,6 +4175,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
                                                  current_ts="", team_id=team_id, chat_type=chat_type)
         return False
 
+    @slack_multiplayer._make_should_wake
     async def _should_wake_on_unmentioned_message(
         self, event_thread_ts, channel_id: str, user_id: str, is_thread_reply: bool,
         team_id: str = "", chat_type: str = "group") -> bool:
@@ -4484,6 +4509,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
         self._reacting_message_ids.add(self._workspace_message_marker(team_id, ts))
         self._evict_oldest_by_ts(self._reacting_message_ids, self._REACTING_MESSAGE_IDS_MAX)
 
+    @slack_multiplayer._make_handle_slack_message
     async def _handle_slack_message(self, event: dict, payload: Optional[dict] = None) -> None:
         """Guard around :meth:`_handle_slack_message_impl`: the impl claims the ts early (no second
         turn from a mid-flight unfurl); if THIS call newly claimed it and raises, release the claim
@@ -4632,6 +4658,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
         allow_bots = self._slack_allow_bots()
         return allow_bots == "none" or (allow_bots == "mentions" and not is_mentioned)
 
+    @slack_multiplayer._make_apply_bot_mention
     def _apply_bot_mention(
         self, text: str, original_text: str, command_probe_text: str, is_command_text: bool,
         bot_uid: str, thread_ts: Optional[str], team_id: str) -> tuple[str, str, str, bool]:
@@ -6051,6 +6078,7 @@ class SlackAdapter(SlackSocketLifecycleMixin, SlackVaultCodeMixin, BasePlatformA
             content = header + "\n" + "\n".join(context_parts) + "\n[End of thread context]\n\n"
         return content, parent_text
 
+    @slack_multiplayer._make_thread_context_line
     async def _thread_context_line(
         self, msg: dict, msg_text: str, is_parent: bool, team_id: str, channel_id: str, *,
         chat_type: str = "group", thread_ts: str = "") -> str:

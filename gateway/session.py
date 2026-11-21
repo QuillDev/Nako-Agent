@@ -448,6 +448,20 @@ def build_session_context_prompt(context: SessionContext, *, redact_pii: bool = 
         lines.append(f"**User ID:** {_format_untrusted_prompt_value(uid)}")
 
     lines.extend(_PLATFORM_NOTES.get(src.platform, lambda ctx: [])(context))
+    from gateway.slack_multiplayer import enabled as multiplayer_enabled
+
+    if src.platform == Platform.SLACK and src.chat_id and not redact_pii and multiplayer_enabled():
+        lines.append(
+            f"**Current Slack channel id:** `{src.chat_id}`. Pass it as `channel_id` when you read "
+            "this chat with the Slack tools. The home channel listed below is a different chat; "
+            "never read it to answer someone here."
+        )
+        if src.chat_type == "dm":
+            lines.append(
+                "In this DM, top-level messages aren't threads: read context with "
+                "`conversations_history` on this channel id, and use `conversations_replies` "
+                "only when the message is a reply inside a real thread."
+            )
     platforms_list = ["local (files on this machine)"] + [
         f"{p.value}: Connected ✓" for p in context.connected_platforms if p != Platform.LOCAL
     ]

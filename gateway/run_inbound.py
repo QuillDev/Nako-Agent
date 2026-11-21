@@ -1509,6 +1509,12 @@ class GatewayInboundMixin(
 
     def _prefix_inbound_sender_context(self, event: MessageEvent, source: SessionSource, message_text: str) -> str:
         """Attribute the sender in shared multi-user sessions and prepend history-backfill channel context."""
+        from gateway.slack_multiplayer import enabled as multiplayer_enabled
+
+        if event.internal and source.user_name and multiplayer_enabled():
+            from gateway.session_identity import replace_source
+
+            source = replace_source(source, user_name=None)
         message_text = label_shared_sender(
             source, message_text, group_sessions_per_user=getattr(self.config, "group_sessions_per_user", True),
             thread_sessions_per_user=getattr(self.config, "thread_sessions_per_user", False))

@@ -585,9 +585,19 @@ class GatewayBusySessionMixin:
         from gateway.session import label_shared_sender
 
         source = event.source
-        text = label_shared_sender(
-            source, text, group_sessions_per_user=getattr(self.config, "group_sessions_per_user", True),
-            thread_sessions_per_user=getattr(self.config, "thread_sessions_per_user", False))
+        from gateway.slack_multiplayer import enabled as multiplayer_enabled
+
+        multiplayer = multiplayer_enabled()
+        if not (multiplayer and event.internal):
+            labeled = label_shared_sender(
+                source, text, group_sessions_per_user=getattr(self.config, "group_sessions_per_user", True),
+                thread_sessions_per_user=getattr(self.config, "thread_sessions_per_user", False))
+            if multiplayer and labeled != text:
+                text = ("Shared chat: this message is from the participant named in its bracketed prefix, not "
+                        "necessarily the person whose message started this turn. Attribute it to that sender.\n"
+                        + labeled)
+            else:
+                text = labeled
         origin = {
             "platform": source.platform.value,
             **{key: getattr(source, key) for key in (

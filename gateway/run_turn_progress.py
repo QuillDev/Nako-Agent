@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from agent.i18n import t
 from agent.interrupt_compat import _accepts_keyword
 from agent.replay_cleanup import strip_stale_dangerous_confirmations
+from gateway import slack_multiplayer
 from gateway.config import Platform
 from gateway.media_repair import repair_explicit_computer_use_media_paths
 from gateway.platforms.base import BasePlatformAdapter
@@ -287,7 +288,11 @@ class GatewayTurnProgressMixin:
         try:
             if event_type == "tool.started" and tool_name and ctx._run_still_current():
                 from agent.display import build_status_phrase
-                adapter.set_status_text(ctx.source.chat_id, build_status_phrase(tool_name, args if ctx._live_status_mode == "full" else None))
+                if ctx.source.platform.value == "slack" and slack_multiplayer.enabled():
+                    phrase = f"is {slack_multiplayer._card_label(tool_name)}…"
+                else:
+                    phrase = build_status_phrase(tool_name, args if ctx._live_status_mode == "full" else None)
+                adapter.set_status_text(ctx.source.chat_id, phrase)
             elif event_type == "tool.completed":
                 # Between tools the model is genuinely "thinking" again — revert to the static default.
                 adapter.set_status_text(ctx.source.chat_id, None)
@@ -441,6 +446,7 @@ class GatewayTurnProgressMixin:
             self.tasks[call_id] = {"id": call_id, "title": self._compact(title), "status": "in_progress"}
             return self.tasks[call_id]
 
+        @slack_multiplayer._make_apply_event
         def apply_event(self, raw: Any) -> bool:
             event_type = raw.get("type") if isinstance(raw, dict) else None
             if event_type not in {"tool.started", "tool.completed"}:
@@ -460,6 +466,7 @@ class GatewayTurnProgressMixin:
             task["status"] = "error" if raw.get("is_error") else "complete"
             return True
 
+    @slack_multiplayer._make_task_card_fallback
     async def _task_card_send_or_edit_fallback(self, st) -> None:
         ctx = self._ctx
         text = st.fallback_text()
@@ -489,6 +496,7 @@ class GatewayTurnProgressMixin:
         if getattr(result, "success", False) and getattr(result, "message_id", None):
             st.fallback_msg_id = str(result.message_id)
 
+    @slack_multiplayer._make_task_card_publish
     async def _task_card_publish(self, st) -> None:
         ctx = self._ctx
         if not st.tasks:
@@ -579,6 +587,7 @@ class GatewayTurnProgressMixin:
             logger.debug("Slack native progress queue drain failed", exc_info=True)
         return changed
 
+    @slack_multiplayer._make_send_native_task_card_progress_runner
     async def _send_native_task_card_progress(self, adapter) -> None:
         """Drain progress into native cards; supported destinations retain editable fallback.
         Unsupported destinations and egress refusals suppress publication, never finalization.

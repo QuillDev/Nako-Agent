@@ -287,6 +287,10 @@ def gate_manifest(
             f"plugins.toml, or use {RELAY_PLUGINS_CONFIG_ENV} for an explicit user-file override"
         )
         return _placeholder(error, logging.WARNING, "Refusing to load removed Hermes Relay plugin '%s'; %s", error)
+    if "slack-multiplayer-enhancements" in names:
+        return _placeholder(
+            "provided by the Nako fork", logging.DEBUG, "Skipping superseded plugin '%s'"
+        )
     if names & disabled:
         if enabled and names & enabled:
             # Contradictory config (#131980): the disable wins, but a silent DEBUG skip hides the
