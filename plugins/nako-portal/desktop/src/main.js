@@ -1,0 +1,459 @@
+// Nako Portal's desktop app: the portal's own web app in a window, plus the glue a browser tab
+// can't do (a server prompt, browser sign-in, notifications, self-updates).
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+
+import { BaseWindow, Menu, Notification, Tray, WebContentsView, app, ipcMain, nativeImage, session, shell } from "electron"
+
+import { browserAgent as agentFrom } from "./agent.js"
+import { listen } from "./alerts.js"
+import { FloatingNako } from "./bubble.js"
+import { ServerOrigin } from "./origin.js"
+import { trackNotification } from "./notifications.js"
+import { begin } from "./signin.js"
+import { Updater, announcement, platformKey, readPublicKey } from "./update.js"
+
+const here = dirname(fileURLToPath(import.meta.url))
+const root = join(here, "..")
+const IDENTIFIER = "moe.nakode.portal"
+const MAC = process.platform === "darwin"
+const log = message => console.error(`nako: ${message}`)
+
+// Settings live where the earlier app kept them, so an update keeps the portal address.
+app.setPath("userData", join(app.getPath("appData"), IDENTIFIER))
+if (!app.requestSingleInstanceLock()) app.exit(0)
+
+const hidden = process.argv.includes("--hidden")
+let window = null
+let portal = null
+let tray = null
+let origin = null
+let listener = null
+let signIn = null
+let floating = null
+let quitting = false
+
+const icon = name => nativeImage.createFromPath(join(root, "icons", name))
+
+// ---- the portal address ----
+
+const settingsPath = () => join(app.getPath("userData"), "settings.json")
+
+function settings() {
+  try {
+    return JSON.parse(readFileSync(settingsPath(), "utf8")) ?? {}
+  } catch {
+    return {}
+  }
+}
+
+function saveSettings(changes) {
+  mkdirSync(dirname(settingsPath()), { recursive: true })
+  writeFileSync(settingsPath(), JSON.stringify({ ...settings(), ...changes }, null, 2))
+}
+
+const savedOrigin = () => ServerOrigin.parse(settings().origin)
+
+const saveOrigin = origin => saveSettings({ origin: origin.value })
+
+async function reachable(origin) {
+  let me
+  try {
+    const response = await fetch(origin.page("/api/me"), { signal: AbortSignal.timeout(10_000) })
+    me = await response.json().catch(() => null)
+  } catch (error) {
+    log(`${origin.value}: ${error.message}`)
+    throw new Error(`Can't reach ${origin.value}`)
+  }
+  if (!me || !("signed_in" in me)) throw new Error(`${origin.value} isn't a Nako portal`)
+}
+
+const localPage = query => portal.webContents.loadFile(join(root, "ui", "index.html"), { search: query })
+
+function openPortal(next) {
+  const changed = origin?.value !== next.value
+  origin = next
+  if (changed || !listener) {
+    listener?.stop()
+    listener = listen({ origin, cookie: cookieHeader, onAlert: showAlert, onFrame: text => floating?.frame(text), log })
+    updater.watch(origin)
+    if (changed) floating?.reset()
+  }
+  portal.webContents.loadURL(origin.url)
+  refreshFloating()
+}
+
+async function cookieHeader() {
+  if (!origin) return null
+  const cookies = await session.defaultSession.cookies.get({ url: origin.url })
+  const header = cookies.map(c => `${c.name}=${c.value}`).join("; ")
+  return header || null
+}
+
+const onPortal = url => Boolean(origin?.opensInApp(url))
+
+// ---- what pages may ask ----
+
+/** Commands, and who may send them: the app's own pages (file://) or the portal. */
+const COMMANDS = {
+  start: ["local"],
+  connect: ["local"],
+  floating: ["portal"],
+  update: ["portal"],
+  "plugin:window|minimize": ["local", "portal"],
+  "plugin:window|toggle_maximize": ["local", "portal"],
+  "plugin:window|internal_toggle_maximize": ["local", "portal"],
+  "plugin:window|close": ["local", "portal"],
+}
+
+function sender(event) {
+  const url = event.senderFrame?.url ?? ""
+  if (event.sender !== portal?.webContents) return null
+  if (url.startsWith("file:")) return "local"
+  return onPortal(url) ? "portal" : null
+}
+
+ipcMain.handle("nako", async (event, command, args = {}) => {
+  if (!COMMANDS[command]?.includes(sender(event))) throw new Error(`${command} not allowed`)
+  switch (command) {
+    case "start": {
+      const saved = savedOrigin()
+      if (!saved) return { kind: "ask", origin: null }
+      if (args.change) return { kind: "ask", origin: saved.value }
+      try {
+        await reachable(saved)
+      } catch (error) {
+        return { kind: "unreachable", origin: saved.value, error: error.message }
+      }
+      openPortal(saved)
+      return { kind: "open" }
+    }
+    case "connect": {
+      const next = ServerOrigin.parse(args.address)
+      if (!next) throw new Error("Enter an address like https://portal.example.com")
+      await reachable(next)
+      saveOrigin(next)
+      openPortal(next)
+      return null
+    }
+    case "floating":
+      return setFloating(Boolean(args.on))
+    case "update":
+      if (args.action === "install") return void updater.install(false)
+      return void updater.check()
+    case "plugin:window|minimize":
+      return window.minimize()
+    case "plugin:window|toggle_maximize":
+    case "plugin:window|internal_toggle_maximize":
+      return window.isMaximized() ? window.unmaximize() : window.maximize()
+    case "plugin:window|close":
+      return window.close()
+  }
+})
+
+// ---- the portal's view ----
+
+/** Same-origin pages stay in the app; everything else goes to the system browser. */
+function navigate(event, url) {
+  if (url.startsWith("file:")) return
+  if (!onPortal(url)) {
+    event.preventDefault()
+    external(url)
+    return
+  }
+  const path = new URL(url).pathname
+  // The sign-in page's button for the desktop app.
+  if (path === "/desktop/sign-in") {
+    event.preventDefault()
+    startSignIn()
+  }
+  // The portal's update button, shown once an update is downloaded.
+  if (path === "/desktop/update") {
+    event.preventDefault()
+    updater.install(false)
+  }
+}
+
+async function startSignIn() {
+  signIn?.cancel()
+  const handoff = await begin(origin)
+  signIn = handoff
+  external(handoff.browserUrl)
+  const finish = await handoff.wait(300_000)
+  if (finish && signIn === handoff) {
+    portal.webContents.loadURL(finish)
+    showMain()
+  }
+}
+
+/** Tells the portal whether the floating companion is on. */
+function tellPortal() {
+  // Settings' "Floating Nako" switch reads this.
+  const float = `window.nakoFloating = { on: ${floatingOn()} }; window.dispatchEvent(new Event("nako-floating"))`
+  if (onPortal(portal.webContents.getURL())) portal.webContents.executeJavaScript(float).catch(() => {})
+}
+
+// The portal marks its title bar strips for the earlier app's drag regions; Chromium drags by CSS.
+const DRAG = `[data-tauri-drag-region] { -webkit-app-region: drag }
+[data-tauri-drag-region] :is(button, a, input, select, textarea, [role="button"], [role="menuitem"], [data-radix-collection-item]) { -webkit-app-region: no-drag }`
+
+const browserAgent = () => agentFrom(app.userAgentFallback)
+
+function createWindow() {
+  window = new BaseWindow({
+    title: "Nako",
+    width: 1100,
+    height: 780,
+    minWidth: 380,
+    minHeight: 480,
+    show: !hidden,
+    // Windows and Linux drop the system title bar for the page's own controls (macOS keeps its native one).
+    frame: MAC,
+    backgroundColor: "#0d0a11",
+    icon: MAC ? undefined : icon("icon.png"),
+  })
+  portal = new WebContentsView({ webPreferences: { preload: join(root, "src", "preload.cjs"), sandbox: true, contextIsolation: true } })
+  portal.setBackgroundColor("#0d0a11")
+  window.contentView.addChildView(portal)
+  const page = portal.webContents
+  // Tagged so the portal offers browser sign-in instead of passkeys.
+  page.setUserAgent(`${browserAgent()} NakoDesktop/${app.getVersion()}`)
+  page.on("will-navigate", event => navigate(event, event.url))
+  page.setWindowOpenHandler(({ url }) => {
+    const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true } }
+    navigate(event, url)
+    if (!event.defaultPrevented) page.loadURL(url)
+    return { action: "deny" }
+  })
+  page.on("dom-ready", () => {
+    if (!MAC) page.insertCSS(DRAG).catch(() => {})
+  })
+  page.on("did-finish-load", () => {
+    if (!onPortal(page.getURL())) return
+    // Chromium writes cookies to disk every so often; a sign-in shouldn't wait for that.
+    session.defaultSession.cookies.flushStore().catch(() => {})
+    listener?.wake()
+    // Where updating stands; the sidebar's version checks for updates only once this is set.
+    if (updater.enabled) page.executeJavaScript(announcement(updater.status)).catch(() => {})
+    updater.checkIfDue()
+    tellPortal()
+  })
+
+  const fitPortal = () => {
+    const { width, height } = window.getContentBounds()
+    portal.setBounds({ x: 0, y: 0, width, height })
+  }
+  fitPortal()
+  window.on("resize", fitPortal)
+  window.on("close", event => {
+    // Closing hides to the tray, so alerts keep coming.
+    if (!quitting && tray) {
+      event.preventDefault()
+      window.hide()
+    }
+  })
+  window.on("blur", () => {
+    if (updater.pending && updater.automatic) updater.install(!window.isVisible())
+  })
+  window.on("focus", () => updater.checkIfDue())
+  localPage("")
+}
+
+function showMain() {
+  window.show()
+  if (window.isMinimized()) window.restore()
+  window.focus()
+  // Reopened from the tray or the launcher: it may have sat there through a release.
+  updater.checkIfDue()
+}
+
+/** A clicked notification opens its chat, without reloading the page when it's already the portal. */
+function openChat(session) {
+  const page = origin?.chatPage(session)
+  if (!page) return
+  showMain()
+  if (onPortal(portal.webContents.getURL())) portal.webContents.executeJavaScript(`location.hash = ${JSON.stringify(`#/c/${session}`)}`)
+  else portal.webContents.loadURL(page)
+}
+
+// ---- the floating Nako ----
+
+const floatingOn = () => settings().floating === true
+
+/** She floats while she's on and the portal is open, whichever window is in front. */
+function refreshFloating() {
+  if (!floating) return
+  if (floatingOn() && origin) floating.show()
+  else floating.hide()
+}
+
+function setFloating(on) {
+  saveSettings({ floating: on })
+  refreshFloating()
+  tellPortal()
+  tray?.setContextMenu(trayMenu())
+}
+
+function createFloating() {
+  floating = new FloatingNako({
+    page: join(root, "ui", "floating.html"),
+    preload: join(root, "src", "floating-preload.cjs"),
+    panelPreload: join(root, "src", "panel-preload.cjs"),
+    portalUrl: chat => (chat ? origin.chatPage(chat) : origin.url),
+    opensInPortal: onPortal,
+    userAgent: `${browserAgent()} NakoDesktop/${app.getVersion()} NakoBubble/1`,
+    saved: () => settings().floatingSpot,
+    keep: floatingSpot => saveSettings({ floatingSpot }),
+    openInApp: chat => (chat ? openChat(chat) : showMain()),
+    openLink: external,
+    signIn: () => {
+      showMain()
+      startSignIn()
+    },
+    putAway: () => setFloating(false),
+    quit: () => {
+      quitting = true
+      app.quit()
+    },
+  })
+}
+
+ipcMain.handle("nako-floating", (event, command, args = {}) => {
+  if (floating?.owns(event.sender) !== "sticker" || !event.senderFrame?.url.startsWith("file:")) throw new Error(`${command} not allowed`)
+  return floating.command(String(command), args ?? {})
+})
+
+ipcMain.handle("nako-panel", (event, command) => {
+  if (floating?.owns(event.sender) !== "panel" || !onPortal(event.senderFrame?.url ?? "")) throw new Error(`${command} not allowed`)
+  if (command === "close") return floating.collapse()
+  if (command === "open_in_app") {
+    const chat = floating.panelChat()
+    floating.collapse()
+    return chat ? openChat(chat) : showMain()
+  }
+})
+
+function external(url) {
+  shell.openExternal(url).catch(error => log(`couldn't open ${url}: ${error.message}`))
+}
+
+// ---- notifications ----
+
+/** The notification shown for each chat: a newer alert replaces it. */
+const shown = new Map()
+
+function notify(title, body, onClick) {
+  if (!Notification.isSupported()) return null
+  const note = new Notification({ title, body, icon: icon("128x128.png"), silent: false })
+  if (onClick) note.on("click", onClick)
+  note.show()
+  return note
+}
+
+function showAlert(alert) {
+  // Nothing to tell someone already looking at the app.
+  if (window.isVisible() && window.isFocused()) return
+  if (floating?.isShown) floating.alert(alert.session)
+  if (!alert.session) return void notify(alert.title, alert.body)
+  const note = notify(alert.title, alert.body, () => openChat(alert.session))
+  if (note) trackNotification(shown, alert.session, note)
+}
+
+// ---- tray, updates, downloads ----
+
+function realPath(path) {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
+const updater = new Updater({
+  version: app.getVersion(),
+  platform: platformKey(process.env, process.platform, app.isPackaged, realPath(process.execPath)),
+  publicKey: readPublicKey(join(root, "pubkey.txt")),
+  cookie: cookieHeader,
+  onStatus: status => {
+    if (portal && onPortal(portal.webContents.getURL())) portal.webContents.executeJavaScript(announcement(status)).catch(() => {})
+  },
+  onReady: () => {
+    if (updater.automatic && !window.isFocused()) updater.install(!window.isVisible())
+  },
+  notify: (title, body) => notify(title, body),
+  quit: () => {
+    quitting = true
+    app.quit()
+  },
+  log,
+})
+
+// The macOS menu bar wants a one-colour template (it tints it for light/dark), at 16pt with an @2x copy.
+function trayIcon() {
+  if (!MAC) return icon("128x128.png").resize({ width: 32, height: 32 })
+  const image = icon("trayTemplate.png")
+  image.setTemplateImage(true)
+  return image
+}
+
+function trayMenu() {
+  return Menu.buildFromTemplate([
+    { label: "Open Nako", click: showMain },
+    {
+      label: "Change server",
+      click: () => {
+        localPage("change=1")
+        showMain()
+      },
+    },
+    { label: "Floating Nako", type: "checkbox", checked: floatingOn(), click: item => setFloating(item.checked) },
+    // Only installs that replace themselves; the .deb and Homebrew update through their package manager.
+    ...(updater.enabled ? [{ label: "Check for updates", click: () => updater.checkNow() }] : []),
+    { type: "separator" },
+    {
+      label: "Quit",
+      click: () => {
+        quitting = true
+        app.quit()
+      },
+    },
+  ])
+}
+
+function createTray() {
+  tray = new Tray(trayIcon())
+  tray.setToolTip("Nako")
+  tray.setContextMenu(trayMenu())
+  tray.on("click", showMain)
+}
+
+app.on("second-instance", () => showMain())
+// Clicking the Dock icon brings back a window that was closed to the menu bar.
+app.on("activate", () => window && showMain())
+app.on("before-quit", () => {
+  quitting = true
+  session.defaultSession.cookies.flushStore().catch(() => {})
+})
+app.on("window-all-closed", () => {})
+
+app.whenReady().then(() => {
+  app.setAppUserModelId(IDENTIFIER)
+  // Downloads from the portal go to the Downloads folder.
+  session.defaultSession.on("will-download", (_event, item) => {
+    item.setSavePath(join(app.getPath("downloads"), item.getFilename()))
+    item.once("done", (_e, state) => {
+      if (state === "completed") notify(`Saved ${item.getFilename()}`, "In your Downloads folder")
+    })
+  })
+  try {
+    createTray()
+  } catch (error) {
+    log(`no tray: ${error.message}`)
+    tray = null
+  }
+  createWindow()
+  createFloating()
+  if (hidden && !tray) window.show()
+})
+

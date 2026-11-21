@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: Install
+        run: uv pip install --system "aiohttp>=3.12,<4" cryptography pytest pytest-asyncio pytest-xdist ruff
+      - name: Lint Python
+        run: ruff check __init__.py plugin_*.py groups_tools.py mesh_tools.py provider_accounts.py dashboard tests
+      - name: Test
+        run: python -m pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: "26"
+      # The installed tree itself, so an unchanged lockfile skips npm ci altogether.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: modules
+        with:
+          path: web/node_modules
+          key: node-modules-${{ runner.os }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Install
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
+        working-directory: web
+      - name: Typecheck and build
+        run: npm run build
+        working-directory: web
+      # The portal serves dashboard/web as committed, so it has to match the source.
+      - name: Built app is committed
+        run: git status --porcelain dashboard/web && test -z "$(git status --porcelain dashboard/web)"
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+      # Only the shell's own tests: no Electron binary, no app build.
+      - name: Install
+        run: npm ci --ignore-scripts
+        working-directory: desktop
+      - name: Test
+        run: npm test
+        working-directory: desktop

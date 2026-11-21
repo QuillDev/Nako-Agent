@@ -1,0 +1,7 @@
+name: nako-portal
+version: 0.1.0
+description: A private, passkey-protected portal for native chats and read-only external sessions, with desktop and Android apps.
+author: QuillDev
+python_dependencies:
+  - aiohttp>=3.12,<4
+  - cryptography>=42

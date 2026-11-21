@@ -1,0 +1,353 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@source "../node_modules/streamdown/dist/*.js";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Neutral surfaces with Nako's pink kept for actions. Dark is the default; html.light swaps the palette. */
+:root {
+  color-scheme: dark;
+  --radius: 0.75rem;
+  --background: #09090b;
+  --foreground: #ececef;
+  --card: #111114;
+  --card-foreground: #ececef;
+  --popover: #111114;
+  --popover-foreground: #ececef;
+  --primary: #db2777;
+  --primary-foreground: #ffffff;
+  --secondary: #17171b;
+  --secondary-foreground: #ececef;
+  --muted: #17171b;
+  --muted-foreground: #8e8e99;
+  --accent: #18181c;
+  --accent-foreground: #ececef;
+  --destructive: #f87171;
+  --border: rgb(255 255 255 / 7%);
+  --input: rgb(255 255 255 / 10%);
+  --focus-fill: rgb(255 255 255 / 17%);
+  --sidebar: #09090b;
+  --skullet-base: rgb(255 255 255 / 7%);
+  --skullet-highlight: rgb(255 255 255 / 11%);
+  --skullet-radius: 0.375rem;
+}
+
+:root.light {
+  color-scheme: light;
+  --background: #fbfbfc;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #db2777;
+  --secondary: #f1f1f4;
+  --secondary-foreground: #18181b;
+  --muted: #f1f1f4;
+  --muted-foreground: #6b6b76;
+  --accent: #ededf0;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --border: rgb(0 0 0 / 8%);
+  --input: rgb(0 0 0 / 12%);
+  --focus-fill: rgb(0 0 0 / 13%);
+  --sidebar: #fbfbfc;
+  --skullet-base: rgb(0 0 0 / 7%);
+  --skullet-highlight: rgb(255 255 255 / 60%);
+  --skullet-radius: 0.375rem;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-sidebar: var(--sidebar);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    overscroll-behavior: none;
+  }
+  /* Thin, quiet scrollbars instead of the system's boxed ones with arrows. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--input) transparent;
+  }
+}
+
+/* Keep keyboard focus subtle; text fields supply their own focus border. */
+:where(button, a[href], input, textarea, select, [contenteditable="true"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: none;
+}
+
+/* Text entry already has a caret. Do not wash out its background on focus. */
+:where(button, a[href], select, [tabindex]:not([tabindex="-1"])):not(input, textarea, [contenteditable]):focus-visible {
+  background-image: linear-gradient(var(--focus-fill), var(--focus-fill));
+}
+
+@media (forced-colors: active) {
+  :where(button, a[href], input, textarea, select, [contenteditable="true"], [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: 0% center;
+  }
+}
+
+.hearts-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hearts-layer .heart {
+  position: absolute;
+  color: var(--primary);
+  opacity: 0;
+  animation-name: heart-rise;
+  animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1);
+  animation-fill-mode: both;
+}
+
+@keyframes heart-rise {
+  0% {
+    transform: translate(0, 0) scale(0.3);
+    opacity: 0;
+  }
+  15% {
+    transform: translate(calc(var(--dx) * 0.15), -24px) scale(1.1) rotate(calc(var(--rot) * 0.3));
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), var(--rise)) scale(0.9) rotate(var(--rot));
+    opacity: 0;
+  }
+}
+
+/* Tables in replies: one hairline frame, quiet header, actions tucked into the header row.
+   The fullscreen view reuses data-streamdown="table-wrapper" (with h-full), so the inline-only
+   rules skip it. Copy goes straight to TSV (src/lib/table-copy.ts); the download menu opens
+   sideways as a row because a short table sits in a message that clips overflow. */
+[data-streamdown="table-wrapper"]:not(.h-full) {
+  position: relative;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+[data-streamdown="table-wrapper"]:not(.h-full) > div:first-child {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.375rem;
+  z-index: 1;
+}
+/* The toolbar sits over the header row, so the last header cell keeps clear of it. On a phone the
+   three buttons fold into one ⋯ menu (components/portal/table-menu.tsx). */
+[data-streamdown="table-wrapper"]:not(.h-full) th:last-child {
+  padding-right: 6rem;
+}
+[data-table-menu] {
+  display: none;
+}
+@media (max-width: 767.98px) {
+  [data-streamdown="table-wrapper"]:not(.h-full) th:last-child {
+    padding-right: 2.5rem;
+  }
+  [data-streamdown="table-wrapper"]:not(.h-full) > div:first-child > :not([data-table-menu]) {
+    display: none;
+  }
+  [data-table-menu] {
+    display: flex;
+  }
+}
+[data-streamdown="table-wrapper"]:not(.h-full) > div:first-child .absolute {
+  top: 50%;
+  right: 100%;
+  margin: 0 0.25rem 0 0;
+  display: flex;
+  translate: 0 -50%;
+  background: var(--popover);
+  box-shadow: none;
+}
+[data-streamdown="table-wrapper"] > div:first-child .absolute button {
+  white-space: nowrap;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+}
+[data-streamdown="table-wrapper"]:not(.h-full) > div:has(> table) {
+  border-radius: var(--radius);
+  background: transparent;
+}
+[data-streamdown="table-wrapper"].h-full table {
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+  border-radius: var(--radius);
+}
+[data-streamdown="table-wrapper"] button[data-copied] {
+  color: var(--primary);
+}
+[data-streamdown="table"] thead {
+  background: transparent;
+}
+[data-streamdown="table"] th {
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+  color: var(--muted-foreground);
+  font-weight: 500;
+  font-size: 0.75rem;
+}
+[data-streamdown="table"] td {
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+  font-variant-numeric: tabular-nums;
+}
+[data-streamdown="table"] tbody tr {
+  transition: background-color 100ms;
+}
+[data-streamdown="table"] tbody tr:hover {
+  background: var(--muted);
+}
+
+/* Nako's thought bubble swapping lines: the old one rises out as the new one rises in. */
+.presence-in {
+  animation: presence-in 280ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.presence-out {
+  animation: presence-out 220ms ease-in both;
+}
+@keyframes presence-in {
+  from {
+    opacity: 0;
+    transform: translateY(70%);
+    filter: blur(2px);
+  }
+}
+@keyframes presence-out {
+  to {
+    opacity: 0;
+    transform: translateY(-70%);
+    filter: blur(2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .presence-in,
+  .presence-out {
+    animation-duration: 1ms;
+  }
+}
+
+/* Cmd+K search growing out of the sidebar's Find row: the row-sized input widens, then the list unfolds. */
+.find-pop[data-state="open"] {
+  animation: find-open 200ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.find-pop[data-state="closed"] {
+  animation: find-close 140ms ease-in both;
+}
+@keyframes find-open {
+  from {
+    clip-path: inset(0 calc(100% - var(--find-row)) calc(100% - 2rem) 0 round 0.5rem);
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 0.5rem);
+  }
+}
+@keyframes find-close {
+  from {
+    clip-path: inset(0 0 0 0 round 0.5rem);
+  }
+  to {
+    clip-path: inset(0 calc(100% - var(--find-row)) calc(100% - 2rem) 0 round 0.5rem);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .find-pop[data-state] {
+    animation-duration: 1ms;
+  }
+}
+
+/* The floating panel (Android and desktop apps): the same page, set a size smaller so more of the chat fits. */
+html.bubble {
+  font-size: 14px;
+}
+
+/* A mesh line to a machine that is working: its dashes run toward the machine. */
+@keyframes mesh-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+.mesh-flow {
+  animation: mesh-flow 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mesh-flow {
+    animation: none;
+  }
+}
+
+/* A secret that just saved: the check in its save button draws itself in. */
+.secret-check path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: secret-check 0.35s 0.05s ease-out forwards;
+}
+
+@keyframes secret-check {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .secret-check path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+/* Message actions stay quiet until approached; touch has no hover state. */
+.copy-reply { opacity: 0; }
+.group:hover .copy-reply, .copy-reply:focus-visible { opacity: 1; }
+@media (pointer: coarse), (hover: none) { .copy-reply { opacity: 0.6; } }
+::highlight(chat-find) { background-color: color-mix(in srgb, var(--primary) 25%, transparent); color: var(--foreground); }
+::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--primary) 50%, transparent); color: var(--foreground); }

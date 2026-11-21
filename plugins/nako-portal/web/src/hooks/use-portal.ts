@@ -1,0 +1,570 @@
+// Portal state: the signed-in user, the chat list, the open chat and its live turn.
+// Transcripts are never stored here; every open reads Hermes's own history.
+import { useCallback, useEffect, useRef, useState } from "react"
+import type { ModelSelection } from "@/components/portal/model-picker"
+import { d } from "@/lib/decode"
+import { api, dataUrlToFile, sessionPath, whenSignedOut } from "@/lib/api"
+import { reloadMcp } from "@/lib/mcp"
+import { reloadProviders } from "@/lib/providers"
+import { reloadSecrets } from "@/lib/secrets"
+import { cachedLive, caughtUp, isCurrentRequest, reconcileSession, sentMessage } from "@/lib/portal-state"
+import { rememberTitles } from "@/lib/session-refs"
+import { ChatGroup, type Command, type CommandNote, type Frame, type GroupColor, type Live, type Me, type OpenSession, type Outside, type SessionRow } from "@/lib/types"
+
+/** Whether this page is on screen and focused, i.e. you'd see a reply land without an alert. */
+const looking = () => document.visibilityState === "visible" && document.hasFocus()
+
+export type Route = { view: "list" } | { view: "new" } | { view: "settings"; page: string | null; fromChat?: string } | { view: "chat"; session: string } | { view: "outside" } | { view: "desktop"; query: string }
+
+export type Attachment = { url: string; filename?: string; mediaType: string }
+
+function parseRoute(hash: string): Route {
+  const chat = hash.match(/^#\/c\/([\w.-]+)/)
+  if (chat) return { view: "chat", session: chat[1] }
+  if (hash === "#/new") return { view: "new" }
+  if (hash === "#/elsewhere") return { view: "outside" }
+  const settings = hash.match(/^#\/settings(?:\/([\w-]+))?$/)
+  if (settings) return { view: "settings", page: settings[1] ?? null }
+  // Mesh and environments had their own pages before they moved into Settings.
+  if (hash === "#/mesh") return { view: "settings", page: "mesh" }
+  if (hash === "#/environments") return { view: "settings", page: "environments" }
+  if (hash.startsWith("#/desktop?")) return { view: "desktop", query: hash.slice("#/desktop?".length) }
+  return { view: "list" }
+}
+
+export function navigate(hash: string) {
+  if (location.hash !== hash) location.hash = hash
+}
+
+const emptyLive = (): Live => ({ messages: [], tools: [] })
+
+// How often a session from elsewhere that's running a turn is reread while it's open: those turns
+// stream nothing to the portal, so their saved rows are all there is to show.
+const OUTSIDE_POLL_MS = 4000
+
+// Chats opened or hovered lately, kept so going back to one shows it at once while it rereads.
+const CACHED_CHATS = 24
+// A prefetch this fresh opens the chat without reading it again.
+const FRESH_MS = 3000
+
+type Cached = { opened: OpenSession; at: number }
+
+// at: when it was last read whole; a read that recent opens the chat without reading it again.
+function remember(cache: Map<string, Cached>, opened: OpenSession, at: number) {
+  cache.delete(opened.session)
+  cache.set(opened.session, { opened, at })
+  while (cache.size > CACHED_CHATS) cache.delete(cache.keys().next().value!)
+}
+
+export function usePortal() {
+  const [me, setMe] = useState<Me | null>(null)
+  const [sessionsState, setSessionsState] = useState<"loading" | "ready" | "failed">("loading")
+  const [sessions, setSessions] = useState<SessionRow[]>([])
+  const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
+  const [current, setCurrent] = useState<(OpenSession & { loading: boolean; loadingOlder: boolean; loadError?: string }) | null>(null)
+  const [live, setLiveState] = useState<Live | null>(null)
+  const liveRef = useRef<Live | null>(null)
+  const setLive = useCallback((update: Live | null | ((previous: Live | null) => Live | null)) => {
+    liveRef.current = typeof update === "function" ? update(liveRef.current) : update
+    setLiveState(liveRef.current)
+  }, [])
+  const generation = useRef({ request: 0, turn: 0 })
+  const [connected, setConnected] = useState(true)
+  const [hermes, setHermes] = useState<import("@/lib/types").HermesBuild | null>(null)
+  // Bumped when a machine in the mesh joins, leaves or starts work; Settings rereads the list.
+  const [machinesSeen, setMachinesSeen] = useState(0)
+  // Whether this page's socket to the portal is up; while it's down nothing live arrives.
+  const [linked, setLinked] = useState(true)
+  const [error, setError] = useState("")
+  const [commands, setCommands] = useState<Command[]>([])
+  const [notes, setNotes] = useState<CommandNote[]>([])
+  // Nako's line about the open chat's last finished turn.
+  const [signOff, setSignOff] = useState<{ session: string; text: string } | null>(null)
+  // Sessions from other ways in (Slack, cron...): which ways there are and which run now.
+  const [outside, setOutside] = useState<Outside>({ sources: [], running: [] })
+
+  const currentRef = useRef(current)
+  currentRef.current = current
+  const socketRef = useRef<WebSocket | null>(null)
+  const retryRef = useRef(1000)
+  const cacheRef = useRef(new Map<string, Cached>())
+  const inflightRef = useRef(new Map<string, Promise<OpenSession>>())
+
+  // One read of a chat's latest page at a time; a hover and the click after it share it.
+  const read = useCallback((session: string) => {
+    const pending = inflightRef.current.get(session)
+    if (pending) return pending
+    const reading = api<OpenSession>(sessionPath(session)).finally(() => inflightRef.current.delete(session))
+    inflightRef.current.set(session, reading)
+    reading.then(opened => remember(cacheRef.current, opened, Date.now()), () => {})
+    return reading
+  }, [])
+
+  // Reads a chat the pointer is on, so opening it is instant.
+  const prefetch = useCallback(
+    (session: string) => {
+      const cached = cacheRef.current.get(session)
+      if (currentRef.current?.session === session || (cached && Date.now() - cached.at < FRESH_MS)) return
+      read(session).catch(() => {})
+    },
+    [read],
+  )
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const rows = await api<SessionRow[]>("/api/sessions")
+      // The same list again (a reconnect, another tab's change elsewhere) leaves the sidebar as it is.
+      setSessions(shown => (JSON.stringify(shown) === JSON.stringify(rows) ? shown : rows))
+      setSessionsState("ready")
+      rememberTitles(rows)
+      setConnected(true)
+    } catch (e) {
+      setSessionsState(state => state === "ready" ? state : "failed")
+      if (/offline/i.test(String((e as Error).message))) setConnected(false)
+    }
+  }, [])
+
+  // Rereads the open chat from where its loaded pages start, so older pages already on screen stay.
+  const refresh = useCallback(async (session: string) => {
+    const ticket = { ...generation.current, request: ++generation.current.request }
+    const startedLive = liveRef.current
+    const valid = () => isCurrentRequest(ticket, generation.current) && currentRef.current?.session === session
+    const open = currentRef.current
+    const since = open?.session === session && !open.loading ? `?since=${open.start}` : ""
+    try {
+      const opened = await (since ? api<OpenSession>(sessionPath(session) + since) : read(session))
+      if (!valid()) return
+      setCurrent(c => c?.session === session && valid() ? { ...reconcileSession(c, opened), loadError: undefined } : c)
+      setLive(l => opened.running ? caughtUp(l, opened.live, startedLive) : null)
+      // Opening a chat marks it seen on the server too (the notifications chat's posts, any chat's ended turn).
+      setSessions(rows => (rows.some(r => r.id === session && (r.unread || r.finished)) ? rows.map(r => (r.id === session ? { ...r, unread: false, finished: false } : r)) : rows))
+    } catch (e) {
+      if (valid()) {
+        if (open?.loading) setCurrent(c => c?.session === session ? { ...c, loadError: (e as Error).message } : c)
+        else setError((e as Error).message)
+      }
+    }
+  }, [read, setLive])
+
+  const loadOlder = useCallback(async () => {
+    const open = currentRef.current
+    if (!open || open.loading || open.loadingOlder || open.start === 0) return
+    const { session, start } = open
+    setCurrent(c => (c?.session === session ? { ...c, loadingOlder: true } : c))
+    try {
+      const older = await api<OpenSession>(sessionPath(session, `?before=${start}`))
+      setCurrent(c => (c?.session === session && c.start === start ? { ...c, start: older.start, messages: [...older.messages, ...c.messages], loadingOlder: false } : c))
+    } catch (e) {
+      setCurrent(c => (c?.session === session ? { ...c, loadingOlder: false } : c))
+      setError((e as Error).message)
+    }
+  }, [])
+
+  // Socket: hub state, list changes and the open chat's live events.
+  const onFrame = useCallback(
+    (frame: Frame) => {
+      switch (frame.kind) {
+        case "hub.connected":
+          setConnected(true)
+          setHermes(frame.hermes ?? null)
+          loadSessions()
+          if (currentRef.current) refresh(currentRef.current.session)
+          return
+        case "hub.disconnected":
+          setHermes(null)
+          return setConnected(false)
+        case "sessions.changed":
+          loadSessions()
+          // A post can land in the open notifications chat; reading it there also marks it seen.
+          if (currentRef.current && !currentRef.current.running) refresh(currentRef.current.session)
+          return
+        case "status":
+          setSessions(rows => rows.map(r => (r.id === frame.session ? { ...r, status: frame.status, finished: Boolean(frame.unread) } : r)))
+          return
+        case "outside": {
+          const next = { sources: frame.sources, running: frame.running }
+          setOutside(shown => (JSON.stringify(shown) === JSON.stringify(next) ? shown : next))
+          return
+        }
+        case "alert":
+        case "status.synced":
+        case "sticker":
+          return
+        case "machines.changed":
+          setMachinesSeen(n => n + 1)
+          return
+        case "secrets.changed":
+          void reloadSecrets()
+          return
+        case "providers.changed":
+          void reloadProviders()
+          return
+        case "mcp.changed":
+          void reloadMcp()
+          return
+        case "profile.changed":
+          // Another profile's chats: the open one isn't among them any more.
+          if (currentRef.current) navigate("#/")
+          cacheRef.current.clear()
+          loadSessions()
+          void reloadMcp()
+          return
+      }
+      const open = currentRef.current
+      if (!open || frame.session !== open.session) return
+      if (frame.kind === "request") {
+        setCurrent(c => c && { ...c, requests: [...c.requests.filter(r => r.id !== frame.request.id), frame.request] })
+        return
+      }
+      if (frame.kind === "request.closed") {
+        setCurrent(c => c && { ...c, requests: c.requests.filter(r => r.id !== frame.id) })
+        return
+      }
+      const p = frame.payload || {}
+      switch (frame.type) {
+        case "message.start":
+          generation.current.turn += 1
+          setSignOff(null)
+          setLive(emptyLive())
+          setCurrent(c => c && { ...c, running: true })
+          break
+        case "gateway.message": {
+          const message = { id: String(p.id || ""), text: String(p.text || "") }
+          setLive(l => {
+            const base = l || emptyLive()
+            const at = base.messages.findIndex(m => m.id === message.id)
+            return {
+              ...base,
+              messages: at < 0 ? [...base.messages, { ...message, after: base.tools.length }] : base.messages.map((m, i) => (i === at ? { ...m, text: message.text, after: m.text === message.text ? m.after : base.tools.length } : m)),
+            }
+          })
+          break
+        }
+        case "tool": {
+          const tool = { id: String(p.id || ""), name: String(p.name || "tool"), context: String(p.context || ""), state: p.state === "running" ? "running" : p.state === "failed" ? "failed" : "done" } as const
+          setLive(l => {
+            const base = l || emptyLive()
+            const at = tool.id ? base.tools.findIndex(t => t.id === tool.id) : -1
+            return { ...base, tools: at < 0 ? [...base.tools, tool] : base.tools.map((t, i) => (i === at ? tool : t)) }
+          })
+          break
+        }
+        case "message.complete":
+          generation.current.turn += 1
+          setCurrent(c => c && { ...c, running: false })
+          refresh(open.session)
+          break
+        case "signoff":
+          setSignOff({ session: open.session, text: String(p.text || "") })
+          break
+        case "session.title":
+          if (p.title) setCurrent(c => c && { ...c, title: String(p.title) })
+          break
+        case "error":
+          setError(String(p.message || "something went wrong"))
+          break
+      }
+    },
+    [loadSessions, refresh, setLive],
+  )
+
+  const onFrameRef = useRef(onFrame)
+  onFrameRef.current = onFrame
+
+  const connect = useCallback(() => {
+    if (socketRef.current && socketRef.current.readyState <= WebSocket.OPEN) return
+    const url = new URL("/ws", location.href)
+    url.protocol = location.protocol === "https:" ? "wss:" : "ws:"
+    const socket = new WebSocket(url)
+    socketRef.current = socket
+    socket.onopen = () => {
+      retryRef.current = 1000
+      setLinked(true)
+      socket.send(JSON.stringify({ watch: currentRef.current?.session ?? null, looking: looking() }))
+    }
+    socket.onmessage = event => {
+      let frame: Frame
+      try { frame = JSON.parse(event.data) } catch { return }
+      if (!frame || typeof frame !== "object" || typeof frame.kind !== "string") return
+      onFrameRef.current(frame)
+    }
+    socket.onclose = () => {
+      socketRef.current = null
+      setLinked(false)
+      setTimeout(() => meRef.current?.signed_in && connect(), retryRef.current)
+      retryRef.current = Math.min(retryRef.current * 2, 15000)
+    }
+  }, [])
+
+  const meRef = useRef(me)
+  meRef.current = me
+
+  const boot = useCallback(async () => {
+    setError("")
+    const who = await api<Me>("/api/me")
+    try { if (who.signed_in) sessionStorage.setItem("portal-seen-session", "1"); else sessionStorage.removeItem("portal-seen-session") } catch { /* Storage can be unavailable. */ }
+    setMe(who)
+    if (!who.signed_in) return
+    connect()
+    await loadSessions()
+    api<Command[]>("/api/commands").then(setCommands, () => {})
+  }, [connect, loadSessions])
+
+  useEffect(() => {
+    whenSignedOut(() => setMe(m => ({ ...(m || { has_passkeys: true, connected: true }), signed_in: false })))
+    boot().catch(e => setError((e as Error).message))
+    const onHash = () => {
+      const next = parseRoute(location.hash)
+      setRoute(previous => next.view !== "settings" ? next : {
+        ...next, fromChat: previous.view === "chat" ? previous.session : previous.view === "settings" ? previous.fromChat : undefined,
+      })
+    }
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !meRef.current?.signed_in) return
+      connect()
+      loadSessions()
+      if (currentRef.current) refresh(currentRef.current.session)
+    }
+    // The server holds alerts for the chat on screen; tell it whenever that changes.
+    const onLooking = () => {
+      const socket = socketRef.current
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ looking: looking() }))
+    }
+    window.addEventListener("hashchange", onHash)
+    document.addEventListener("visibilitychange", onVisible)
+    document.addEventListener("visibilitychange", onLooking)
+    window.addEventListener("focus", onLooking)
+    window.addEventListener("blur", onLooking)
+    return () => {
+      window.removeEventListener("hashchange", onHash)
+      document.removeEventListener("visibilitychange", onVisible)
+      document.removeEventListener("visibilitychange", onLooking)
+      window.removeEventListener("focus", onLooking)
+      window.removeEventListener("blur", onLooking)
+    }
+  }, [boot, connect, loadSessions, refresh])
+
+  // Opening a chat follows the route.
+  const routedSession = route.view === "chat" ? route.session : null
+  useEffect(() => {
+    if (!me?.signed_in) return
+    setError("")
+    if (!routedSession) {
+      generation.current.turn += 1
+      currentRef.current = null
+      setCurrent(null)
+      setLive(null)
+      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ watch: null }))
+      return
+    }
+    if (currentRef.current?.session === routedSession) return
+    const title = sessions.find(s => s.id === routedSession)?.title || ""
+    const cached = cacheRef.current.get(routedSession)
+    const reading = inflightRef.current.has(routedSession)
+    // Seen lately: show it as it was straight away, then catch up from where its pages start.
+    generation.current.turn += 1
+    const opened = cached
+      ? { ...cached.opened, title: cached.opened.title || title, loading: false, loadingOlder: false }
+      : { session: routedSession, title, messages: [], start: 0, requests: [], running: false, loading: true, loadingOlder: false }
+    currentRef.current = opened
+    setCurrent(opened)
+    setLive(cached ? cachedLive(cached.opened) : null)
+    if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ watch: routedSession }))
+    // A read already on its way (the pointer was on the row) or just finished is the latest page.
+    if (!(cached && !reading && Date.now() - cached.at < FRESH_MS)) refresh(routedSession)
+    // sessions is only read for a placeholder title
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routedSession, me?.signed_in, refresh])
+
+  // An open session from elsewhere has no live view: reread it while it runs, and once more when it stops.
+  const watchedSession = current && current.source && current.source !== "portal" ? current.session : null
+  const watchedRunning = Boolean(watchedSession && outside.running.includes(watchedSession))
+  useEffect(() => {
+    if (!watchedSession || !watchedRunning) return
+    const timer = setInterval(() => refresh(watchedSession), OUTSIDE_POLL_MS)
+    return () => {
+      clearInterval(timer)
+      if (currentRef.current?.session === watchedSession) refresh(watchedSession)
+    }
+  }, [watchedSession, watchedRunning, refresh])
+
+  const send = useCallback(
+    async (text: string, attachments: Attachment[], model?: ModelSelection) => {
+      const form = new FormData()
+      form.set("text", text)
+      if (model) form.set("model", JSON.stringify(model))
+      for (const a of attachments) {
+        const name = a.filename || "file"
+        if (!a.url.startsWith("data:")) throw new Error(`Couldn't read ${name}. Please attach it again.`)
+        form.append("file", dataUrlToFile(a.url, name, a.mediaType), name)
+      }
+      setError("")
+      try {
+        const open = currentRef.current
+        if (open) {
+          generation.current.turn += 1
+          await api(sessionPath(open.session, "/messages"), { method: "POST", form })
+          setCurrent(c => sentMessage(c, open.session, { role: "user", text, row_id: `pending-${Date.now()}`, timestamp: Date.now() / 1000, images: attachments.filter(a => a.mediaType.startsWith("image/") && a.url.startsWith("data:")).map(a => a.url) }))
+          if (currentRef.current?.session === open.session) setLive(l => l || emptyLive())
+        } else {
+          const created = d.object({ session: d.string(), confirmation: d.string().optional(), message: d.string().optional() }).parse(await api<unknown>("/api/sessions", { method: "POST", form }))
+          if (created.confirmation) {
+            if (!window.confirm(created.message)) throw new Error("Message not sent")
+            const selected = d.object({ confirmation: d.string().optional() }).parse(await api<unknown>(sessionPath(created.session, "/model"), { method: "POST", body: { ...model, confirm: created.confirmation } }))
+            if (selected.confirmation) throw new Error("Model selection changed. Pick it again before sending.")
+            await api(sessionPath(created.session, "/messages"), { method: "POST", form })
+          }
+          await loadSessions()
+          navigate(`#/c/${created.session}`)
+        }
+      } catch (e) {
+        setError((e as Error).message)
+        throw e
+      }
+    },
+    [loadSessions, setLive],
+  )
+
+  const act = useCallback(
+    // True when it went through; a failure shows as the page error instead.
+    async (fn: () => Promise<unknown>) => {
+      try {
+        await fn()
+        return true
+      } catch (e) {
+        setError((e as Error).message)
+        return false
+      }
+    },
+    [],
+  )
+
+  const stop = useCallback(() => act(() => api(sessionPath(currentRef.current!.session, "/stop"), { method: "POST" })), [act])
+
+  const answer = useCallback(
+    (id: string, result: unknown) =>
+      act(async () => {
+        await api(`/api/requests/${encodeURIComponent(id)}`, { method: "POST", body: { result } })
+        setCurrent(c => c && { ...c, requests: c.requests.filter(r => r.id !== id) })
+      }),
+    [act],
+  )
+
+  const setName = useCallback(async (name: string) => {
+    const saved = await api<{ name: string }>("/api/me/name", { method: "POST", body: { name } })
+    setMe(m => (m ? { ...m, name: saved.name } : m))
+  }, [])
+
+  const rename = useCallback(
+    (session: string, title: string) =>
+      act(async () => {
+        await api(sessionPath(session, "/title"), { method: "POST", body: { title } })
+        setCurrent(c => (c && c.session === session ? { ...c, title } : c))
+        await loadSessions()
+      }),
+    [act, loadSessions],
+  )
+
+  const pin = useCallback(
+    (session: string, pinned: boolean) =>
+      act(async () => {
+        await api(sessionPath(session, "/pin"), { method: "POST", body: { pinned } })
+        await loadSessions()
+      }),
+    [act, loadSessions],
+  )
+
+  // Chat groups: a chat goes in one (or none, with null); a group is made, renamed, recolored or removed.
+  const setGroup = useCallback(
+    (session: string, group: string | null) =>
+      act(async () => {
+        await api(sessionPath(session, "/group"), { method: "POST", body: { group } })
+        await loadSessions()
+      }),
+    [act, loadSessions],
+  )
+
+  const createGroup = useCallback(async (name: string) => ChatGroup.parse(await api<unknown>("/api/groups", { method: "POST", body: { name } })), [])
+
+  const updateGroup = useCallback(
+    (group: string, change: { name?: string; color?: GroupColor }) =>
+      act(async () => {
+        await api(`/api/groups/${encodeURIComponent(group)}`, { method: "POST", body: change })
+        await loadSessions()
+      }),
+    [act, loadSessions],
+  )
+
+  const deleteGroup = useCallback(
+    (group: string) =>
+      act(async () => {
+        await api(`/api/groups/${encodeURIComponent(group)}/remove`, { method: "POST", body: {} })
+        await loadSessions()
+      }),
+    [act, loadSessions],
+  )
+
+  const archive = useCallback(
+    (session: string) =>
+      act(async () => {
+        await api(sessionPath(session, "/archive"), { method: "POST", body: { archived: true } })
+        cacheRef.current.delete(session)
+        if (currentRef.current?.session === session) navigate("#/")
+        await loadSessions()
+      }),
+    [act, loadSessions],
+  )
+
+  // Back into the list from Cmd+K's archived results, then open it.
+  const unarchive = useCallback(
+    (session: string) =>
+      act(async () => {
+        await api(sessionPath(session, "/archive"), { method: "POST", body: { archived: false } })
+        await loadSessions()
+        navigate(`#/c/${session}`)
+      }),
+    [act, loadSessions],
+  )
+
+  // `/name arg` in an open chat. Output shows in the chat; `prefill` text goes back to the composer.
+  const command = useCallback(
+    async (text: string): Promise<string | undefined> => {
+      const open = currentRef.current
+      if (!open) {
+        setError("Open a chat to run commands")
+        return
+      }
+      setError("")
+      const note = (body: string) =>
+        setNotes(n => [...n, { session: open.session, at: open.start + open.messages.length, text: body, key: `note-${Date.now()}-${n.length}` }])
+      try {
+        const done = await api<{ output?: string | null; prefill?: string; sent?: boolean }>(sessionPath(open.session, "/command"), { method: "POST", body: { text } })
+        note(done.output ? `${text.trim()}\n${done.output}` : text.trim())
+        if (done.sent) {
+          setCurrent(c => (c?.session === open.session ? { ...c, running: true } : c))
+          if (currentRef.current?.session === open.session) {
+            generation.current.turn += 1
+            setLive(l => l || emptyLive())
+            refresh(open.session)
+          }
+        }
+        return done.prefill
+      } catch (e) {
+        note(`${text.trim()}\n${(e as Error).message}`)
+      }
+    },
+    [refresh, setLive],
+  )
+
+  // What's on screen is what going back to a chat shows next time.
+  useEffect(() => {
+    if (current && !current.loading) {
+      const { loading: _loading, loadingOlder: _older, ...opened } = current
+      remember(cacheRef.current, { ...opened, live: live ?? undefined }, cacheRef.current.get(current.session)?.at ?? 0)
+    }
+  }, [current, live])
+
+  return { me, setName, boot, refresh, sessions, sessionsState, outside, route, current, live, connected, hermes, linked, error, setError, send, stop, answer, rename, pin, archive, unarchive, setGroup, createGroup, updateGroup, deleteGroup, loadOlder, prefetch, commands, command, notes, signOff, machinesSeen }
+}
+
+export type Portal = ReturnType<typeof usePortal>

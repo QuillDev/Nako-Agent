@@ -1,0 +1,9 @@
+<resources>
+    <!-- Light or dark with the system, so the portal's "system" theme (prefers-color-scheme) follows the phone. -->
+    <style name="Theme.Nako" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

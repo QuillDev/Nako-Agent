@@ -1,0 +1,944 @@
+"""The portal as a Hermes messaging platform, like Discord or Slack.
+
+Every portal chat is a gateway thread (`portal:<chat id>`). Prompts go in as
+gateway messages, replies come back through the adapter's sends and edits, and
+transcripts are read from Hermes's own session store. The hub and the
+web server run in their own process (`dashboard/serve.py`), so the site stays up
+while the gateway restarts; the `backend` is the gateway's adapter on the other
+end of the link (`link.py`), the only part that touches Hermes, so tests use a fake.
+
+backend:
+  sessions() -> [{id, title, preview, started_at, message_count, pinned, chat_id}]
+  thread(session) -> {title, messages}      transcript in Hermes's display projection
+  chat_of(session) / session_of(chat) -> id or None
+  title_of(session) -> str or None          any session's title (the thread a message came from)
+  new_thread(chat, title) -> session id     (async)
+  adopt(chat, session) -> session id        (async) move another surface's chat into a new thread
+  inbound(chat, text, files)                (async) a message from the person, as the gateway sees it
+  resolve(request, result)                  (async) answer an approval or question
+  set_title / set_archived / set_pinned(session, value)
+  is_archived(session) -> bool
+  set_yolo(chat)                            approvals off for one thread
+  commands() -> [{name, description, skill}]
+  processes(session) -> [{id, command, cwd, running, started_at, exited_at, exit_code, ended, notify}]   background processes the chat started
+  process_log(session, id, lines) -> {lines, total_chars} or None   one of them's latest output
+  sign_off(reply) -> str or None            a short line Nako says once a turn's reply is in
+  sign_off_models() -> [{provider, label, models}]   what the sign-off can run on
+  sign_off_model() -> {provider, model}     / set_sign_off_model(provider, model)
+  profiles() -> {profile, profiles}         the Hermes profile shown, and the ones served
+  use_profile(name) -> profiles()           show another profile's chats (ValueError if not served)
+  models() / model() / set_model(provider, model)   the shown profile's own model (ValueError if refused)
+  usage() -> [{provider, label, accounts: [{label, windows: [{label, used_percent, resets_at}], note, resets?}]}] or None
+                                            plan limits per account; None: model-controls can't report them
+  use_reset(provider, account, force, grant?) -> {status, redeemed, message, available} or None
+                                            redeem a banked usage reset credit; None: model-controls can't
+  secrets() -> [{name, note, origin, created_at, updated_at}] or None   None: no secrets plugin
+  secret(name) -> value or None / set_secret(name, value, note) / remove_secret(name) -> bool
+
+A `secret` request is the agent-secrets plugin asking the person for a value. The answer goes
+to the backend like any other (`resolve`), which hands it to that plugin's vault; nothing here
+keeps it.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import uuid
+
+from .media import MEDIA
+
+log = logging.getLogger("hermes.portal")
+
+# Kinds of row a person wrote or should read; everything else is host traffic.
+PUBLISHED_KINDS = {None, "steer", "failed_turn"}
+# What Nako answers to her own notice when she has nothing to say; the gateway sends nothing.
+SILENCE_MARKERS = {"[SILENT]", "SILENT", "NO_REPLY", "NO REPLY"}
+ANSWERABLE = {"approval", "clarify", "secret"}
+WORKING = "working"
+NEEDS_YOU = "needs you"
+DONE = "done"
+FAILED = "failed"
+MAX_FILE = 25 * 1024 * 1024
+SEND_TIMEOUT = 5
+SEND_CONCURRENCY = 32
+PREVIEW_CHARS = 280
+# The thread cron posts and other deliveries to `portal` land in, like a bot's DM elsewhere.
+INBOX = "inbox"
+# A second thread like it, for code-review status posts (`portal:reviews`).
+REVIEWS = "reviews"
+CHANNELS = {INBOX, REVIEWS}
+# Hermes labels every cron post it mirrors into a chat with this.
+CRON_DELIVERY = re.compile(r"^\[Cron delivery: ([^\]\n]+)\]?\n?")
+# A message sent while a turn runs is steered into it with a note for the model saying where it
+# came from; Hermes keeps that note in the saved text, but the user never typed it. Several messages
+# sent during one turn arrive joined, each with its own note at the start of a line.
+STEER_ORIGIN = re.compile(r"^Gateway message origin \([^)\n]*\):\n\{[^\n]*\}\n(?:Do not guess[^\n]*\n)?\n*", re.MULTILINE)
+# When Hermes compacts a chat mid-turn it restates the unfinished request after the summary, under
+# this header, so the model carries on. The person sent that message once, earlier in the turn.
+RESTATED = re.compile(r"^\[STILL IN PROGRESS\b[^\]]*\]\s*")
+# A message another thread sent in (`nako-spawn --to`, or the brief of a thread one started). The
+# model reads this line, so it knows the text came from another thread and isn't the person's own
+# instruction; the app draws the message as that thread's, not the person's.
+FROM_THREAD = re.compile(r'^\[From another thread, not typed by the user: "([^"\n]*)" \(session ([\w.-]{1,120})\)\]\n+')
+# Hermes cuts a chat's preview short, often inside that line, so a cut-off line goes too.
+FROM_THREAD_PREVIEW = re.compile(r"^\[From another thread, not typed by the user: [^\]]*(?:\]\s*|$)")
+SESSION_ID = re.compile(r"^[\w.-]{1,120}$")
+# Prompts and replies in one page of a transcript; tool rows between them come along.
+PAGE_MESSAGES = 30
+# What the app draws from a transcript row. Hermes's rows also carry reasoning signatures, full
+# tool arguments and display metadata, which made a page of a long chat ~170 KB instead of ~10 KB.
+SHOWN_FIELDS = ("role", "text", "row_id", "timestamp", "reasoning", "label", "post", "ended", "steered", "sender", "name", "context", "tool_call_id")
+# Nako's own one-liner for the end of a reply: the model writes it in the reply, the app shows it
+# beside her and hides the tag. A tag still streaming in (`<sign`, `<signoff>proud of`) is hidden too.
+# A reply that mentions the tag in prose (`<signoff>`) isn't one: a tag holds no other tag.
+SIGN_OFF_TAG = re.compile(r"\s*<signoff>((?:(?!</?signoff>).)*?)</signoff>\s*", re.DOTALL | re.IGNORECASE)
+# Only on a line of its own, where the sign-off goes, so a `<signoff>` in prose isn't a tag.
+SIGN_OFF_OPEN = re.compile(r"(?:\A|\n)\s*(?:<signoff>[^<\n]*|<(?:s(?:i(?:g(?:n(?:o(?:f(?:f)?)?)?)?)?)?)?)$", re.IGNORECASE)
+# A post outside a turn is mirrored into the transcript just after the send returns.
+MIRROR_SETTLE = 1.0
+# A reply line that shows the person a stored secret: `SECRET:NAME` (web/src/lib/secrets.ts).
+SECRET_LINE = re.compile(r"^[^\S\n]*SECRET:([A-Za-z_][A-Za-z0-9_]{0,63})[^\S\n]*$", re.MULTILINE)
+
+
+class Hub:
+    def __init__(self, backend, *, alert=None):
+        self.backend = backend
+        # alert(session, title, text): a reply finished, a post arrived, or something needs an answer.
+        self.alert = alert or (lambda session, title, text: None)
+        self.clients = set()
+        self.subscribers = {}
+        self.send_slots = asyncio.Semaphore(SEND_CONCURRENCY)
+        # The chat each socket shows, and the sockets whose page is on screen and focused.
+        self.viewing = {}
+        self.looking = set()
+        self.status = {}
+        # Chats whose last turn ended while nobody had them open; opening one clears it.
+        self.unread = set()
+        self.requests = {}
+        self.running = set()
+        self.titles = {}
+        # The Notifications and Reviews chats the last listing found; None until the first listing.
+        self.inboxes = None
+        self.last_text = {}
+        # What a running turn has shown so far (its messages and tool calls), so a chat opened
+        # mid-turn picks up where the live view is instead of starting blank.
+        self.progress = {}
+        # Whether a gateway is there to run turns. The standalone server's link keeps this.
+        self.connected = True
+        self.hermes_build = None
+        # Whether a finished turn gets Nako's sign-off line (Settings; the server keeps it).
+        self.sign_off_on = True
+        # Callables that see every frame this hub sends its app, chat events included; a machine
+        # in a mesh passes them up to its hub this way (`mesh.Node`).
+        self.taps = set()
+        # (status, unread) for chats on other machines, which a mesh hub reports too (`mesh.Mesh`).
+        self.elsewhere = lambda: ()
+        # The last sticker frame sent, so one goes out only when what she shows changes.
+        self.shown_sticker = None
+        # Sessions that came in another way (Slack, cron...), as the gateway last said: which ways
+        # in there are and which of those sessions run a turn now. The app only watches them, so
+        # they stay out of `status`: no alerts, no unread marks, nothing on the sticker.
+        self.outside_now = {"sources": [], "running": []}
+        # Cached provider/model lists from the gateway, cleared when providers, profile or gateway change.
+        self._models_cache = {}
+        self._models_locks = {}
+        self._models_gen = 0
+
+    def notify(self, session, title, text):
+        """An alert for every surface: web push (via ``alert``) and every live socket, which is
+        how the Android app hears about it without Google's push service. Nothing goes out while
+        the chat is open in front of you on some device: you're already reading it."""
+        if self.seen(session):
+            return
+        self.alert(session, title, text)
+        frame = {"kind": "alert", "title": title, "body": text, "session": session}
+        asyncio.get_running_loop().create_task(self.broadcast(frame))
+
+    # Clients (browser tabs)
+
+    def join(self, client):
+        self.clients.add(client)
+
+    def leave(self, client):
+        self.clients.discard(client)
+        self.viewing.pop(client, None)
+        self.looking.discard(client)
+        for session, watchers in list(self.subscribers.items()):
+            watchers.discard(client)
+            if not watchers:
+                self.subscribers.pop(session, None)
+
+    def watch(self, client, session):
+        """The chat a socket shows now. It hears that chat's live events and no longer the last
+        one's, so a tab that has opened many chats isn't sent every reply streaming in them."""
+        shown = self.viewing.pop(client, None)
+        if shown is not None:
+            watchers = self.subscribers.get(shown, set())
+            watchers.discard(client)
+            if not watchers:
+                self.subscribers.pop(shown, None)
+        if session is None:
+            return
+        self.subscribers.setdefault(session, set()).add(client)
+        self.viewing[client] = session
+        self._read(session)
+
+    def look(self, client, looking):
+        """The page on this socket came on screen and into focus, or left it."""
+        if looking:
+            self.looking.add(client)
+            self._read(self.viewing.get(client))
+        else:
+            self.looking.discard(client)
+
+    def seen(self, session):
+        return any(self.viewing.get(client) == session for client in self.looking)
+
+    async def _send(self, clients, message):
+        async def send(client):
+            async with self.send_slots:
+                try:
+                    await asyncio.wait_for(client.send(message), SEND_TIMEOUT)
+                except Exception:  # noqa: BLE001 - One broken browser must not block broadcasts to the others.
+                    self.leave(client)
+
+        await asyncio.gather(*(send(client) for client in list(clients)))
+
+    def _tap(self, frame):
+        for tap in list(self.taps):
+            try:
+                tap(frame)
+            except Exception:
+                log.debug("portal: a tap failed", exc_info=True)
+
+    async def broadcast(self, message):
+        self._tap(message)
+        await self._send(self.clients, message)
+        if message.get("kind") == "status":
+            sticker = self.sticker()
+            if sticker != self.shown_sticker:
+                self.shown_sticker = sticker
+                await self.broadcast(sticker)
+
+    def sticker(self):
+        """What the floating Nako shows on every app: her mood and the counts under her (chats
+        working, and chats that finished a turn you haven't opened since)."""
+        chats = [(status, session in self.unread) for session, status in self.status.items()]
+        chats += list(self.elsewhere())
+        statuses = [status for status, _ in chats]
+        mood = "needs-you" if NEEDS_YOU in statuses else "working" if WORKING in statuses else "idle"
+        return {"kind": "sticker", "mood": mood, "working": statuses.count(WORKING), "finished": sum(1 for _, unread in chats if unread)}
+
+    async def _publish(self, session, message):
+        frame = {"session": session, **message}
+        self._tap(frame)
+        await self._send(self.subscribers.get(session, ()), frame)
+
+    async def _event(self, session, kind, payload=None):
+        await self._publish(session, {"kind": "event", "type": kind, "payload": payload or {}})
+
+    def _status_frame(self, session):
+        return {"kind": "status", "session": session, "status": self.status[session], "unread": session in self.unread}
+
+    def status_frames(self):
+        """Every chat's status as it stands, for a socket that just joined."""
+        return [self._status_frame(session) for session in self.status]
+
+    def _read(self, session):
+        """The chat came in front of you: a turn that ended unseen there is seen now."""
+        if session not in self.unread or not self.seen(session):
+            return
+        self.unread.discard(session)
+        if session in self.status:
+            asyncio.get_running_loop().create_task(self.broadcast(self._status_frame(session)))
+
+    async def _set_status(self, session, status):
+        # An archived chat is out of sight on purpose, so a turn ending there isn't waiting on you.
+        unread = status in (DONE, FAILED) and not self.seen(session) and not await asyncio.to_thread(self.backend.is_archived, session)
+        if self.status.get(session) == status and (session in self.unread) == unread:
+            return
+        self.status[session] = status
+        if unread:
+            self.unread.add(session)
+        else:
+            self.unread.discard(session)
+        await self.broadcast(self._status_frame(session))
+
+    # Sessions
+
+    async def search_sessions(self, query):
+        if len(query.strip()) < 2:
+            return []
+        return await asyncio.to_thread(self.backend.search_sessions, query)
+
+    async def sessions(self):
+        rows = []
+        inboxes = set()
+        for row in await asyncio.to_thread(self.backend.sessions):
+            session = row["id"]
+            self.titles[session] = row.get("title") or ""
+            if row.get("chat_id") in CHANNELS:
+                inboxes.add(session)
+            rows.append(
+                {
+                    "id": session,
+                    # The thread the chat is; a group holds it by this (see Store.chat_groups).
+                    "chat": row.get("chat_id"),
+                    "title": row.get("title") or row.get("preview") or "untitled",
+                    "preview": FROM_THREAD_PREVIEW.sub("", row.get("preview") or ""),
+                    "started_at": row.get("started_at") or 0,
+                    "message_count": row.get("message_count") or 0,
+                    "source": "portal",
+                    # The thread posts to `portal` land in; the sidebar keeps it on top.
+                    "notifications": row.get("chat_id") == INBOX,
+                    # Where review threads post their status; it sits under Notifications.
+                    "reviews": row.get("chat_id") == REVIEWS,
+                    "pinned": bool(row.get("pinned")),
+                    "status": self.status.get(session),
+                    # A turn ended here while you weren't looking; opening the chat clears it.
+                    "finished": session in self.unread,
+                }
+            )
+        self.inboxes = inboxes
+        return rows
+
+    def outside_frame(self):
+        return {"kind": "outside", **self.outside_now}
+
+    async def outside(self, state):
+        """The gateway's word on sessions from other ways in (`outside_now`)."""
+        state = {"sources": [str(s) for s in state.get("sources") or []], "running": [str(s) for s in state.get("running") or []]}
+        if state == self.outside_now:
+            return
+        self.outside_now = state
+        await self.broadcast(self.outside_frame())
+
+    async def outside_sessions(self, source=None, offset=0):
+        """A page of sessions from other ways in, latest first, each saying whether it runs now."""
+        rows = await asyncio.to_thread(self.backend.outside_sessions, source, offset)
+        running = set(self.outside_now["running"])
+        return [{**row, "running": row["id"] in running} for row in rows]
+
+    async def _portal_only(self, session):
+        """Changing a chat is for portal threads; a session from elsewhere is only read here."""
+        if await asyncio.to_thread(self.backend.chat_of, session) is None:
+            raise ValueError("This chat isn't a portal thread, so it can only be read here")
+
+    async def archived(self):
+        rows = await asyncio.to_thread(self.backend.archived_sessions)
+        return [
+            {
+                "id": row["id"],
+                "title": row.get("title") or row.get("preview") or "untitled",
+                "started_at": row.get("started_at") or 0,
+            }
+            for row in rows
+        ]
+
+    async def open(self, session, results=False, cache=True):
+        """A chat's transcript and where it stands. `results`: keep the start of each tool call's
+        result on its row (an agent following the chat reads them; the app doesn't).
+
+        It reads with no gateway connected too (the server reads the session store itself), so
+        `gateway` says whether one is, and `last_active` when the chat last moved. Bulk readers
+        use `cache=False` to leave the interactive transcript cache undisturbed."""
+        args = (session,) if cache else (session, False)
+        thread = await asyncio.to_thread(self.backend.thread, *args)
+        if thread is None:
+            raise ValueError("No such chat")
+        title = thread.get("title") or ""
+        messages = thread["messages"]
+        stamps = [m["timestamp"] for m in messages if isinstance(m.get("timestamp"), (int, float))]
+        if not results:
+            messages = [{k: v for k, v in m.items() if k != "result"} if "result" in m else m for m in messages]
+        if (session in self.inboxes) if self.inboxes is not None else (await asyncio.to_thread(self.backend.chat_of, session)) in CHANNELS:
+            messages = _mark_posts(messages)
+        messages = _mark_turn_ends(_without_quiet_replies(messages))
+        # Hermes names a chat after its first exchange; a list fetched before that still says untitled.
+        renamed = session in self.titles and self.titles[session] != title
+        self.titles[session] = title
+        if renamed:
+            await self.broadcast({"kind": "sessions.changed"})
+        return {
+            "session": session,
+            # Where it came in; anything but the portal opens read-only.
+            "source": thread.get("source") or "portal",
+            "title": self.titles[session],
+            "messages": _without_restated([_without_sign_off(_as_notification(_from_thread(_without_steer_origin(m)))) for m in messages if _is_shown(m)]),
+            "running": session in self.running,
+            **({"live": _progress_view(self.progress[session])} if session in self.running and session in self.progress else {}),
+            "status": self.status.get(session),
+            "requests": [_request_view(r) for r in self.requests.values() if r["session"] == session],
+            "gateway": bool(self.connected),
+            "last_active": max(stamps) if stamps else None,
+        }
+
+    async def create(self, text, files=(), title=None, cwd=None, yolo=False, archived=False, sender=None, model=None):
+        chat = uuid.uuid4().hex[:16]
+        args = (chat, title, cwd) if cwd else (chat, title)
+        session = await self.backend.new_thread(*args)
+        if model:
+            selected = await self.set_session_model(session, model)
+            if selected.get("confirmation"):
+                return {"session": session, **selected}
+        if archived:
+            # Work handed off to run out of sight (a review that reports to Reviews when done).
+            await asyncio.to_thread(self.backend.set_archived, session, True)
+        if yolo:
+            # Thread-scoped, like Shift+Tab in Desktop: approvals stay on everywhere else.
+            await asyncio.to_thread(self.backend.set_yolo, chat)
+        submitted = await self.send(session, text, files, sender=sender)
+        await self.broadcast({"kind": "sessions.changed"})
+        return {"session": session, **submitted}
+
+    async def adopt(self, session):
+        """Hand a Desktop chat to the portal: it becomes a portal thread with its history intact."""
+        chat = uuid.uuid4().hex[:16]
+        adopted = await self.backend.adopt(chat, session)
+        await self.broadcast({"kind": "sessions.changed"})
+        return {"session": adopted}
+
+    async def _chat(self, session):
+        chat = await asyncio.to_thread(self.backend.chat_of, session)
+        if chat is None:
+            raise ValueError("This chat isn't a portal thread, so it can't take new messages here")
+        return chat
+
+    async def send(self, session, text, files=(), sender=None):
+        """A message into a thread. `sender`: the thread it came from, when another thread sent it
+        (the loopback API only); the person's own messages have none."""
+        files = list(files)
+        text = str(text or "").strip()
+        if not text and not files:
+            raise ValueError("Nothing to send")
+        for upload in files:
+            if len(upload["data"]) > MAX_FILE:
+                raise ValueError("Files must be under 25 MiB")
+        chat = await self._chat(session)
+        # A `/command` stays a command: the gateway only runs one that starts the message.
+        if sender is not None and not text.startswith("/"):
+            if not SESSION_ID.match(str(sender)):
+                raise ValueError("The sending thread's id isn't a session id")
+            title = await asyncio.to_thread(self.backend.title_of, str(sender))
+            text = from_thread_line(str(sender), title) + text
+        await self.backend.inbound(chat, text, files)
+        await self._set_status(session, WORKING)
+        return {"status": "sent"}
+
+    async def interrupt(self, session):
+        await self.backend.inbound(await self._chat(session), "/stop", [])
+        return {"ok": True}
+
+    async def answer(self, request_id, result):
+        request = self.requests.get(str(request_id))
+        if request is None:
+            raise ValueError("That request is no longer open")
+        if request["method"] == "secret":
+            if result.get("declined"):
+                result = {"declined": True}
+            elif isinstance(result.get("value"), str) and result["value"]:
+                result = {"value": result["value"]}
+            else:
+                raise ValueError("Type the secret first")
+        elif request["method"] == "approval":
+            if result.get("choice") not in request["params"].get("choices", []):
+                raise ValueError("Pick one of the offered options")
+            result = {"choice": result["choice"]}
+        else:
+            answers = result.get("answers")
+            if not isinstance(answers, dict):
+                raise ValueError("Answer the questions first")
+            result = {"answers": {str(k): (None if v is None else str(v)) for k, v in answers.items()}}
+        await self.backend.resolve(request, result)
+        await self.settle(str(request_id))
+        return {"ok": True}
+
+    # Secrets, kept by the agent-secrets plugin in the gateway; the app lists and reveals them.
+
+    async def secrets(self):
+        return await asyncio.to_thread(self.backend.secrets)
+
+    async def secret(self, name):
+        return await asyncio.to_thread(self.backend.secret, str(name))
+
+    async def set_secret(self, name, value, note=None):
+        await asyncio.to_thread(self.backend.set_secret, str(name), value, note)
+        await self.secrets_changed()
+
+    async def remove_secret(self, name):
+        removed = await asyncio.to_thread(self.backend.remove_secret, str(name))
+        await self.secrets_changed()
+        return removed
+
+    async def secrets_changed(self):
+        await self.broadcast({"kind": "secrets.changed"})
+
+    # Providers: signed-in accounts and API keys, read and changed from Settings.
+
+    async def providers(self):
+        return await asyncio.to_thread(self.backend.providers)
+
+    async def set_provider_key(self, slug, value):
+        await asyncio.to_thread(self.backend.set_provider_key, str(slug), value)
+        await self.providers_changed()
+
+    async def remove_provider_key(self, slug):
+        await asyncio.to_thread(self.backend.remove_provider_key, str(slug))
+        await self.providers_changed()
+
+    async def start_provider_signin(self, slug):
+        started = await asyncio.to_thread(self.backend.start_provider_signin, str(slug))
+        await self.providers_changed()
+        return started
+
+    async def provider_signin(self, slug, session):
+        status = await asyncio.to_thread(self.backend.provider_signin, str(slug), str(session))
+        if status.get("status") == "approved":
+            await self.providers_changed()
+        return status
+
+    async def start_account_signin(self, slug, target=None):
+        return await asyncio.to_thread(self.backend.start_account_signin, str(slug), target)
+
+    async def finish_account_signin(self, slug, attempt, code):
+        result = await asyncio.to_thread(self.backend.finish_account_signin, str(slug), str(attempt), code)
+        await self.providers_changed()
+        return result
+
+    async def account_signin(self, slug, attempt):
+        status = await asyncio.to_thread(self.backend.account_signin, str(slug), str(attempt))
+        if status.get("status") == "done":
+            await self.providers_changed()
+        return status
+
+    async def cancel_account_signin(self, slug, attempt):
+        await asyncio.to_thread(self.backend.cancel_account_signin, str(slug), str(attempt))
+
+    async def remove_account(self, slug, account):
+        await asyncio.to_thread(self.backend.remove_account, str(slug), str(account))
+        await self.providers_changed()
+
+    async def providers_changed(self):
+        self.invalidate_models()
+        await self.broadcast({"kind": "providers.changed"})
+
+    def invalidate_models(self):
+        self._models_gen += 1
+        self._models_cache.clear()
+
+    async def _cached_models(self, key, fetch):
+        cached = self._models_cache.get(key)
+        if cached is not None:
+            return cached
+        lock = self._models_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            cached = self._models_cache.get(key)
+            if cached is not None:
+                return cached
+            gen = self._models_gen
+            rows = await asyncio.to_thread(fetch)
+            if self._models_gen == gen:
+                self._models_cache[key] = rows
+            return rows
+
+    async def models(self):
+        return await self._cached_models("models", self.backend.models)
+
+    async def sign_off_models(self):
+        return await self._cached_models("sign_off_models", self.backend.sign_off_models)
+
+    # MCP servers: what `hermes mcp` keeps, read and changed from Settings.
+
+    async def mcp_servers(self):
+        return await asyncio.to_thread(self.backend.mcp_servers)
+
+    async def mcp_catalog(self):
+        return await asyncio.to_thread(self.backend.mcp_catalog)
+
+    async def mcp_test(self, name):
+        return await asyncio.to_thread(self.backend.mcp_test, str(name))
+
+    async def mcp_change(self, method, *args):
+        """Any write: run it, then tell every open tab to reread the list."""
+        result = await asyncio.to_thread(getattr(self.backend, method), *args)
+        await self.mcp_changed()
+        return result
+
+    async def mcp_signin(self, flow):
+        status = await asyncio.to_thread(self.backend.mcp_signin, str(flow))
+        if status.get("status") == "approved":
+            await self.mcp_changed()
+        return status
+
+    async def mcp_oauth_callback(self, name, code, state, error, iss):
+        return await asyncio.to_thread(self.backend.mcp_oauth_callback, str(name), code, state, error, iss)
+
+    async def mcp_changed(self):
+        await self.broadcast({"kind": "mcp.changed"})
+
+    async def archive(self, session, archived=True):
+        await self._portal_only(session)
+        chat = await asyncio.to_thread(self.backend.chat_of, session) if archived else None
+        if chat == INBOX:
+            raise ValueError("The Notifications chat can't be archived")
+        if chat == REVIEWS:
+            raise ValueError("The Reviews chat can't be archived")
+        await asyncio.to_thread(self.backend.set_archived, session, archived)
+        if archived and session in self.unread:
+            # Archiving a finished chat you never opened puts it away: it stops counting as unread.
+            self.unread.discard(session)
+            if session in self.status:
+                await self.broadcast(self._status_frame(session))
+        await self.broadcast({"kind": "sessions.changed"})
+        return {"ok": True}
+
+    async def rename(self, session, title):
+        await self._portal_only(session)
+        await asyncio.to_thread(self.backend.set_title, session, title)
+        self.titles[session] = title
+        await self.broadcast({"kind": "sessions.changed"})
+        return {"ok": True}
+
+    async def pin(self, session, pinned):
+        await self._portal_only(session)
+        await asyncio.to_thread(self.backend.set_pinned, session, pinned)
+        await self.broadcast({"kind": "sessions.changed"})
+
+    async def commands(self):
+        return await asyncio.to_thread(self.backend.commands)
+
+    async def processes(self, session):
+        """The chat's background processes, running first, each with a short label for its command."""
+        rows = await asyncio.to_thread(self.backend.processes, session)
+        rows = sorted(rows, key=lambda p: (not p["running"], -p["started_at"]))
+        return [{**p, "label": process_label(p["command"])} for p in rows]
+
+    async def session_model(self, session):
+        if not await asyncio.to_thread(self.backend.chat_of, session):
+            raise ValueError("No chat with that id")
+        current, providers = await asyncio.gather(
+            asyncio.to_thread(self.backend.session_model, session), self.models())
+        if current is None:
+            raise ValueError("model-controls is not enabled")
+        return {**current, "providers": providers}
+
+    async def set_session_model(self, session, body):
+        if session in self.running:
+            raise ValueError("Wait for this turn to finish")
+        result = await self.backend.set_session_model(session, body)
+        if result.get("confirmation"):
+            return result
+        await self.broadcast({"kind": "model.changed", "session": session})
+        return await self.session_model(session)
+
+    async def process_log(self, session, proc_id, lines=200):
+        return await asyncio.to_thread(self.backend.process_log, session, proc_id, lines)
+
+    async def command(self, session, text):
+        """A `/command` is an ordinary message to the gateway, which runs it and answers in the chat."""
+        await self.send(session, text)
+        return {"output": None, "sent": True}
+
+    # What the gateway does in a thread (called by the adapter)
+
+    async def _session(self, chat):
+        return await asyncio.to_thread(self.backend.session_of, chat)
+
+    async def turn_started(self, chat):
+        session = await self._session(chat)
+        if session is None:
+            return
+        self.running.add(session)
+        self.progress[session] = {"messages": {}, "tools": {}}
+        await self._set_status(session, WORKING)
+        await self._event(session, "message.start")
+
+    async def turn_finished(self, chat, outcome):
+        session = await self._session(chat)
+        if session is None:
+            return
+        # An archived chat is out of sight on purpose; it doesn't ping when a turn ends.
+        quiet = await asyncio.to_thread(self.backend.is_archived, session)
+        self.running.discard(session)
+        self.progress.pop(session, None)
+        failed = outcome == "failure"
+        if not any(r["session"] == session for r in self.requests.values()):
+            await self._set_status(session, FAILED if failed else DONE)
+        await self._event(session, "message.complete", {"status": "error" if failed else "complete"})
+        title = self.titles.get(session) or "Nako"
+        reply = self.last_text.pop(session, "")
+        if failed and not quiet:
+            self.notify(session, title, "hit an error")
+        elif outcome == "success":
+            if not quiet:
+                self.notify(session, title, _preview(reply) or "done")
+            if self.sign_off_on:
+                asyncio.get_running_loop().create_task(self._sign_off(session, reply))
+
+    async def _sign_off(self, session, sent):
+        """Nako's one-liner about the turn that just ended, for the chat's sticker. Her own line
+        from the saved reply when she wrote one; otherwise a small model writes it from the reply.
+        Best effort: without one the chat says a plain "done"."""
+        try:
+            reply = await asyncio.to_thread(self._last_reply, session) or sent
+            clean, line = split_sign_off(reply)
+            if not line and clean.strip():
+                line = await asyncio.to_thread(self.backend.sign_off, clean)
+        except Exception:
+            log.debug("portal sign-off failed", exc_info=True)
+            return
+        if line and session not in self.running:
+            await self._event(session, "signoff", {"text": line})
+
+    def _last_reply(self, session):
+        """The turn's reply as saved, not as last streamed: the final send can land after the turn ends."""
+        thread = self.backend.thread(session) or {}
+        last = _without_quiet_replies(thread.get("messages") or [])[-1:]
+        return last[0].get("text") or "" if last and last[0].get("role") == "assistant" else ""
+
+    async def tool(self, session, call_id, name, context, state):
+        """A tool call starting ("running") or ending ("done"/"failed") in a running turn, for the
+        live view; the saved transcript draws the finished calls itself."""
+        if session not in self.running:
+            return
+        tool = {"id": call_id, "name": name, "context": context, "state": state}
+        if session in self.progress:
+            tools = self.progress[session]["tools"]
+            tools[call_id or f"#{len(tools)}"] = tool
+        await self._event(session, "tool", tool)
+
+    async def outgoing(self, chat, message_id, text):
+        """A message the gateway sent or edited. Inside a turn it shows live until the reply is saved;
+        outside one (a cron post, a message from another platform) it's a notification."""
+        session = await self._session(chat)
+        if session is None:
+            return
+        self.last_text[session] = text
+        shown = split_sign_off(text)[0]
+        # Read before anything is shown, so the alert goes out as soon as the message does.
+        quiet = session not in self.running and await asyncio.to_thread(self.backend.is_archived, session)
+        if session in self.running and session in self.progress:
+            # `after`: how many tool calls had started when its text last changed, as the app counts.
+            progress = self.progress[session]
+            was = progress["messages"].get(message_id)
+            after = was["after"] if was and was["text"] == shown else len(progress["tools"])
+            progress["messages"][message_id] = {"id": message_id, "text": shown, "after": after}
+        await self._event(session, "gateway.message", {"id": message_id, "text": shown})
+        if session in self.running:
+            return
+        if not quiet:
+            self.notify(session, self.titles.get(session) or "Nako", _preview(text) or "new message")
+        await asyncio.sleep(MIRROR_SETTLE)
+        await self._event(session, "message.complete", {"status": "complete"})
+        await self.broadcast({"kind": "sessions.changed"})
+
+    async def ask(self, chat, request):
+        """An approval or a question the gateway wants answered: {id, method, params, private}."""
+        session = await self._session(chat)
+        if session is None:
+            return
+        request = {**request, "session": session}
+        self.requests[request["id"]] = request
+        await self._set_status(session, NEEDS_YOU)
+        await self._publish(session, {"kind": "request", "request": _request_view(request)})
+        what = {"approval": "needs your ok", "clarify": "has a question"}.get(request["method"], "needs you")
+        if request["method"] == "secret":
+            what = f"needs {request['params'].get('name') or 'a secret'}"
+        self.notify(session, self.titles.get(session) or "Nako", what)
+
+    async def settle(self, request_id):
+        request = self.requests.pop(request_id, None)
+        if request is None:
+            return
+        session = request["session"]
+        await self._publish(session, {"kind": "request.closed", "id": request_id})
+        if not any(r["session"] == session for r in self.requests.values()) and self.status.get(session) == NEEDS_YOU:
+            await self._set_status(session, WORKING)
+
+
+# Setup at the front of a background command (variables, cd, source) says nothing about what it runs.
+SETUP_STEP = re.compile(r"^(\w+=\S*|cd\s|source\s|export\s|\.\s)")
+
+
+def process_label(command):
+    """What a background command runs, for a one-line list: its first step past the setup."""
+    steps = [s.strip() for s in re.split(r";|&&|\n", command) if s.strip()]
+    doing = [s for s in steps if not SETUP_STEP.match(s)]
+    return " ".join((doing or steps or [command])[0].split())
+
+
+def page(messages, *, before=None, since=None, limit=PAGE_MESSAGES):
+    """A window of a transcript and the index it starts at.
+
+    `since` reads from that index to the end, which refreshes what a client already shows.
+    Otherwise it's the last `limit` prompts and replies before `before` (the end when absent),
+    with the tool rows between them. A page always starts on a prompt or reply, so a run of
+    tool calls is never split across two pages.
+    """
+    total = len(messages)
+    if since is not None:
+        start = min(max(since, 0), total)
+        return start, messages[start:]
+    end = total if before is None else min(max(before, 0), total)
+    start, seen = end, 0
+    while start > 0 and seen < limit:
+        start -= 1
+        if messages[start].get("role") != "tool":
+            seen += 1
+    return start, messages[start:end]
+
+
+def for_app(message):
+    """A transcript row with only what the app draws. Tool calls show no time."""
+    return {key: message[key] for key in SHOWN_FIELDS if key in message and not (key == "timestamp" and message.get("role") == "tool")}
+
+
+def _without_quiet_replies(messages):
+    """Drop a bare silence marker Nako gave to her own notice (a heartbeat, a finished job): the
+    gateway sent nothing, so the saved row isn't a reply anyone should see."""
+    out, own_notice = [], False
+    for message in messages:
+        role = message.get("role")
+        if role == "user":
+            own_notice = message.get("display_kind") not in PUBLISHED_KINDS
+        elif role == "assistant" and own_notice and " ".join((message.get("text") or "").upper().split()) in SILENCE_MARKERS:
+            continue
+        out.append(message)
+    return out
+
+
+def _is_shown(message):
+    if message.get("role") == "tool":
+        return True
+    if message.get("role") not in {"user", "assistant"}:
+        return False
+    if message.get("display_kind") not in PUBLISHED_KINDS:
+        return False
+    return bool((message.get("text") or "").strip()) or message.get("role") == "assistant"
+
+
+def _request_view(request):
+    return {"id": request["id"], "method": request["method"], "params": request["params"], "answerable": request["method"] in ANSWERABLE}
+
+
+def split_sign_off(text):
+    """A reply without its sign-off tag (or the start of one still streaming), and the line."""
+    text = str(text or "")
+    found = SIGN_OFF_TAG.findall(text)
+    clean = SIGN_OFF_OPEN.sub("", SIGN_OFF_TAG.sub("\n\n", text)).strip()
+    line = " ".join(found[-1].split()).strip("\"'` ") if found else ""
+    return clean, line[:80] or None
+
+
+def _without_sign_off(message):
+    if message.get("role") != "assistant" or not message.get("text"):
+        return message
+    return {**message, "text": split_sign_off(message["text"])[0]}
+
+
+def _preview(text, limit=PREVIEW_CHARS):
+    """The start of a reply as one plain line for a notification: no MEDIA tags or markdown marks."""
+    text = split_sign_off(text)[0]
+    # A shared secret reads as its name, kept whole past the markdown cleanup below (STRIPE_KEY).
+    shared = SECRET_LINE.findall(str(text or ""))
+    text = SECRET_LINE.sub("\0", MEDIA.sub("", str(text or "")))
+    # Heading marks only at the start of a line: a `#` mid-line is a PR or issue number (web#12).
+    lines = (re.sub(r"^\s*#{1,6}\s+", "", line) for line in text.splitlines())
+    plain = re.sub(r"[`*_>|]+", "", " ".join(lines))
+    for name in shared:
+        plain = plain.replace("\0", name, 1)
+    plain = re.sub(r"\s+([,.;:)])", r"\1", plain)
+    plain = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", plain)
+    plain = " ".join(plain.split())
+    return plain if len(plain) <= limit else plain[: limit - 1].rstrip() + "…"
+
+
+def _without_steer_origin(message):
+    if message.get("role") != "user" or not message.get("text"):
+        return message
+    if message.get("display_kind") == "steer":
+        message = {**message, "steered": True}
+    text, notes = STEER_ORIGIN.subn("", message["text"])
+    return {**message, "text": text.strip()} if notes else message
+
+
+def _without_restated(messages):
+    """Drop Hermes's mid-turn restatement of a request after a compaction: the person's own
+    message is already in the transcript above it. Without that original (an older Hermes that
+    doesn't hand back compacted rows), show the message as they sent it, without the header."""
+    out = []
+    for message in messages:
+        match = RESTATED.match(message.get("text") or "") if message.get("role") == "user" else None
+        if match:
+            message = _from_thread({**message, "text": message["text"][match.end():].strip()})
+            text = message["text"]
+            sent = next((m for m in reversed(out) if m.get("role") == "user"), None)
+            if sent is not None and (sent.get("text") or "").strip() == text:
+                continue
+        out.append(message)
+    return out
+
+
+def _mark_turn_ends(messages):
+    """Mark each reply that ended its turn: no tool call or other message of hers follows it before
+    the next user row. The app keeps only these in a quiet chat, but it never sees the rows Hermes
+    adds for itself (a background job's completion notice), so without the mark a reply followed by
+    such a notice and her answer to it reads as a message along the way and disappears."""
+    out, clear = [], True
+    for message in reversed(messages):
+        role = message.get("role")
+        text = (message.get("text") or "").strip()
+        if role == "assistant" and text and clear:
+            message = {**message, "ended": True}
+        if role == "user":
+            clear = True
+        elif role == "tool" or text:
+            clear = False
+        out.append(message)
+    return out[::-1]
+
+
+def _mark_posts(messages):
+    """In a chat posts land in, Nako's messages that no prompt asked for are posts (`send_message`
+    mirrors them in as hers), so the app keeps each one instead of only the last of a run."""
+    out, in_turn = [], False
+    for i, message in enumerate(messages):
+        role = message.get("role")
+        if role == "user":
+            in_turn = True
+        elif role == "assistant":
+            if not in_turn and (message.get("text") or "").strip():
+                message = {**message, "post": True}
+            following = messages[i + 1] if i + 1 < len(messages) else None
+            if following is None or following.get("role") != "tool":
+                in_turn = False
+        out.append(message)
+    return out
+
+
+def _progress_view(progress):
+    return {"messages": list(progress["messages"].values()), "tools": list(progress["tools"].values())}
+
+
+def _as_notification(message):
+    """A cron post reads as Nako's message under its job's name; everything else is unchanged."""
+    match = CRON_DELIVERY.match(message.get("text") or "") if message.get("role") == "user" else None
+    if not match:
+        return message
+    return {**message, "role": "assistant", "label": match.group(1).strip(), "text": message["text"][match.end():].strip()}
+
+
+def from_thread_line(session, title):
+    """The line a message from another thread starts with: who sent it, for the model and the app."""
+    title = " ".join(str(title or "").split()).replace('"', "'")[:80] or "untitled"
+    return f'[From another thread, not typed by the user: "{title}" (session {session})]\n\n'
+
+
+def _from_thread(message):
+    """A message another thread sent, with its sender line lifted into `sender` for the app."""
+    match = FROM_THREAD.match(message.get("text") or "") if message.get("role") == "user" else None
+    if not match:
+        return message
+    return {**message, "text": message["text"][match.end():].strip(), "sender": {"session": match.group(2), "title": match.group(1)}}

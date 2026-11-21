@@ -1,0 +1,143 @@
+"""The adapter's transcript reads, against stand-ins shaped like Hermes's session store."""
+
+import importlib.util
+import sqlite3
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class Store:
+    """Rows of one portal chat, with Hermes's revision: it moves on appends and in-place rewrites."""
+
+    def __init__(self):
+        self.rows = []
+        self.rewrites = 0
+
+    def add(self, role, content):
+        self.rows.append({"id": len(self.rows) + 1, "role": role, "content": content, "compacted": False})
+
+    def compact(self, summary):
+        """Hermes's in-place compaction: the rows so far stay stored for display only, and the
+        live context continues from a summary."""
+        for row in self.rows:
+            row["compacted"] = True
+        self.add("user", summary)
+
+    def rewrite(self, index, content):
+        self.rows[index]["content"] = content
+        self.rewrites += 1
+
+    def conversation_revision(self, session, include_ancestors=False):
+        live = [row for row in self.rows if not row["compacted"]]
+        return ((session,), len(live), live[-1]["id"] if live else 0, self.rewrites)
+
+    def get_messages_as_conversation(self, session, include_ancestors=False, include_row_ids=False, include_compacted=False):
+        return [dict(row) for row in self.rows if include_compacted or not row["compacted"]]
+
+    def get_session_title(self, session):
+        return "a chat"
+
+
+@pytest.fixture
+def backend(tmp_path, monkeypatch):
+    def module(name, **attrs):
+        mod = type(sys)(name)
+        mod.__dict__.update(attrs)
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    module("hermes_constants", set_hermes_home_override=lambda path: None, reset_hermes_home_override=lambda token: None)
+    module("tui_gateway")
+    module("tui_gateway.server", _history_to_messages=lambda history, profile_home=None: [{"role": m["role"], "text": m["content"]} for m in history])
+    with sqlite3.connect(tmp_path / "state.db") as db:
+        db.execute("CREATE TABLE sessions (id TEXT, source TEXT)")
+        db.execute("INSERT INTO sessions VALUES ('chat-1', 'portal')")
+    spec = importlib.util.spec_from_file_location("nako_portal_thread_test", ROOT / "__init__.py")
+    plugin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(plugin)
+    store = Store()
+    adapter = type("Adapter", (), {"_session_store": type("SessionStore", (), {"_db": store})()})()
+    return plugin.HermesBackend(adapter, tmp_path), store
+
+
+def texts(backend):
+    return [m["text"] for m in backend.thread("chat-1")["messages"]]
+
+
+def test_a_transcript_reads_fresh_after_every_kind_of_change(backend):
+    backend, store = backend
+    store.add("user", "fix the build")
+    store.add("assistant", "on it")
+    assert texts(backend) == ["fix the build", "on it"]
+    assert texts(backend) == ["fix the build", "on it"]
+
+    store.add("assistant", "done")
+    assert texts(backend) == ["fix the build", "on it", "done"]
+    # An in-place rewrite keeps the count and the last id; Hermes's revision still moves.
+    store.rewrite(0, "fix the build, please")
+    assert texts(backend) == ["fix the build, please", "on it", "done"]
+    # An undo drops rows.
+    store.rows.pop()
+    assert texts(backend) == ["fix the build, please", "on it"]
+
+
+def test_a_compacted_chat_still_reads_as_the_whole_conversation(backend):
+    backend, store = backend
+    store.add("user", "fix the build")
+    store.add("assistant", "fixed")
+    store.add("user", "now the docs")
+    assert texts(backend) == ["fix the build", "fixed", "now the docs"]
+    store.compact("summary of the chat so far")
+    assert texts(backend) == ["fix the build", "fixed", "now the docs", "summary of the chat so far"]
+
+
+def test_a_chat_that_isnt_a_portal_thread_reads_as_missing(backend):
+    backend, _ = backend
+    assert backend.thread("someone-elses") is None
+
+
+async def test_periodic_attachment_backfill_preserves_the_open_transcript_cache(backend):
+    import asyncio
+
+    from portal.hub import Hub
+    from portal.mesh import Node
+
+    backend, store = backend
+    store.add('user', 'hello')
+    store.add('assistant', 'done')
+    with sqlite3.connect(backend.root / 'state.db') as db:
+        db.executemany("INSERT INTO sessions VALUES (?, 'portal')", [(f'chat-{i}',) for i in range(2, 14)])
+    reads = []
+    original = store.get_messages_as_conversation
+
+    def read(session, **kwargs):
+        reads.append(session)
+        return original(session, **kwargs)
+
+    store.get_messages_as_conversation = read
+    backend.chat_of = lambda session: session
+    backend.is_archived = lambda session: False
+
+    class BackfillHub(Hub):
+        async def sessions(self):
+            return [{'id': f'chat-{i}'} for i in range(1, 14)]
+
+        async def archived(self):
+            return []
+
+    hub = BackfillHub(backend)
+    node = Node('http://example.test/mesh', 'node', 'token', hub)
+    assert (await hub.open('chat-1'))['messages'][0]['text'] == 'hello'
+    task = asyncio.create_task(node._sync_attachments(None))
+    try:
+        from conftest import until
+        await until(lambda: 'chat-13' in reads)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    after_backfill = reads.count('chat-1')
+    assert (await hub.open('chat-1'))['messages'][0]['text'] == 'hello'
+    assert reads.count('chat-1') == after_backfill

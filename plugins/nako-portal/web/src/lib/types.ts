@@ -1,0 +1,151 @@
+import { d, type Infer } from "@/lib/decode"
+
+export type Me = { signed_in: boolean; has_passkeys: boolean; connected: boolean; name?: string; environments?: boolean; machine_load?: boolean }
+
+// A named, colored set of chats the sidebar shows together (`/api/groups`); a chat is in one at most.
+export const GROUP_COLORS = ["blue", "green", "yellow", "orange", "red", "teal", "purple", "grey"] as const
+export type GroupColor = (typeof GROUP_COLORS)[number]
+export const ChatGroup = d.object({ id: d.string(), name: d.string(), color: d.enum(GROUP_COLORS) })
+export type ChatGroup = Infer<typeof ChatGroup>
+
+export type SessionRow = {
+  id: string
+  title: string
+  started_at: number
+  pinned?: boolean
+  // The one chat posts to the portal (cron deliveries) land in; it sits above every other chat.
+  notifications?: boolean
+  // Where review threads post their status; it sits under Notifications.
+  reviews?: boolean
+  // A post landed in the Notifications or Reviews chat since it was last opened.
+  unread?: boolean
+  status?: Status | null
+  // A turn ended here that you haven't opened the chat for since: the sidebar marks it.
+  finished?: boolean
+  // Another machine's chat, reached through this portal's mesh: that machine's name.
+  machine?: string
+  group?: ChatGroup | null
+}
+
+// A slash command a portal chat can run (`/api/commands`).
+export type Command = { name: string; description: string; skill: boolean }
+
+// What a command printed, shown in the chat where it ran. Only this browser keeps it, like Desktop.
+// `at` is the transcript index it follows.
+export type CommandNote = { session: string; at: number; text: string; key: string }
+
+// A background process a chat's turn started (terminal background=true), from Hermes's process registry.
+export type BackgroundProcess = {
+  id: string
+  command: string
+  label: string
+  cwd?: string
+  running: boolean
+  // How it ended: exited, killed, lost, ...
+  ended?: string | null
+  started_at: number
+  exited_at: number | null
+  exit_code: number | null
+  notify: boolean
+}
+
+export type Status = "working" | "needs you" | "done" | "failed"
+
+// Another machine in this portal's mesh (`/api/mesh`).
+export type Machine = {
+  name: string
+  online: boolean
+  // Its Hermes gateway is up, so it can run tasks (only while online).
+  gateway: boolean
+  os: string | null
+  hostname: string | null
+  last_seen: number | null
+  working: number
+}
+
+// Where new machines install the portal plugin from: saved on the Mesh page, else detected.
+export type PluginSource = { source: string | null; detected: string | null; saved: boolean }
+
+export type Mesh = { hub: boolean; name?: string; address?: string | null; plugin?: PluginSource; machines: Machine[] }
+
+export type Sender = { session: string; title: string }
+
+export type HistoryMessage =
+  // images: local previews for a turn that is still being sent
+  // steered: sent while a turn was running, so Hermes fed it into that turn
+  // sender: the thread that sent it in (a report back, a brief), when it isn't the person's own
+  // timestamp: when it was written, Unix seconds
+  | { role: "user"; text: string; row_id?: string | number; timestamp?: number; images?: string[]; steered?: boolean; sender?: Sender }
+  // label: the cron job that posted it, when it's a cron post
+  // post: a message no prompt asked for, in a chat posts land in (a review's status)
+  // ended: the reply that ended its turn, counting turns the app never sees start
+  | { role: "assistant"; text: string; timestamp?: number; reasoning?: string; label?: string; post?: boolean; ended?: boolean; row_id?: string | number }
+  | { role: "tool"; name: string; context?: string; tool_call_id?: string }
+
+export type PortalRequest = {
+  id: string
+  method: string
+  answerable: boolean
+  params: {
+    description?: string
+    command?: string
+    choices?: string[]
+    questions?: { qid: string; question: string; choices?: string[] }[]
+    // A secret request: the name it'll be stored under, why it's needed, and whether one exists.
+    name?: string
+    note?: string
+    replace?: boolean
+  }
+}
+
+export type OpenSession = {
+  session: string
+  // Where it came in: "portal", or another way in (slack, cron...), which opens read-only.
+  source?: string
+  title: string
+  messages: HistoryMessage[]
+  // Where messages[0] sits in the whole transcript; above 0, older pages are left to load.
+  start: number
+  running: boolean
+  status?: Status | null
+  requests: PortalRequest[]
+  // What the running turn has shown so far, for a chat opened mid-turn.
+  live?: Live
+}
+
+// What the gateway has sent in a chat and not saved yet: a reply streaming in (each edit
+// replaces its text), tool progress, a post. The transcript replaces it once saved.
+// after: how many tools the turn had started when the message was last written to, so a message
+// followed by more tool calls reads as her working, not her reply.
+export type LiveMessage = { id: string; text: string; after?: number }
+
+// A tool call in the running turn, as it starts and ends.
+export type LiveTool = { id: string; name: string; context: string; state: "running" | "done" | "failed" }
+
+export type Live = { messages: LiveMessage[]; tools: LiveTool[] }
+
+export type Passkey = { id: string; label: string; current?: boolean }
+
+// A session that came in another way (Slack, Discord, cron, the CLI), from `/api/outside`.
+// source: Hermes's name for the way in; last_active: Unix seconds.
+export type OutsideRow = { id: string; title: string; source: string; last_active: number; running: boolean }
+
+// The ways in other than the portal that have sessions, and which of those sessions run a turn now.
+export type Outside = { sources: string[]; running: string[] }
+export type HermesBuild = { version: string; build: string }
+
+export type Frame =
+  | { kind: "hub.connected"; hermes?: HermesBuild | null }
+  | { kind: "hub.disconnected" | "sessions.changed" | "status.synced" }
+  | { kind: "status"; session: string; status: Status | null; unread?: boolean }
+  | { kind: "sticker"; mood: "idle" | "working" | "needs-you"; working: number; finished: number }
+  | { kind: "request"; session: string; request: PortalRequest }
+  | { kind: "request.closed"; session: string; id: string }
+  | { kind: "alert"; session: string | null; title: string; body: string }
+  | { kind: "profile.changed"; profile: string }
+  | ({ kind: "outside" } & Outside)
+  | { kind: "machines.changed" }
+  | { kind: "secrets.changed" }
+  | { kind: "providers.changed" }
+  | { kind: "mcp.changed" }
+  | { kind: "event"; session: string; type: string; payload: Record<string, unknown> }

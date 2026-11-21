@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nako</title>
+    <link rel="stylesheet" href="connect.css" />
+    <script type="module" src="connect.js"></script>
+  </head>
+  <body>
+    <header id="titlebar" data-tauri-drag-region="deep" hidden>
+      <button type="button" data-window="minimize" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 10 10"><path d="M0 5.5h10" /></svg></button>
+      <button type="button" data-window="toggle_maximize" aria-label="Maximize" title="Maximize"><svg viewBox="0 0 10 10"><path d="M.5.5h9v9h-9z" /></svg></button>
+      <button type="button" data-window="close" aria-label="Close" title="Close" class="close"><svg viewBox="0 0 10 10"><path d="M.5.5l9 9M9.5.5l-9 9" /></svg></button>
+    </header>
+    <main>
+      <img alt="" src="nako.png" />
+      <h1>Nako</h1>
+      <div id="starting" role="status" aria-label="Connecting to portal"><span></span><i></i><i></i></div>
+      <form id="ask" hidden>
+        <p id="message">Portal address</p>
+        <input id="address" autocomplete="url" placeholder="portal.example.com" spellcheck="false" />
+        <button type="submit">Connect</button>
+      </form>
+      <div id="unreachable" hidden>
+        <p id="reason"></p>
+        <button id="retry" type="button">Retry</button>
+        <button id="change" class="quiet" type="button">Change address</button>
+      </div>
+    </main>
+  </body>
+</html>

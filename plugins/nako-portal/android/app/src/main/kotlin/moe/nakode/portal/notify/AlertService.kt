@@ -1,0 +1,259 @@
+package moe.nakode.portal.notify
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.content.res.Configuration
+import android.graphics.BitmapFactory
+import android.net.ConnectivityManager
+import android.net.Network
+import android.os.IBinder
+import android.util.Log
+import android.webkit.CookieManager
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import moe.nakode.portal.R
+import moe.nakode.portal.bubble.Bubble
+import moe.nakode.portal.bubble.Sticker
+import moe.nakode.portal.shell.MainActivity
+import moe.nakode.portal.shell.ServerOrigin
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Keeps one socket open to the portal on this machine and turns its alerts into
+ * Android notifications. Nothing goes through Google: the phone talks straight
+ * to the portal, signed in with the same cookie as the WebView.
+ */
+class AlertService : Service() {
+    private val client = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
+    private var socket: WebSocket? = null
+    private var attempts = 0
+    private var stopped = false
+    private val ids = AtomicInteger(100)
+    @Volatile private var sticker = Sticker.IDLE
+    private var bubble: Bubble? = null
+    private var bubbleOrigin: String? = null
+    private var serverOrigin: String? = null
+    private var generation = 0L
+    private var night = 0
+    private val handler by lazy { android.os.Handler(mainLooper) }
+    private val network = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            // Back online: reconnect now instead of waiting out the backoff.
+            handler.post { if (socket == null) connect(reset = true) }
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        channels(this)
+        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val ongoing = NotificationCompat.Builder(this, QUIET)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Listening for Nako")
+            .setContentIntent(open)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+        ServiceCompat.startForeground(this, 1, ongoing, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+        getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(network)
+        running = this
+        night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        refreshBubble()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        val night = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        super.onConfigurationChanged(newConfig)
+        if (night != this.night) {
+            // The panel's page reads light or dark from its theme when it's made: make it again.
+            this.night = night
+            bubble?.destroy()
+            bubble = null
+            refreshBubble()
+        } else {
+            bubble?.screenChanged()
+        }
+    }
+
+    /** Nako's floating sticker: on when switched on and allowed, and only while the app itself is out of sight. */
+    fun refreshBubble() {
+        val server = origin(this)
+        if (bubbleOrigin != server?.value) {
+            bubble?.destroy()
+            bubble = null
+            bubbleOrigin = server?.value
+        }
+        if (server == null || !Bubble.enabled(this) || MainActivity.visible) {
+            bubble?.hide()
+            return
+        }
+        val current = bubble ?: Bubble(android.view.ContextThemeWrapper(this, R.style.Theme_Nako), server).also { bubble = it }
+        current.status(sticker.mood, sticker.counts)
+        current.show()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (serverOrigin != origin(this)?.value) serverChanged()
+        else if (socket == null) connect(reset = true)
+        return START_STICKY
+    }
+
+    /** The activity saved a different origin: no socket, retry or bubble may keep the old one. */
+    fun serverChanged() {
+        generation++
+        handler.removeCallbacksAndMessages(null)
+        socket?.cancel()
+        socket = null
+        serverOrigin = origin(this)?.value
+        attempts = 0
+        sticker = Sticker.IDLE
+        bubble?.destroy()
+        bubble = null
+        refreshBubble()
+        connect(reset = true)
+    }
+
+    override fun onDestroy() {
+        stopped = true
+        generation++
+        handler.removeCallbacksAndMessages(null)
+        if (running === this) running = null
+        bubble?.destroy()
+        bubble = null
+        runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(network) }
+        socket?.close(1000, null)
+        super.onDestroy()
+    }
+
+    private fun connect(reset: Boolean = false) {
+        if (stopped) return
+        if (reset) attempts = 0
+        val origin = origin(this) ?: return stop("no server set")
+        serverOrigin = origin.value
+        val cookie = CookieManager.getInstance().getCookie(origin.value)
+        if (cookie.isNullOrEmpty()) return stop("signed out")
+        val request = Request.Builder()
+            .url(origin.socketUrl)
+            .header("Cookie", cookie)
+            .header("Origin", origin.value)
+            .build()
+        socket = client.newWebSocket(request, Listener(origin, generation))
+    }
+
+    private fun stop(why: String) {
+        Log.w(TAG, "Stopped listening: $why")
+        stopSelf()
+    }
+
+    private fun retryLater() {
+        socket = null
+        if (stopped) return
+        val expected = generation
+        handler.postDelayed({ if (!stopped && generation == expected && socket == null) connect() }, backoffSeconds(attempts++) * 1000)
+    }
+
+    private inner class Listener(private val origin: ServerOrigin, private val expected: Long) : WebSocketListener() {
+        private fun current(webSocket: WebSocket): Boolean = !stopped && expected == generation && socket === webSocket
+
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            handler.post { if (current(webSocket)) attempts = 0 }
+        }
+
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            handler.post {
+                if (!current(webSocket)) return@post
+                Sticker.parse(text)?.let { shown ->
+                    sticker = shown
+                    bubble?.status(shown.mood, shown.counts)
+                    return@post
+                }
+                parseAlert(text)?.let { alert ->
+                    show(origin, alert)
+                    bubble?.alert(alert.session)
+                }
+            }
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            // Signed out (cookie expired or passkey removed): stop until the app signs in again.
+            handler.post {
+                if (!current(webSocket)) return@post
+                if (response?.code == 401 || response?.code == 403) stop("server answered ${response.code}")
+                else retryLater()
+            }
+        }
+
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            handler.post { if (current(webSocket)) retryLater() }
+        }
+    }
+
+    private val avatar by lazy { BitmapFactory.decodeResource(resources, R.drawable.nako) }
+
+    private fun show(origin: ServerOrigin, alert: Alert) {
+        val open = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            putExtra(MainActivity.EXTRA_SESSION, alert.session)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val tap = PendingIntent.getActivity(this, alert.session.hashCode(), open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val notification = NotificationCompat.Builder(this, ALERTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            // Her colour sticker beside the text; the status bar can only show the white paw.
+            .setLargeIcon(avatar)
+            .setContentTitle(alert.title)
+            .setContentText(alert.body)
+            // Expanded, the notification shows the whole reply preview, not one line of it.
+            .setStyle(NotificationCompat.BigTextStyle().bigText(alert.body))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .build()
+        val manager = getSystemService(NotificationManager::class.java)
+        // One notification per chat: a newer alert replaces the older one.
+        val id = alert.session?.hashCode() ?: ids.incrementAndGet()
+        manager.notify(id, notification)
+    }
+
+    companion object {
+        const val ALERTS = "alerts"
+        private const val TAG = "NakoAlerts"
+        const val QUIET = "connection"
+
+        /** The service while it runs, so the app can show or hide the bubble as it comes and goes. */
+        var running: AlertService? = null
+            private set
+
+        fun origin(context: Context): ServerOrigin? =
+            context.getSharedPreferences("shell", MODE_PRIVATE).getString("origin", null)?.let(ServerOrigin::parse)
+
+        fun channels(context: Context) {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(NotificationChannel(ALERTS, "Nako alerts", NotificationManager.IMPORTANCE_HIGH))
+            manager.createNotificationChannel(
+                NotificationChannel(QUIET, "Connection", NotificationManager.IMPORTANCE_MIN).apply {
+                    description = "Shown while the app listens for alerts. Safe to hide."
+                },
+            )
+        }
+
+        fun start(context: Context) {
+            ContextCompat.startForegroundService(context, Intent(context, AlertService::class.java))
+        }
+    }
+}

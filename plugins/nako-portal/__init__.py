@@ -1,0 +1,1381 @@
+"""The portal is a Hermes messaging platform, like Discord or Slack.
+
+The portal itself (the web app, sign-in, push, and the hub that turns gateway
+traffic into what the chat UI shows) runs as its own process, `dashboard/serve.py`,
+so the site stays up while the gateway restarts. This adapter starts that server
+when it isn't running and dials in over a loopback WebSocket (`link.py`), the way
+a bot connects to Discord. Each portal chat is a gateway thread
+(`portal:<chat id>`), so commands, approvals, cron delivery and `send_message`
+work here the way they do on any platform.
+
+`portal:inbox` is the Notifications thread: like a bot's DM, cron posts and other
+deliveries land there, and a reply has every post in context. `portal:reviews` is a
+second thread like it, for code-review status posts. `portal:new` starts a new thread
+with the message as its first post, so another platform can open one.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+import hashlib
+import importlib
+import importlib.util
+import json
+import logging
+import mimetypes
+import os
+import re
+import secrets
+import shutil
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from contextlib import closing
+from pathlib import Path
+
+log = logging.getLogger("hermes.portal")
+PLUGIN = "nako-portal"
+
+
+# Bootstrap the path loader without importing this directory as a Python package.
+_runtime_spec = importlib.util.spec_from_file_location("nako_portal_runtime", Path(__file__).with_name("plugin_runtime.py"))
+if _runtime_spec.name not in sys.modules:
+    _runtime = importlib.util.module_from_spec(_runtime_spec)
+    sys.modules[_runtime_spec.name] = _runtime
+    _runtime_spec.loader.exec_module(_runtime)
+_runtime = sys.modules[_runtime_spec.name]
+_load_sibling = _runtime._load_sibling
+_agent_name = _runtime._agent_name
+_secrets_api = _runtime._secrets_api
+_need_secrets = _runtime._need_secrets
+
+# Compatibility exports for callers that import helpers from the plugin entry point.
+_providers = _load_sibling("nako_portal_providers", "plugin_providers.py")
+_mcp = _load_sibling("nako_portal_mcp", "plugin_mcp.py")
+_adapter_module = _load_sibling("nako_portal_adapter", "plugin_adapter.py")
+_provider_accounts = _providers._provider_accounts
+LOOPBACK = _providers.LOOPBACK
+_provider_catalog = _providers._provider_catalog
+_ScopedEnv = _providers._ScopedEnv
+_account_status = _providers._account_status
+_add_accounts = _providers._add_accounts
+_oauth_routes = _providers._oauth_routes
+_default_endpoint = _providers._default_endpoint
+_provider_row = _providers._provider_row
+FLOW_HOME = _mcp.FLOW_HOME
+MCP_SIGNIN_TTL = _mcp.MCP_SIGNIN_TTL
+_flow_home = _mcp._flow_home
+_mcp_configs = _mcp._mcp_configs
+_codex_runtime = _mcp._codex_runtime
+_mcp_redact = _mcp._mcp_redact
+_mcp_tool_filters = _mcp._mcp_tool_filters
+_mcp_tool_on = _mcp._mcp_tool_on
+_mcp_row = _mcp._mcp_row
+_mcp_pending_row = _mcp._mcp_pending_row
+SecretSurface = _adapter_module.SecretSurface
+QUIET_DISPLAY = _adapter_module.QUIET_DISPLAY
+_quiet_display_defaults = _adapter_module._quiet_display_defaults
+
+
+AGENT = _agent_name()
+HOME_CHANNEL = "inbox"
+NEW_THREAD = "new"
+# A chat whose newest row is mid-turn this recently may still be running on its old surface.
+BUSY_WINDOW = 15 * 60
+CHAT_TITLE = "Notifications"
+REVIEWS_CHANNEL = "reviews"
+# Threads posts can be addressed to by name, each with the title it gets when first opened.
+CHANNELS = {HOME_CHANNEL: CHAT_TITLE, REVIEWS_CHANNEL: "Reviews"}
+DEFAULT_PORT = 8797
+DEFAULT_PROFILE = "default"
+# The one person portal threads belong to; passkey sign-in already decided who that is.
+OWNER = "owner"
+# Who every portal thread is with. Threads created ahead of their first message (a new chat, the
+# Notifications thread) must carry it too: a background process's wake is checked against it.
+PERSON = {"chat_name": "Nako", "user_id": OWNER, "user_name": "you"}
+INBOX_POLL = 2
+# How often the gateway half looks for turns Hermes runs without telling the adapter.
+TURN_SWEEP = 2
+# A turn's settled admission says how it went; the hub's words for those.
+TURN_OUTCOMES = {"completed": "success", "failed": "failure"}
+# How long an out-of-process send waits for the gateway to open a named thread (a few inbox polls).
+CHANNEL_WAIT = 4 * INBOX_POLL + 2
+# Transcripts kept projected for chats read lately; a long one holds a few MB.
+CACHED_THREADS = 8
+# Sessions that came in another way (Slack, cron, the CLI...): the portal lists them a page at a
+# time and only reads them. Tool sessions are a turn's helpers, not something anyone started.
+OUTSIDE_PAGE = 50
+NOT_OUTSIDE = ("portal", "tool")
+# How often the sweep rereads which other ways in have sessions (it reads what's running every time).
+OUTSIDE_SOURCES_EVERY = 15
+# How often the sweep repeats what's running elsewhere even when nothing changed, for a server
+# that started since it last said.
+OUTSIDE_REPEAT_EVERY = 15
+ROOT = Path(__file__).parent
+SERVER = ROOT / "dashboard" / "serve.py"
+# The server's code: a change here means the running server is stale and gets replaced.
+SERVER_CODE = [SERVER, *sorted((ROOT / "dashboard" / "portal").glob("*.py"))]
+# Don't start servers faster than this while one is still coming up.
+SPAWN_GAP = 30
+# Where a machine in a mesh dials its hub, and the folder it mirrors the hub's skills into.
+MESH_PATH = "/mesh"
+MESH_SKILLS = "mesh-skills"
+# Gateway commands with no use in a portal thread (platform setup, the portal's own list).
+UNSUPPORTED = {"start", "sethome", "topic", "platform", "commands"}
+
+
+def _portal(module):
+    """A module of the portal package (dashboard/portal), loaded once under a private name."""
+    package = "nako_portal_portal"
+    if package not in sys.modules:
+        here = ROOT / "dashboard" / "portal"
+        spec = importlib.util.spec_from_file_location(package, here / "__init__.py", submodule_search_locations=[str(here)])
+        loaded = importlib.util.module_from_spec(spec)
+        sys.modules[package] = loaded
+        spec.loader.exec_module(loaded)
+    return importlib.import_module(f"{package}.{module}")
+
+
+def _deliver(chat_id, text):
+    """Out-of-process sends (cron with no gateway running) wait in the store for the adapter."""
+    from hermes_constants import get_hermes_home
+
+    store = _portal("store").Store(get_hermes_home() / "nako-portal" / "portal.db")
+    try:
+        return store.deliver(str(chat_id or HOME_CHANNEL), str(text))
+    finally:
+        store.db.close()
+
+
+def _source(chat, profile=None, **fields):
+    """A portal thread as the gateway names it. A named profile namespaces the thread's key and
+    runs its turns in that profile's home; None is the default profile, keyed as it always was."""
+    from gateway.config import Platform
+    from gateway.session import SessionSource
+
+    return SessionSource(platform=Platform("portal"), chat_id=chat, chat_type="dm", profile=_named(profile),
+                         **(PERSON | fields))
+
+
+def _own_origins(session_store):
+    """Give portal threads stored without their person (plugin releases before PERSON) the one
+    their messages carry. Hermes sets a thread's origin once, when it's created, and rebuilds a
+    finished background process's wake from it; with no person on it the wake doesn't match the
+    thread's last message and is refused (``admission_conflict``), so the agent never hears back."""
+    import dataclasses
+
+    try:
+        with session_store._lock:
+            stale = [e for e in session_store._entries.values()
+                     if e.origin is not None and getattr(e.origin.platform, "value", None) == "portal"
+                     and e.origin.user_id is None]
+            for entry in stale:
+                entry.origin = dataclasses.replace(entry.origin, **PERSON)
+        if stale:
+            session_store._save_entries()
+        return len(stale)
+    except Exception:
+        log.exception("portal: could not repair stored threads; background process wakes may be refused")
+        return 0
+
+
+def _named(profile):
+    return None if not profile or profile == DEFAULT_PROFILE else profile
+
+
+def _ensure_chat(session_store, chat=HOME_CHANNEL, title=CHAT_TITLE, profile=None):
+    """The gateway session for one portal thread, created now if it doesn't exist. Cron's mirror only
+    appends to a session that already exists, so the Notifications thread must be there first."""
+    if session_store is None:
+        return None
+    source = _source(chat, profile)
+    entry = session_store.get_or_create_session(source, touch_activity=False)
+    # The thread's own profile store, whichever profile the caller is scoped to.
+    owner = getattr(session_store, "_persistence_for_key", None)
+    if owner is not None:
+        store = owner(entry.session_key)
+        if store is not None:
+            record = store.sessions.get(entry.session_id)
+            if record is not None:
+                if title and not record.title:
+                    store.sessions.set_title(entry.session_id, title)
+                if chat in CHANNELS and record.archived:
+                    store.sessions.set_archived(entry.session_id, False)
+        return entry.session_id
+    owner = getattr(session_store, "_db_for_key", None)
+    db = owner(entry.session_key) if owner else getattr(session_store, "_db", None)
+    if title and db is not None and not db.get_session_title(entry.session_id):
+        db.set_session_title(entry.session_id, title)
+    if chat in CHANNELS and db is not None and (db.get_session(entry.session_id) or {}).get("archived"):
+        # An archived Notifications or Reviews chat drops out of the sidebar list and its row goes dead.
+        db.set_session_archived(entry.session_id, False)
+    return entry.session_id
+
+
+def _plugin_settings():
+    from hermes_cli.config import load_config
+
+    return load_config().get("plugins", {}).get("entries", {}).get(PLUGIN, {}).get("settings", {}) or {}
+
+
+def _machine_name():
+    """This machine's name in a mesh unless settings give one: its hostname, cleaned up."""
+    import socket
+
+    name = re.sub(r"[^a-z0-9-]+", "-", socket.gethostname().split(".")[0].lower()).strip("-")
+    return (name or "machine")[:32]
+
+
+def _mesh(entry, home, origin=None):
+    """The mesh part of the server's settings.
+
+    A machine in someone's mesh (`mesh_hub`, the hub portal's URL) dials in with NAKO_MESH_TOKEN
+    and mirrors the hub's skills into `mesh-skills`. Any other portal is a hub, with no machines
+    until one is added: machines reach it on the portal's own address (`origin`, or
+    `mesh_address`), and `mesh_listen` (host:port) adds a listener of its own, e.g. on a private
+    network. It shares this home's skills, minus `skill_sync_exclude`."""
+    hub = str(entry.get("mesh_hub") or "").strip()
+    if not hub:
+        listen = str(entry.get("mesh_listen") or "").strip() or None
+        exclude = entry.get("skill_sync_exclude") or []
+        if isinstance(exclude, str):
+            exclude = [part.strip() for part in exclude.split(",")]
+        address = str(entry.get("mesh_address") or "").strip().rstrip("/") or (f"http://{listen}" if listen and not origin else origin)
+        return {
+            "name": str(entry.get("mesh_name") or _machine_name()),
+            "address": address,
+            "listen": listen,
+            "skills_dir": str(home / "skills"),
+            "skills_exclude": sorted({str(x) for x in exclude if str(x).strip()}),
+            "plugin": _plugin_origin(entry),
+        }
+    if hub:
+        token = os.environ.get("NAKO_MESH_TOKEN") or _env_value(home, "NAKO_MESH_TOKEN")
+        if not token:
+            raise RuntimeError("Set NAKO_MESH_TOKEN in .env to the token the hub's `hermes mesh add` printed")
+        hub = hub.rstrip("/")
+        if not hub.endswith(MESH_PATH):
+            hub += MESH_PATH
+        return {
+            "hub": hub,
+            "name": str(entry.get("mesh_name") or _machine_name()),
+            "token": token,
+            "skills_into": str(home / MESH_SKILLS),
+            # Off: the server leaves a gateway that went away alone instead of starting it again.
+            "watchdog": str(entry.get("mesh_gateway_watchdog", True)).lower() not in ("false", "0", "no", "off"),
+        }
+
+
+def _plugin_origin(entry):
+    """Where a new machine installs this plugin from, and the commit this hub runs, so both sides
+    run the same code. A copy installed from a local path points machines at the public repo."""
+
+    def git(*args):
+        try:
+            done = subprocess.run(["git", "-C", str(ROOT), *args], check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return done.stdout.strip() if done.returncode == 0 else ""
+
+    source = str(entry.get("mesh_plugin_source") or "").strip()
+    from hermes_cli.plugins import get_bundled_plugins_dir
+
+    if ROOT.resolve().parent == get_bundled_plugins_dir().resolve():
+        return {
+            "source": source or "https://github.com/QuillDev/nako-portal",
+            "ref": "1a659c32cc733f52f4e6eb364b247ad37d11f187",
+        }
+    if not source:
+        remote = git("remote", "get-url", "origin")
+        source = remote if remote.startswith(("https://", "git@", "ssh://")) else ""
+    ref = git("rev-parse", "HEAD")
+    return {"source": source or None, "ref": ref if re.fullmatch(r"[0-9a-f]{40}", ref or "") else None}
+
+
+def _env_value(home, key):
+    """One line of `.env`, read plainly (the gateway may have started before it was written)."""
+    try:
+        for line in (home / ".env").read_text(encoding="utf-8-sig").splitlines():
+            name, _, value = line.partition("=")
+            if name.strip() == key:
+                return value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return None
+
+
+def _settings():
+    from hermes_constants import get_hermes_home
+
+    entry = _plugin_settings()
+    home = get_hermes_home().resolve()
+    port = int(entry.get("port") or DEFAULT_PORT)
+    origin = str(entry.get("origin") or "").strip().rstrip("/")
+    mesh = _mesh(entry, home, origin if origin.startswith("https://") else None)
+    if not origin and mesh.get("hub"):
+        # A machine in a mesh is used through its hub; its own site only answers on loopback.
+        origin = f"http://127.0.0.1:{port}"
+    elif not origin.startswith("https://"):
+        raise RuntimeError("Set plugins.entries.nako-portal.settings.origin to the portal's https URL")
+    apps = {
+        "android_release_dir": entry.get("android_release_dir") or None,
+        "android_cert_sha256": entry.get("android_cert_sha256") or None,
+        "desktop_release_dir": entry.get("desktop_release_dir") or None,
+        # Optional: a command printing JSON about what runs on this machine (environments.py).
+        "environments_command": entry.get("environments_command") or None,
+        # Optional: run with an environment's name to stop it; the page then offers a Stop button.
+        "environments_stop_command": entry.get("environments_stop_command") or None,
+        "mesh": mesh,
+    }
+    contact = str(entry.get("contact") or "mailto:owner@localhost")
+    return home, origin.rstrip("/"), port, contact, apps
+
+
+def _hermes_build():
+    """Identify the gateway's booted revision, not the checkout's current HEAD."""
+    try:
+        from hermes_cli.version_info import get_version_info
+    except ImportError:
+        return None
+    info = get_version_info()
+    if info.base_version == "unknown":
+        return None
+    full = info.derived_version
+    if info.commit and not info.dirty:
+        import hermes_cli
+
+        # Hermes's display version measures distance from stable, even on a tagged canary.
+        try:
+            tags = subprocess.run(
+                ["git", "tag", "--points-at", info.commit, "--list", f"v{info.base_version}+canary.*"], check=False,
+                cwd=Path(hermes_cli.__file__).resolve().parent,
+                capture_output=True, text=True, timeout=3,
+            ).stdout.splitlines()
+        except (OSError, subprocess.SubprocessError):
+            tags = []
+        if tags:
+            full = max(tags)[1:]
+    return {"version": info.base_version, "build": full}
+
+
+def _server_config(home, origin, port, contact, apps):
+    """What the server runs with, written to a file it reads. `code` names this code and these
+    settings, so a server started from anything else is replaced."""
+    data = home / "nako-portal"
+    # `home`: whose session store the server reads chats from while no gateway is connected.
+    # `hermes`: the command the server runs to restart or update this machine's agent.
+    # `agent`: what that agent calls itself, which names its update marker and background service.
+    config = {"data": str(data), "home": str(home), "hermes": _hermes_command(), "agent": AGENT, "origin": origin, "port": port, "contact": contact, **apps}
+    digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode())
+    for path in SERVER_CODE:
+        digest.update(path.name.encode() + b"\0" + path.read_bytes())
+    config["code"] = digest.hexdigest()[:24]
+    path = data / "server.json"
+    data.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    return path, config
+
+
+def _hermes_command():
+    """The agent's command as this machine runs it (argv), for the server; None if not found."""
+    found = shutil.which(AGENT)
+    return [found] if found else None
+
+
+def _spawn_server(config_path, data):
+    """Start the portal server where a gateway restart can't take it down: its own systemd user
+    unit when the gateway is a systemd service (which kills the service's whole cgroup on
+    stop), otherwise its own session."""
+    command = [sys.executable, str(SERVER), str(config_path)]
+    # The gateway's interpreter finds aiohttp and cryptography through the import path Hermes set
+    # up at launch, not through its own site-packages; the server gets the same path.
+    path = os.pathsep.join(p for p in sys.path if p and os.path.isabs(p) and os.path.isdir(p))
+    if os.environ.get("INVOCATION_ID") and shutil.which("systemd-run"):
+        unit = f"nako-portal-{int(time.time())}"
+        try:
+            started = subprocess.run(
+                ["systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}", "--description=Nako portal", f"--setenv=PYTHONPATH={path}", *command], check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if started.returncode == 0:
+                log.info("Nako portal: started the server as %s.service", unit)
+                return
+            log.warning("Nako portal: systemd-run failed (%s); starting the server directly", started.stderr.strip())
+        except (OSError, subprocess.SubprocessError):
+            log.warning("Nako portal: systemd-run failed; starting the server directly", exc_info=True)
+    with open(data / "server.log", "ab") as out:
+        env = {**os.environ, "PYTHONPATH": path}
+        if os.name == "nt":
+            # Windows has no sessions: a detached process in its own group outlives the gateway.
+            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env, creationflags=flags, close_fds=True)
+        else:
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env, start_new_session=True, close_fds=True)
+    log.info("Nako portal: started the server (log in %s)", data / "server.log")
+
+
+def _local_token(data):
+    """The credential for the loopback API: kept across restarts so scripts need no refresh."""
+    path = data / "local-token"
+    if not path.exists():
+        data.mkdir(parents=True, exist_ok=True)
+        path.touch(mode=0o600)
+        path.write_text(secrets.token_urlsafe(32) + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    return path.read_text(encoding="utf-8-sig").strip()
+
+
+class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
+    """The hub's view of Hermes: the gateway's session store and this adapter's inbound path.
+
+    The portal shows one profile at a time (Settings). Its chats, history and new threads all
+    come from that profile's own home and state.db, and its turns run as that profile, so
+    switching is a clean change of everything the portal shows."""
+
+    def __init__(self, adapter, home):
+        self.adapter = adapter
+        self.root = home
+        self.profile = DEFAULT_PROFILE
+        # chat -> the profile its thread lives in, so a reply goes back to the right one.
+        self.owner = {}
+        # (home, session) -> (revision, transcript) for chats read lately; see thread().
+        self.threads = {}
+        self.threads_lock = threading.Lock()
+        # MCP servers: catalog installs still running or failed ((home, name) -> state), and
+        # browser sign-ins waiting for their redirect (flow id -> flow).
+        self.mcp_installs = {}
+        self.mcp_flows = {}
+        self.mcp_lock = threading.Lock()
+
+    def _mcp_changed(self):
+        _hub_tell("mcp_changed")
+
+    @property
+    def store(self):
+        return self.adapter._session_store
+
+    @property
+    def db(self):
+        return self.store._db
+
+    def _persistence(self):
+        resolve = getattr(self.store, "_scoped_persistence", None)
+        if resolve is None:
+            return None
+        store = resolve()
+        if store is None:
+            raise RuntimeError("Hermes session storage is temporarily unavailable")
+        return store
+
+    def _list_sessions(self, *, source=None, exclude_sources=(), limit, offset=0,
+                       min_message_count=0, archived_only=False, include_archived=False, include_pinned=False):
+        store = self._persistence()
+        if store is None:
+            return self.db.list_sessions_rich(
+                source=source, exclude_sources=list(exclude_sources), limit=limit, offset=offset,
+                min_message_count=min_message_count, archived_only=archived_only, include_archived=include_archived,
+                include_pinned=include_pinned, order_by_last_active=True, compact_rows=True)
+        from persistence.conversation.sessions import SessionOrder, SessionQuery, SessionWindow
+
+        query = SessionQuery(sources=(source,) if source else None, exclude_sources=tuple(exclude_sources),
+                             min_message_count=min_message_count, archived_only=archived_only,
+                             include_archived=include_archived, include_pinned=include_pinned,
+                             order=SessionOrder.LAST_ACTIVE)
+        return [row.as_list_row() for row in store.sessions.list_sessions(
+            query, SessionWindow(limit=limit, offset=offset), compact_rows=True)]
+
+    # Profiles
+
+    def homes(self):
+        """The profiles this gateway serves, by name. Without multiplexing it serves only its own."""
+        try:
+            from hermes_cli.config import load_config
+            from hermes_cli.profiles import profiles_to_serve
+
+            multiplex = bool((load_config().get("gateway") or {}).get("multiplex_profiles"))
+            served = dict(profiles_to_serve(multiplex=multiplex)) if multiplex else {}
+        except Exception:
+            log.warning("portal: could not list served profiles", exc_info=True)
+            served = {}
+        return {DEFAULT_PROFILE: self.root, **{k: Path(v) for k, v in served.items() if k != DEFAULT_PROFILE}}
+
+    def profiles(self):
+        return {"profile": self.profile, "profiles": list(self.homes())}
+
+    def use_profile(self, name):
+        if name not in self.homes():
+            raise ValueError("That profile isn't served by this gateway")
+        self.profile = name
+        _ensure_chat(self.store, HOME_CHANNEL, CHAT_TITLE, name)
+        return self.profiles()
+
+    def _home(self, profile=None):
+        selected = profile or self.profile
+        return self.homes().get(selected, self.root)
+
+    def home_of(self, profile):
+        """The home a turn for ``profile`` runs in (None is the default profile)."""
+        return self.homes().get(profile or DEFAULT_PROFILE, self.root)
+
+    def _scoped(self, fn, *args, profile=None, home=None):
+        """Run ``fn`` with Hermes pointed at one profile's home, so the store reads its state.db.
+        Reach ``self.db`` inside ``fn``: it resolves to the profile's store only once scoped."""
+        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+        token = set_hermes_home_override(str(home if home is not None else self._home(profile)))
+        try:
+            return fn(*args)
+        finally:
+            reset_hermes_home_override(token)
+
+    def _read(self, sql, args=(), profile=None):
+        state = self._home(profile) / "state.db"
+        if not state.exists():
+            return []
+        with closing(sqlite3.connect(f"file:{state}?mode=ro", uri=True, timeout=10)) as db:
+            return db.execute(sql, args).fetchall()
+
+    def _origin(self):
+        """The profile whose work is calling in: a turn or cron run is scoped to its profile's
+        home; a request from the web app isn't scoped and means the profile on screen."""
+        from hermes_constants import get_hermes_home_override
+
+        override = get_hermes_home_override()
+        if override:
+            here = Path(override).resolve()
+            for name, home in self.homes().items():
+                if Path(home).resolve() == here:
+                    return name
+        return self.profile
+
+    # Chats
+
+    def search_sessions(self, query):
+        return _portal("search").search_sessions(self._home(), query)
+
+    def sessions(self):
+        live = {
+            sid: (chat, pinned)
+            for sid, chat, pinned in self._read(
+                "SELECT id, chat_id, pinned FROM sessions WHERE source='portal' AND ended_at IS NULL AND COALESCE(archived, 0)=0"
+            )
+        }
+        rows = self._scoped(
+            lambda: self._list_sessions(source="portal", limit=300, include_pinned=True)
+        )
+        out = []
+        for row in rows:
+            if row["id"] in live:
+                chat, pinned = live[row["id"]]
+                out.append({**row, "chat_id": chat, "pinned": bool(pinned)})
+        return out
+
+    def archived_sessions(self):
+        """Archived portal chats that can come back: still their thread's chat (not ended)."""
+        open_ = {
+            sid
+            for (sid,) in self._read(
+                "SELECT id FROM sessions WHERE source='portal' AND ended_at IS NULL AND COALESCE(archived, 0)=1"
+            )
+        }
+        rows = self._scoped(
+            lambda: self._list_sessions(source="portal", limit=300, archived_only=True)
+        )
+        return [row for row in rows if row["id"] in open_]
+
+    def outside_sessions(self, source=None, offset=0):
+        """Sessions that came in some other way than the portal (Slack, Discord, cron, the CLI...),
+        latest activity first, a page at a time. `source` keeps one way in."""
+        rows = self._scoped(
+            lambda: self._list_sessions(
+                source=source or None,
+                exclude_sources=list(NOT_OUTSIDE),
+                # Archived in another client is still something that happened.
+                include_archived=True,
+                limit=OUTSIDE_PAGE,
+                offset=max(0, int(offset or 0)),
+            )
+        )
+        return [
+            {
+                "id": row["id"],
+                "title": row.get("title") or row.get("preview") or "untitled",
+                "source": row.get("source") or "",
+                "last_active": row.get("last_active") or row.get("started_at") or 0,
+            }
+            for row in rows
+            if row.get("source") not in NOT_OUTSIDE
+        ]
+
+    def outside_sources(self):
+        """The other ways in this profile has sessions from, by Hermes's source name."""
+        try:
+            rows = self._read(
+                "SELECT DISTINCT source FROM sessions WHERE source IS NOT NULL AND source NOT IN (?, ?) "
+                "AND COALESCE(hidden, 0)=0 ORDER BY source",
+                NOT_OUTSIDE,
+            )
+        except sqlite3.OperationalError:  # a Hermes from before hidden sessions
+            rows = self._read(
+                "SELECT DISTINCT source FROM sessions WHERE source IS NOT NULL AND source NOT IN (?, ?) ORDER BY source",
+                NOT_OUTSIDE,
+            )
+        return [source for (source,) in rows]
+
+    def outside_running(self):
+        """Those sessions with a turn Hermes is running right now, by the admission it runs."""
+        try:
+            rows = self._read(
+                "SELECT DISTINCT s.id FROM sessions s JOIN session_admissions a ON a.target_session_id = s.id "
+                "WHERE a.status='started' AND s.source NOT IN (?, ?)",
+                NOT_OUTSIDE,
+            )
+        except sqlite3.OperationalError:  # a Hermes from before the durable queue
+            return []
+        return sorted(sid for (sid,) in rows)
+
+    def thread(self, session, cache=True):
+        from tui_gateway.server import (
+            _history_to_messages,  # bound copy; the session_history original lacks server globals
+        )
+
+        found = self._read("SELECT source FROM sessions WHERE id=?", (session,))
+        # Any session reads (one from Slack or cron opens read-only); a turn's tool sessions don't.
+        if not found or found[0][0] == "tool":
+            return None
+        source = found[0][0] or "portal"
+        home = self._home()
+
+        def read():
+            store = self._persistence()
+            db = self.db if store is None else None
+            # Reading and projecting a long transcript takes the better part of a second, and every
+            # open, refresh and older page reads it again. Hermes's revision moves on any append,
+            # undo, compaction or in-place rewrite, so the last projection stands while it holds.
+            if store is not None:
+                revision = store.messages.conversation_revision(session, include_lineage=True)
+            else:
+                revision = db.conversation_revision(session, include_ancestors=True) if hasattr(db, "conversation_revision") else None
+            key = (str(home), session)
+            with self.threads_lock:
+                cached = self.threads.get(key)
+            if revision is not None and cached is not None and cached[0] == revision:
+                messages = cached[1]
+            else:
+                if store is not None:
+                    messages = _portal("offline").messages_from_store(home, session, store)
+                else:
+                    # Display reads include the turns that compaction summarized.
+                    try:
+                        history = db.get_messages_as_conversation(session, include_ancestors=True, include_row_ids=True, include_compacted=True)
+                    except TypeError:  # a Hermes from before display reads
+                        history = db.get_messages_as_conversation(session, include_ancestors=True, include_row_ids=True)
+                    offline = _portal("offline")
+                    messages = offline.with_results(_history_to_messages(offline.original_user_messages(home, history), profile_home=home), history)
+                if cache and revision is not None:
+                    with self.threads_lock:
+                        self.threads.pop(key, None)
+                        self.threads[key] = (revision, messages)
+                        while len(self.threads) > CACHED_THREADS:
+                            self.threads.pop(next(iter(self.threads)))
+            if store is not None:
+                record = store.sessions.get(session)
+                title = record.title if record is not None else None
+            else:
+                title = db.get_session_title(session)
+            return {"title": title or "", "messages": list(messages), "source": source}
+
+        return self._scoped(read)
+
+    def chat_of(self, session):
+        rows = self._read("SELECT chat_id FROM sessions WHERE id=? AND source='portal'", (session,))
+        chat = rows[0][0] if rows and rows[0][0] else None
+        if chat:
+            self.owner[chat] = self.profile
+        return chat
+
+    async def restart_work(self):
+        runner = self.adapter.gateway_runner
+        units = runner._describe_active_work()
+        active = []
+        for profile in self.homes():
+            rows = await asyncio.to_thread(self._read, "SELECT s.id,s.session_key,s.title,a.admission_id FROM sessions s "
+                "JOIN session_admissions a ON a.target_session_id=s.id WHERE s.source='portal' "
+                "AND s.ended_at IS NULL AND a.status='started'", (), profile)
+            active.extend({"session": sid, "key": key, "title": title or sid, "turn": turn, "profile": profile}
+                          for sid, key, title, turn in rows)
+        by_key = {r['key']: r for r in active}
+        for unit in units:
+            row = by_key.get(unit.get('session')) if unit['kind'] == 'chat' else None
+            if row:
+                row['tool'] = unit.get('current_tool')
+            else:
+                active.append({'title': str(unit.get('job_id') or unit.get('session') or unit['kind']),
+                               'tool': unit['kind']})
+        return {'instance': str(os.getpid()), 'work': active}
+
+    async def restart_thread(self, row, resume):
+        profile, session, turn = row['profile'], row['session'], row['turn']
+        matches = await asyncio.to_thread(self._read, "SELECT s.chat_id,a.status,a.outcome FROM sessions s JOIN session_admissions a "
+            "ON a.target_session_id=s.id WHERE s.id=? AND a.admission_id=? AND s.ended_at IS NULL "
+            "AND s.source='portal'", (session, turn), profile)
+        if not matches:
+            return 'Needs review'
+        chat, status, outcome = matches[0]
+        request = 'portal-restart:' + turn
+        if resume:
+            prior = await asyncio.to_thread(self._read, 'SELECT status,outcome FROM session_admissions WHERE target_session_id=? AND request_id=?',
+                               (session, request), profile)
+            if prior:
+                state, result = prior[0]
+                if state == 'started' or result == 'completed':
+                    return 'Resumed'
+                return 'Resume queued' if state == 'queued' else 'Needs review'
+            if resume == 'check':
+                return 'Needs review'
+            if row.get('tool'):
+                return 'Needs review'
+        if resume and outcome == 'completed':
+            return 'Finished before pause'
+        if resume and (status != 'terminal' or outcome not in ('interrupted', 'cancelled')):
+            return 'Needs review'
+        if not resume and status != 'started':
+            return 'Finished before pause'
+        if resume and await asyncio.to_thread(self._read, 'SELECT 1 FROM session_admissions WHERE target_session_id=? AND seq > '
+                '(SELECT seq FROM session_admissions WHERE admission_id=?) LIMIT 1', (session, turn), profile):
+            return 'Newer turn exists'
+        self.owner[chat] = profile
+        await self._inbound_event(chat, ('Continue the interrupted task from the existing conversation. Check the outcome '
+            'of any pending action before proceeding. Never repeat an uncertain external action; ask instead.'
+            if resume else '/stop'), [], message_id=request if resume else None)
+        return await self.restart_thread(row, 'check') if resume else 'Pause requested'
+
+    def running_turns(self):
+        """Every portal chat with a turn Hermes is running right now, in every served profile, by
+        the admission that turn runs: Hermes's own record, so a turn it starts without the adapter
+        hearing (a queued message run after the one before it, one held over a restart) counts."""
+        running = {}
+        for profile in self.homes():
+            try:
+                rows = self._read(
+                    "SELECT s.chat_id, a.admission_id FROM sessions s JOIN session_admissions a ON a.target_session_id = s.id "
+                    "WHERE s.source='portal' AND s.ended_at IS NULL AND s.chat_id IS NOT NULL AND a.status='started'",
+                    (),
+                    profile,
+                )
+            except sqlite3.OperationalError:  # a Hermes from before the durable queue: hooks cover every turn
+                continue
+            running.update(rows)
+        return running
+
+    def turn_outcome(self, admission):
+        """How a finished admission went, in the hub's words (an interrupted one is neither)."""
+        for profile in self.homes():
+            try:
+                rows = self._read("SELECT outcome FROM session_admissions WHERE admission_id=?", (admission,), profile)
+            except sqlite3.OperationalError:
+                continue
+            if rows:
+                return TURN_OUTCOMES.get(rows[0][0], "cancelled")
+        return "cancelled"
+
+    def title_of(self, session):
+        """Any session's title in the shown profile, portal or not: the thread a message came from."""
+        rows = self._read("SELECT title FROM sessions WHERE id=?", (session,))
+        return (rows[0][0] or "") if rows else None
+
+    def session_of(self, chat):
+        """The open thread for a chat: in the calling profile first, then any other (a turn that
+        started before a switch still finds its thread)."""
+        first = self._origin()
+        for profile in [first, *(p for p in self.homes() if p != first)]:
+            rows = self._read(
+                "SELECT id FROM sessions WHERE source='portal' AND chat_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+                (chat,),
+                profile,
+            )
+            if rows:
+                return rows[0][0]
+        return None
+
+    def ensure_chat(self, chat, title=None):
+        return _ensure_chat(self.store, chat, title, self.profile)
+
+    async def new_thread(self, chat, title, cwd=None):
+        profile = self.profile
+        self.owner[chat] = profile
+
+        def create():
+            directory = Path(cwd).expanduser().resolve() if cwd else None
+            if directory is not None and not directory.is_dir():
+                raise ValueError("Working directory does not exist")
+            session = _ensure_chat(self.store, chat, title, profile)
+            if directory is not None:
+                entry = self.store.get_or_create_session(_source(chat, profile), touch_activity=False)
+                self.store.set_session_metadata(entry.session_key, "terminal_cwd", str(directory))
+            return session
+
+        return await asyncio.to_thread(create)
+
+    async def adopt(self, chat, session):
+        return await asyncio.to_thread(self._adopt, chat, session)
+
+    def _adopt(self, chat, session):
+        """Move another surface's chat (a Desktop thread) into a new portal thread, keeping its id
+        and transcript: the same repoint Hermes's own /handoff does for a messaging platform."""
+        rows = self._read(
+            "SELECT source, ended_at, COALESCE(archived, 0) FROM sessions WHERE id=?", (session,)
+        )
+        if not rows:
+            raise ValueError("No chat with that id")
+        surface, _, archived = rows[0]
+        if surface == "portal":
+            raise ValueError("That chat is already in the portal")
+        if archived:
+            raise ValueError("That chat is archived")
+        newest = self._read(
+            "SELECT role, finish_reason, timestamp FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1", (session,)
+        )
+        if newest:
+            role, finish, stamp = newest[0]
+            mid_turn = role in ("user", "tool") or finish == "tool_calls"
+            if mid_turn and (stamp or 0) > time.time() - BUSY_WINDOW:
+                raise ValueError("That chat is in the middle of a turn; hand it off once it finishes")
+
+        def repoint():
+            thread = _source(chat, self.profile)
+            key = self.store.get_or_create_session(thread, touch_activity=False).session_key
+            return self.store.switch_session(key, session, preserve_prompt_pin=False)
+
+        if self._scoped(repoint) is None:
+            raise ValueError("Couldn't move that chat into the portal")
+        self.owner[chat] = self.profile
+        return session
+
+    async def inbound(self, chat, text, files):
+        return await self._inbound_event(chat, text, files)
+
+    async def _inbound_event(self, chat, text, files, *, message_id=None):
+        from gateway.platforms.base import cache_document_from_bytes, cache_image_from_bytes
+        from gateway.platforms.event import MessageEvent, MessageType
+
+        paths, kinds, kind = [], [], MessageType.TEXT
+        for upload in files:
+            mime = upload.get("content_type") or mimetypes.guess_type(upload["filename"])[0] or "application/octet-stream"
+            if mime.startswith("image/"):
+                paths.append(cache_image_from_bytes(upload["data"], Path(upload["filename"]).suffix or ".png"))
+                kind = MessageType.PHOTO
+            else:
+                paths.append(cache_document_from_bytes(upload["data"], upload["filename"]))
+                if kind != MessageType.PHOTO:
+                    kind = MessageType.DOCUMENT
+            kinds.append(mime)
+        if text.startswith("/"):
+            kind = MessageType.COMMAND
+        source = self.adapter.build_source(chat_id=chat, chat_type="dm", **PERSON)
+        source = dataclasses.replace(source, profile=_named(self.owner.get(chat, self.profile)))
+        event = MessageEvent(text=text, message_type=kind, source=source, message_id=message_id or uuid.uuid4().hex, media_urls=paths, media_types=kinds)
+        await self._carrier(source.profile).handle_message(event)
+
+    def _carrier(self, profile):
+        """The adapter the gateway accepts a turn in ``profile`` from: the one that profile owns.
+        Hermes refuses a turn whose profile isn't its adapter's owner, so another profile's
+        message goes through the portal adapter that profile loaded. Without one (a profile
+        that doesn't load this plugin) it stays with this adapter, as before."""
+        if profile:
+            runner = getattr(self.adapter, "gateway_runner", None)
+            own = (getattr(runner, "_profile_adapters", None) or {}).get(profile) or {}
+            carrier = own.get(self.adapter.platform)
+            if carrier is not None:
+                return carrier
+        return self.adapter
+
+    async def resolve(self, request, result):
+        private = request.get("private") or {}
+        if request["method"] == "secret":
+            # Straight into the vault of the profile that asked; the agent hears only "stored".
+            api = _secrets_api()
+            if api is None or not api.answer(private["secret_request"], result.get("value"), declined=bool(result.get("declined"))):
+                raise ValueError("That request is no longer open")
+            return
+        if request["method"] == "approval":
+            from tools.approval import resolve_gateway_approval
+
+            resolve_gateway_approval(private["session_key"], result["choice"])
+        else:
+            from tools.clarify_gateway import resolve_gateway_clarify
+
+            resolve_gateway_clarify(private["clarify_id"], next(iter(result["answers"].values()), None) or "")
+
+    # Secrets: the agent-secrets plugin keeps them; Settings and shared cards read them here.
+
+    def secrets(self):
+        api = _secrets_api()
+        return None if api is None else self._scoped(api.names)
+
+    def secret(self, name):
+        api = _secrets_api()
+        return None if api is None else self._scoped(api.get, name)
+
+    def set_secret(self, name, value, note=None):
+        api = _need_secrets()
+        self._scoped(lambda: api.put(name, value, note=note, origin="you"))
+
+    def remove_secret(self, name):
+        return self._scoped(_need_secrets().remove, name)
+
+
+    def _set_session_value(self, name, session, value):
+        def write():
+            store = self._persistence()
+            if store is not None:
+                getattr(store.sessions, f"set_{name}")(session, value)
+            else:
+                getattr(self.db, f"set_session_{name}")(session, value)
+        self._scoped(write)
+
+    def set_title(self, session, title):
+        self._set_session_value("title", session, title)
+
+    def set_archived(self, session, archived):
+        self._set_session_value("archived", session, archived)
+
+    def is_archived(self, session):
+        rows = self._read("SELECT COALESCE(archived, 0) FROM sessions WHERE id=? AND source='portal'", (session,))
+        return bool(rows and rows[0][0])
+
+    def set_pinned(self, session, pinned):
+        self._set_session_value("pinned", session, pinned)
+
+    def sign_off(self, reply):
+        """A few proud words about what the turn did, from a small fast model. The model is
+        config.yaml's `auxiliary.portal_signoff` (provider/model/reasoning_effort/timeout)."""
+        from agent.auxiliary_client import call_llm
+
+        response = call_llm(
+            task="portal_signoff",
+            messages=[{"role": "system", "content": SIGN_OFF_PROMPT}, {"role": "user", "content": f"<reply>\n{reply[-SIGN_OFF_REPLY_CHARS:]}\n</reply>"}],
+            max_tokens=120,
+        )
+        line = " ".join(str(response.choices[0].message.content or "").split()).strip("\"'` ").lower()
+        if len(line) > SIGN_OFF_MAX_CHARS:
+            line = line[:SIGN_OFF_MAX_CHARS].rsplit(" ", 1)[0] + "…"
+        return line or None
+
+    def sign_off_models(self):
+        return _model_providers()
+
+    # The shown profile's own model: what its turns run on (config.yaml `model:`).
+
+    def _profile_scope(self, home=None):
+        """Config, credentials and paths of the shown profile, the way a turn there sees them."""
+        from gateway.run import _profile_runtime_scope
+
+        return _profile_runtime_scope(Path(home if home is not None else self._home()))
+
+    def models(self):
+        with self._profile_scope():
+            return _model_providers()
+
+    def _model_client(self, profile=None):
+        api = sys.modules.get("model_controls")
+        if api is None:
+            raise ValueError("Install and enable the model-controls plugin")
+        profile = profile or self.profile
+        return api.Client(home=self.home_of(profile), runner=self.adapter.gateway_runner,
+            session_chat=self.chat_of, source=lambda chat: _source(chat, profile),
+            active=getattr(self.adapter, "_active_sessions", {}))
+
+    def model(self):
+        if sys.modules.get("model_controls") is None:
+            return None
+        return self._model_client().model()
+
+    def usage(self):
+        """Plan limits by provider and account; None when model-controls can't report them."""
+        api = sys.modules.get("model_controls")
+        if api is None or not hasattr(api.Client, "usage"):
+            return None
+        return self._model_client().usage()
+
+    def use_reset(self, provider, account="", force=False, grant=""):
+        """Redeem a banked usage reset through model-controls; None when unsupported."""
+        api = sys.modules.get("model_controls")
+        if api is None or not hasattr(api.Client, "use_reset"):
+            return None
+        client = self._model_client()
+        if grant:
+            return client.use_reset(provider, account=account, force=force, grant=grant)
+        return client.use_reset(provider, account=account, force=force)
+
+    def model_options(self, provider, model):
+        from hermes_cli.config import get_compatible_custom_providers, load_config
+        from hermes_cli.model_switch import switch_model
+
+        controls = sys.modules.get("model_controls")
+        if controls is None:
+            raise ValueError("Install and enable the model-controls plugin")
+        with self._profile_scope():
+            config = load_config()
+            current = config.get("model") if isinstance(config.get("model"), dict) else {}
+            route = switch_model(raw_input=model, explicit_provider=provider, is_global=False,
+                current_model=current.get("default") or "", current_provider=current.get("provider") or "",
+                current_base_url=current.get("base_url") or "", user_providers=config.get("providers"),
+                custom_providers=get_compatible_custom_providers(config))
+            if not route.success:
+                raise ValueError(route.error_message or "That model can't be used")
+            return controls.settings.options(config, route.target_provider, route.new_model, route.base_url)
+
+    def set_model_options(self, body):
+        return self._model_client().set_model_options(body)
+
+    def restore_model_options(self, source):
+        api = sys.modules.get("model_controls")
+        if api is not None:
+            self._model_client(source.profile).restore_model_options(source)
+
+    def session_model(self, session):
+        if sys.modules.get("model_controls") is None:
+            return None
+        return self._model_client().session_model(session)
+
+    async def set_session_model(self, session, body):
+        return await self._model_client().set_session_model(session, body)
+
+    def sign_off_model(self):
+        from hermes_cli.config import load_config
+
+        task = (load_config().get("auxiliary") or {}).get("portal_signoff") or {}
+        return {"provider": str(task.get("provider") or "auto"), "model": str(task.get("model") or "")}
+
+    def set_sign_off_model(self, provider, model):
+        from hermes_cli.config import set_config_value
+
+        set_config_value("auxiliary.portal_signoff.provider", provider)
+        set_config_value("auxiliary.portal_signoff.model", model)
+
+    def set_yolo(self, chat):
+        from tools.approval import enable_session_yolo
+
+        source = _source(chat, self.profile)
+        enable_session_yolo(self._scoped(lambda: self.store.get_or_create_session(source, touch_activity=False).session_key))
+
+    def processes(self, session):
+        """Background processes a chat's turns started (terminal ``background=true``), from Hermes's
+        process registry, which lives in this gateway process. A portal thread's processes carry its
+        gateway key, ``<profile>:portal:dm:<chat>``; finished ones stay listed for a while."""
+        from tools.process_registry import process_registry
+
+        chat = self.chat_of(session)
+        if not chat:
+            return []
+        now = time.time()
+        out = []
+        for entry in process_registry.list_sessions():
+            proc = self._process(chat, entry["session_id"])
+            if proc is None:
+                continue
+            out.append(
+                {
+                    "id": entry["session_id"],
+                    "command": proc.command,
+                    "cwd": proc.cwd or "",
+                    "running": entry["status"] == "running",
+                    "started_at": proc.started_at or now - entry["uptime_seconds"],
+                    "exited_at": proc.exited_at or None,
+                    "exit_code": entry.get("exit_code"),
+                    "ended": proc.completion_reason if proc.exited else None,
+                    "notify": bool(proc.notify_on_complete or proc.watch_patterns),
+                }
+            )
+        return out
+
+    @staticmethod
+    def _process(chat, proc_id):
+        from tools.process_registry import process_registry
+
+        proc = process_registry.get(proc_id)
+        return proc if proc is not None and str(proc.session_key or "").endswith(f":portal:dm:{chat}") else None
+
+    def process_log(self, session, proc_id, lines=200):
+        """The last lines a chat's background process printed. Read from the buffer itself, not
+        ``read_log``: that marks a finished process's completion as seen, which would swallow the
+        notice Nako is waiting for."""
+        from tools.ansi_strip import strip_ansi
+
+        chat = self.chat_of(session)
+        proc = self._process(chat, proc_id) if chat else None
+        if proc is None:
+            return None
+        with proc._lock:
+            text = strip_ansi(proc.output_buffer)
+        return {"lines": text.splitlines()[-int(lines):], "total_chars": proc.total_output_chars}
+
+    def commands(self):
+        from agent.skill_commands import get_interactive_skill_commands
+        from hermes_cli import commands as registry
+
+        listed = [
+            {"name": f"/{cmd.name}", "description": registry._build_description(cmd), "skill": False}
+            for cmd in registry.COMMAND_REGISTRY
+            if not cmd.cli_only and cmd.name not in UNSUPPORTED
+        ]
+        names = {c["name"] for c in listed}
+        for name, info in sorted(get_interactive_skill_commands().items()):
+            if name not in names:
+                listed.append({"name": name, "description": str(info.get("description") or "Skill"), "skill": True})
+        return listed
+
+
+# What a portal turn gets when its profile resolves to no tools at all.
+FALLBACK_TOOLSETS = [f"{AGENT}-cli"]
+
+
+def _fallback_toolsets(home=None):
+    """Tools for a portal turn in a profile that doesn't load this plugin.
+
+    Hermes builds a plugin platform's default toolset (`hermes-portal`) only where the plugin is
+    registered, so in a profile that doesn't load it the bundle is empty and portal turns run
+    with no tools. Such a profile gets the standard full toolset instead. A profile that sets
+    `platform_toolsets.portal`, or where the bundle exists, is left alone (None)."""
+    from hermes_cli.config import load_config
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from toolsets import resolve_toolset
+
+    token = set_hermes_home_override(str(home)) if home else None
+    try:
+        if "portal" in (load_config().get("platform_toolsets") or {}):
+            return None
+        return None if resolve_toolset(f"{AGENT}-portal") else list(FALLBACK_TOOLSETS)
+    except Exception:
+        log.warning("portal: could not check the toolset for a turn", exc_info=True)
+        return None
+    finally:
+        if token is not None:
+            reset_hermes_home_override(token)
+
+
+def _model_providers():
+    """Models Hermes can run on with the credentials in scope, grouped by provider."""
+    api = sys.modules.get("model_controls")
+    return api.providers() if api is not None else []
+
+
+async def _forward_inbox(store, adapter):
+    """Posts written while no gateway ran (`_deliver`) are sent once it's back."""
+    last = await asyncio.to_thread(store.meta, "inbox_pushed", 0) or 0
+    while True:
+        await asyncio.sleep(INBOX_POLL)
+        fresh = await asyncio.to_thread(store.inbox_after, last)
+        for row in fresh:
+            await adapter.send(row["chat"], row["text"])
+            last = row["id"]
+            await asyncio.to_thread(store.set_meta, "inbox_pushed", last)
+
+
+def _check():
+    return True
+
+
+def _validate(config):
+    return True
+
+
+def _env_enablement():
+    return {"home_channel": {"chat_id": HOME_CHANNEL, "name": CHAT_TITLE}}
+
+
+async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False):
+    text = "\n".join([message, *(f"MEDIA:{path}" for path in media_files or [])])
+    row = await asyncio.to_thread(_deliver, chat_id, text)
+    chat = str(chat_id or HOME_CHANNEL)
+    if chat in CHANNELS and chat != HOME_CHANNEL:  # the gateway opens Notifications as it connects
+        await _thread_ready(chat)
+    return {"success": True, "message_id": str(row)}
+
+
+async def _thread_ready(chat, timeout=None):
+    """`hermes send` mirrors the post into the chat's thread as soon as this returns, and the
+    gateway opens a Reviews thread only when its first post arrives, so wait for it to be there.
+    Without a gateway running it never appears; the post still goes out once one starts."""
+    from hermes_constants import get_hermes_home
+
+    state = get_hermes_home() / "state.db"
+    deadline = time.monotonic() + (CHANNEL_WAIT if timeout is None else timeout)
+    while time.monotonic() < deadline:
+        if state.exists():
+            with closing(sqlite3.connect(f"file:{state}?mode=ro", uri=True, timeout=5)) as db:
+                found = db.execute(
+                    "SELECT 1 FROM sessions WHERE source='portal' AND chat_id=? AND ended_at IS NULL LIMIT 1", (chat,)
+                ).fetchone()
+            if found:
+                return True
+        await asyncio.sleep(0.25)
+    return False
+
+
+# A portal chat id as `hermes send --to portal:<id>` and cron name it: the named threads, a new
+# thread, or a thread's own id. Anything else falls through to Hermes's channel directory.
+TARGET = re.compile(r"^(?:new|[0-9a-f]{16}|" + "|".join(map(re.escape, CHANNELS)) + r")$")
+
+
+def _parse_target(ref):
+    ref = str(ref or "").strip()
+    return (ref, None) if TARGET.match(ref) else None
+
+
+def _hub_tell(call, *args):
+    """Tell the server something changed in this process, if the link is up."""
+    link, loop = _LIVE_TOOLS.get("link"), _LIVE_TOOLS.get("loop")
+    if link is not None and loop is not None and link.peer is not None:
+        loop.call_soon_threadsafe(link.tell, call, *args)
+
+
+# The reply goes in <reply> tags so small models write about it instead of answering it.
+SIGN_OFF_PROMPT = (
+    "You are Nako, a cheerful assistant who's quietly proud of her work. You just sent the reply inside <reply> tags. "
+    "Say the tiny line you'd mutter to yourself right after, pleased with what you just did "
+    "(fixed, shipped, built, found, or explained something well). "
+    "One line, 3 to 9 words, lowercase, no emoji, no hearts, no quotes. "
+    "Don't talk to the user, don't repeat the reply, no next steps, no questions. "
+    "Tone only, don't copy: 'fixed that flaky test, and it stays fixed' / 'merged, tested, shipped. good day' / "
+    "'cleared that one right up'. Output only the line."
+)
+SIGN_OFF_REPLY_CHARS = 3000
+SIGN_OFF_MAX_CHARS = 120
+
+# Tool hooks run on the agent's thread; the link to the hub lives on the gateway's loop.
+_LIVE_TOOLS = {}
+
+
+def _tool_context(name, args):
+    try:
+        from agent.display import build_tool_preview
+
+        return build_tool_preview(name, args if isinstance(args, dict) else {}, max_len=80) or ""
+    except Exception:  # noqa: BLE001 - A display preview must not interrupt an agent tool call.
+        return ""
+
+
+def _forward_tool(state):
+    def hook(tool_name="", args=None, session_id=None, tool_call_id=None, status=None, **_):
+        link, loop = _LIVE_TOOLS.get("link"), _LIVE_TOOLS.get("loop")
+        if link is None or loop is None or link.peer is None or not session_id:
+            return
+        ended = "failed" if status == "error" else "done"
+        payload = (session_id, str(tool_call_id or ""), tool_name, _tool_context(tool_name, args), state or ended)
+        # The hub keeps only calls in a portal turn it shows as running.
+        loop.call_soon_threadsafe(link.tell, "tool", *payload)
+        return
+
+    return hook
+
+
+def _secrets_changed():
+    """agent-secrets stored or deleted one in this process (an agent sharing, a request answered):
+    the app's Settings and shared cards reread their list."""
+    link, loop = _LIVE_TOOLS.get("link"), _LIVE_TOOLS.get("loop")
+    if link is not None and loop is not None and link.peer is not None:
+        loop.call_soon_threadsafe(link.tell, "secrets_changed")
+
+
+def _mesh_tools():
+    """The mesh tools and `hermes mesh` command (mesh_tools.py), loaded once under a private name."""
+    name = "nako_portal_mesh_tools"
+    if name not in sys.modules:
+        loaded = _load_sibling(name, "mesh_tools.py")
+        loaded.PORTAL = _portal
+    return sys.modules[name]
+
+
+def _groups_tools():
+    """The chat-group tools (groups_tools.py), loaded once under a private name."""
+    name = "nako_portal_groups_tools"
+    if name not in sys.modules:
+        loaded = _load_sibling(name, "groups_tools.py")
+        mesh = _mesh_tools()
+        loaded.CALL = lambda method, path, body=None: mesh._call(
+            method, path, body, missing="the portal server isn't running here, so chat groups can't be changed"
+        )
+    return sys.modules[name]
+
+
+def _adapter(config):
+    return _adapter_module._adapter(config, _adapter_module.AdapterRuntime(
+        backend=HermesBackend,
+        settings=_settings,
+        local_token=_local_token,
+        server_config=_server_config,
+        spawn_server=_spawn_server,
+        portal=_portal,
+        hermes_build=_hermes_build,
+        forward_inbox=_forward_inbox,
+        live_tools=_LIVE_TOOLS,
+        secrets_api=_secrets_api,
+        secrets_changed=_secrets_changed,
+        own_origins=_own_origins,
+        ensure_chat=_ensure_chat,
+        fallback_toolsets=_fallback_toolsets,
+        home_channel=HOME_CHANNEL,
+        chat_title=CHAT_TITLE,
+        new_thread=NEW_THREAD,
+        channels=CHANNELS,
+        spawn_gap=SPAWN_GAP,
+        turn_sweep=lambda: TURN_SWEEP,
+        outside_sources_every=OUTSIDE_SOURCES_EVERY,
+        outside_repeat_every=OUTSIDE_REPEAT_EVERY,
+    ))
+
+
+def register(ctx):
+    _quiet_display_defaults()
+    # Other machines in this portal's mesh: the agent's tools for them and `hermes mesh`.
+    tools = _mesh_tools()
+    if hasattr(ctx, "register_tool"):
+        tools.register(ctx)
+        # Chat groups in the sidebar, which the agent can make and fill.
+        _groups_tools().register(ctx)
+    if hasattr(ctx, "register_cli_command"):
+        tools.register_cli(ctx)
+    # How the mesh works, for any agent on any machine in it (`nako-portal:mesh`).
+    if hasattr(ctx, "register_skill"):
+        ctx.register_skill("mesh", ROOT / "skills" / "mesh" / "SKILL.md")
+    # Live tool calls for the chat's activity view (the gateway's own text breadcrumbs are off).
+    ctx.register_hook("pre_tool_call", _forward_tool("running"))
+    ctx.register_hook("post_tool_call", _forward_tool(None))
+    # Its own model slot, so Desktop's Models page and the portal's Settings can pick it.
+    if hasattr(ctx, "register_auxiliary_task"):
+        ctx.register_auxiliary_task(
+            "portal_signoff",
+            display_name="Nako's sign-off",
+            description="The few words Nako says in the portal when a turn ends. A small fast model is plenty.",
+            defaults={"timeout": 15},
+        )
+    ctx.register_platform(
+        name="portal",
+        label="Nako",
+        adapter_factory=_adapter,
+        check_fn=_check,
+        validate_config=_validate,
+        env_enablement_fn=_env_enablement,
+        standalone_sender_fn=_standalone_send,
+        parse_target_ref_fn=_parse_target,
+        cron_deliver_env_var="PORTAL_HOME_CHANNEL",
+        max_message_length=0,
+        emoji="🪟",
+        pii_safe=True,
+        platform_hint=(
+            "You are chatting in the user's private Nako app. It renders markdown. "
+            "Each portal chat is its own thread; send_message to portal:new starts a new one. "
+            "End every reply with <signoff>...</signoff> on its own line: a 3-9 word lowercase aside, "
+            "quietly proud of the specific thing you just did this turn (not a summary, not addressed "
+            "to the user, no emoji). The app shows it beside you and hides the tag."
+        ),
+    )
