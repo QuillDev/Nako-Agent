@@ -48,12 +48,46 @@ class BitwardenLoginBackend(LoginBackend):
     def _env(self, session_token: Optional[str]) -> dict[str, str]:
         env = {k: os.environ[k] for k in _ENV_KEEP if k in os.environ}
         env["NO_COLOR"] = "1"
+        if appdata := str(self.cfg.get("appdata_dir") or ""):
+            env["BITWARDENCLI_APPDATA_DIR"] = os.path.expanduser(appdata)
         if session_token:
             env["BW_SESSION"] = session_token
         return env
 
+    def _password_command(self) -> list[str]:
+        """``vault.bitwarden.master_password_command``: an argv whose stdout is the master password, so the
+        vault unlocks itself where nobody can type it (cron, headless). Never run through a shell."""
+        cmd = self.cfg.get("master_password_command") or []
+        return [str(part) for part in cmd] if isinstance(cmd, list) else []
+
     def is_unlocked(self) -> bool:
-        return _unlock.is_unlocked(self.name)
+        return bool(self._password_command()) or _unlock.is_unlocked(self.name)
+
+    def _unlock_unattended(self) -> None:
+        cmd = self._password_command()
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                  timeout=_TIMEOUT, stdin=subprocess.DEVNULL, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"Bitwarden master_password_command failed to run: {type(exc).__name__}") from exc
+        master = (proc.stdout or "").rstrip("\r\n")
+        if proc.returncode != 0 or not master:
+            raise RuntimeError(f"Bitwarden master_password_command exited {proc.returncode} without a password")
+        try:
+            self.unlock(master)
+        finally:
+            del master
+        # A fresh session reads the local cache; pull edits made elsewhere (best effort).
+        run_cli([str(self._bw()), "sync", "--nointeraction"], env=self._env(_unlock.get_session_token(self.name)),
+                timeout=_TIMEOUT, label="bw", timeout_message="bw sync timed out")
+
+    def _allowed(self, origins: tuple) -> bool:
+        """``vault.bitwarden.allowed_origins`` limits which logins are offered at all (unset: every login)."""
+        allowed = self.cfg.get("allowed_origins")
+        if not isinstance(allowed, list):
+            return True
+        wanted = {normalize_origin(str(o)) for o in allowed}
+        return any(o in wanted for o in origins)
 
     def unlock(self, master_password: str) -> None:
         # bw refuses a piped password ("Master password is required"); its non-interactive contract is
@@ -73,6 +107,9 @@ class BitwardenLoginBackend(LoginBackend):
 
     def _run(self, *args: str) -> str:
         token = _unlock.get_session_token(self.name)
+        if not token and self._password_command():
+            self._unlock_unattended()
+            token = _unlock.get_session_token(self.name)
         if not token:
             raise UnlockRequired(self)
         proc = run_cli([str(self._bw()), *args, "--nointeraction"], env=self._env(token), timeout=_TIMEOUT,
@@ -110,6 +147,8 @@ class BitwardenLoginBackend(LoginBackend):
             # Fill targets are browser pages, so app URIs (androidapp:// etc.) never widen
             # the fill set; an app-URI-only item keeps its single origin exactly as before.
             web_origins = tuple(o for o in origins if o.startswith(("http://", "https://"))) or (origins[0],)
+            if not self._allowed(web_origins):
+                continue
             out.append(VaultItemMeta(
                 id=f"{self.prefix}{item.get('id')}", kind="login", label=str(item.get("name") or origins[0]),
                 origin=origins[0], created_at=str(item.get("creationDate") or ""),
