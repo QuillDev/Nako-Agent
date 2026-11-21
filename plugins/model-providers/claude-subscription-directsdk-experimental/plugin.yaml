@@ -1,0 +1,46 @@
+name: claude-subscription-directsdk-experimental
+kind: model-provider
+version: 0.7.0
+manifest_version: 2
+description: Claude Subscription DirectSDK (Experimental) — drive your Claude Pro/Max subscription through the official Claude Code CLI; Hermes owns tools, approvals and compaction
+author: Nous Research
+license: MIT
+homepage: https://github.com/QuillDev/hermes-claude-account-pool
+tags: [model-provider, anthropic, claude, subscription, experimental]
+requires_hermes: ">=0.21.4"
+platforms: []
+optional_env:
+  - CLAUDE_SUBSCRIPTION_DIRECTSDK_COMMAND
+  - CLAUDE_SUBSCRIPTION_DIRECTSDK_CONFIG_DIR
+  - CLAUDE_CONFIG_DIR
+external_dependencies:
+  - name: claude
+    check: "claude --version"
+    install: "npm install -g @anthropic-ai/claude-code"
+config_schema:
+  accounts:
+    type: list
+    default: []
+    label: Linked Claude accounts
+    description: >-
+      Optional list of {label, config_dir, enabled?} objects, up to eight logins. Each directory
+      is logged in separately with the official CLI. Routes to the login with most measured
+      headroom and skips exhausted accounts. Empty keeps the existing single-login behavior.
+  usage_cache_seconds:
+    type: int
+    default: 60
+    label: Account usage cache seconds
+    description: Cache usage probes across chats for 0–300 seconds. Reset times trigger an earlier refresh.
+  claude_config_dir:
+    type: string
+    default: ""
+    label: Claude login config directory
+    description: Select this profile's logged-in Claude config directory, overriding process environment directories.
+  claude_code_telemetry:
+    type: bool
+    default: true
+    label: Claude Code telemetry and feature flags
+    description: >-
+      Let Claude Code send its usage telemetry and fetch feature flags. Feature flags unlock newer
+      models in the model picker; turn off to keep Claude Code quiet (the picker may then list fewer
+      models).
