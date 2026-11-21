@@ -3,10 +3,10 @@ import type {
   ConnectionSettleReason,
   ConnectionUpdatePayload,
   ConnectorsConnectResult
-} from '@hermes/shared'
+} from '@nako/shared'
 import { atom } from 'nanostores'
 
-import type { ProfileScope } from '@/hermes'
+import type { ProfileScope } from '@/nako'
 import { type ConnectionTarget, parseConnectionTarget } from '@/store/connection-request'
 import { noteFreeTierAppConnected } from '@/store/free-tier-sign-in'
 import { activeGatewayConnectionId } from '@/store/gateway'

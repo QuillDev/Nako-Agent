@@ -11,7 +11,7 @@ function run(env: NodeJS.ProcessEnv, defaultApp = true) {
     app: { setAsDefaultProtocolClient: (...args: unknown[]) => { calls.push(args);
 
  return true } },
-    protocol: 'hermes',
+    protocol: 'nako',
     env,
     defaultApp,
     argv: ['/electron', '.'],
@@ -23,31 +23,31 @@ function run(env: NodeJS.ProcessEnv, defaultApp = true) {
   return { calls, log }
 }
 
-test('the E2E/dev guard leaves the OS hermes:// handler untouched; normal launches still register', () => {
-  const skipped = run({ HERMES_DESKTOP_SKIP_PROTOCOL_REGISTRATION: '1' })
+test('the E2E/dev guard leaves the OS nako:// handler untouched; normal launches still register', () => {
+  const skipped = run({ NAKO_DESKTOP_SKIP_PROTOCOL_REGISTRATION: '1' })
   assert.deepEqual(skipped.calls, [])
   assert.match(skipped.log.join('\n'), /registration skipped/)
 
-  assert.deepEqual(run({}).calls, [['hermes', '/electron', ['/checkout/.']]])
-  assert.deepEqual(run({}, false).calls, [['hermes']])
+  assert.deepEqual(run({}).calls, [['nako', '/electron', ['/checkout/.']]])
+  assert.deepEqual(run({}, false).calls, [['nako']])
 })
 
 function launch(url: string, ready = true) {
   let activated = 0
-  const handled = handleLaunchDeepLink(url, ['hermes-dev', 'hermes'], { ready, activate: () => { activated += 1 } })
+  const handled = handleLaunchDeepLink(url, ['nako-dev', 'nako'], { ready, activate: () => { activated += 1 } })
 
   return { handled, activated }
 }
 
-test('hermes://launch only focuses the app, whatever it carries, malformed tails included', () => {
-  for (const url of ['hermes://launch', 'hermes://launch/', 'hermes://launch/chat/new?prompt=rm%20-rf', 'hermes://launch/%', 'hermes-dev://launch?x=1']) {
+test('nako://launch only focuses the app, whatever it carries, malformed tails included', () => {
+  for (const url of ['nako://launch', 'nako://launch/', 'nako://launch/chat/new?prompt=rm%20-rf', 'nako://launch/%', 'nako-dev://launch?x=1']) {
     assert.deepEqual(launch(url), { handled: true, activated: 1 }, url)
   }
 
   // A window still booting reveals itself; the link is consumed without an early show.
-  assert.deepEqual(launch('hermes://launch', false), { handled: true, activated: 0 })
+  assert.deepEqual(launch('nako://launch', false), { handled: true, activated: 0 })
 
-  for (const url of ['hermes://', 'hermes://open/launch', 'hermes://plugin/install?repo=launch', 'hermes://launcher', 'hermes://close-preview', 'other://launch', 'not a url']) {
+  for (const url of ['nako://', 'nako://open/launch', 'nako://plugin/install?repo=launch', 'nako://launcher', 'nako://close-preview', 'other://launch', 'not a url']) {
     assert.deepEqual(launch(url), { handled: false, activated: 0 }, url)
   }
 })

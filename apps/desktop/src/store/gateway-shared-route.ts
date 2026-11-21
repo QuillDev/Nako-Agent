@@ -17,7 +17,7 @@ import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
 // same boot for another 20 s, then opened a second socket at the shared process
 // (#120005). Callers surface the rejection as the switch/request failure.
 export async function sharedPrimaryRoute(profile: string): Promise<boolean> {
-  const desktop = window.hermesDesktop
+  const desktop = window.nakoDesktop
 
   if (!desktop) {
     return false

@@ -6,7 +6,7 @@ from tools.process_registry import ProcessRegistry
 
 @pytest.fixture
 def registry(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    monkeypatch.setenv("NAKO_HOME", str(tmp_path / ".nako"))
     return ProcessRegistry()
 
 def _spawn_sleeper(registry, notify=False):

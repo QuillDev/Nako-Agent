@@ -233,9 +233,9 @@ def _completions(registry):
 def _receipt(session):
     import json
 
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
 
-    record = json.loads((get_hermes_home() / "logs" / "process-results" / f"{session.id}.json").read_text())
+    record = json.loads((get_nako_home() / "logs" / "process-results" / f"{session.id}.json").read_text())
     return record["exit_code"], record["completion_reason"], record["termination_source"]
 
 

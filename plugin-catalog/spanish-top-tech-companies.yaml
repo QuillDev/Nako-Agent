@@ -1,7 +1,7 @@
 name: spanish-top-tech-companies
 title: Spanish Top Tech Companies
 repo: https://github.com/pugarte7/spanish-top-tech-companies
-subdir: hermes-plugin
+subdir: nako-plugin
 sha: 87319691316975e1a406e83904dc1647ca2d729e
 description: >-
   Find the day's tech job postings in Spain and remote roles open to it, from 400+ company job boards,
@@ -20,10 +20,10 @@ description: >-
 maintainer: pugarte7
 tier: community
 category: tools
-requires_hermes: ">=0.22.0"
-docs_url: https://github.com/pugarte7/spanish-top-tech-companies/blob/87319691316975e1a406e83904dc1647ca2d729e/hermes-plugin/README.md
+requires_nako: ">=0.22.0"
+docs_url: https://github.com/pugarte7/spanish-top-tech-companies/blob/87319691316975e1a406e83904dc1647ca2d729e/nako-plugin/README.md
 version: "1.0.0"
-image: https://raw.githubusercontent.com/pugarte7/spanish-top-tech-companies/87319691316975e1a406e83904dc1647ca2d729e/hermes-plugin/assets/catalog-card.png
+image: https://raw.githubusercontent.com/pugarte7/spanish-top-tech-companies/87319691316975e1a406e83904dc1647ca2d729e/nako-plugin/assets/catalog-card.png
 platforms: []
 capabilities:
   provides_tools: []

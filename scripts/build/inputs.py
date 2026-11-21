@@ -9,11 +9,11 @@ import tomllib
 
 
 RESOURCE_ENV = {
-    "skills": "HERMES_BUNDLED_SKILLS",
-    "optional-skills": "HERMES_OPTIONAL_SKILLS",
-    "plugins": "HERMES_BUNDLED_PLUGINS",
-    "locales": "HERMES_BUNDLED_LOCALES",
-    "optional-mcps": "HERMES_OPTIONAL_MCPS",
+    "skills": "NAKO_BUNDLED_SKILLS",
+    "optional-skills": "NAKO_OPTIONAL_SKILLS",
+    "plugins": "NAKO_BUNDLED_PLUGINS",
+    "locales": "NAKO_BUNDLED_LOCALES",
+    "optional-mcps": "NAKO_OPTIONAL_MCPS",
 }
 
 

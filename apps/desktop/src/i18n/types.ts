@@ -443,7 +443,7 @@ export interface Translations extends NoticeTranslations {
     desktopOutOfDateMessage: string
     updateDesktopApp: string
     installMethodUnsupportedTitle: string
-    updateHermes: string
+    updateNako: string
     updateReadyTitle: string
     updateReadyMessage: (count: number) => string
     updateReadyMessageUnknown: string
@@ -472,10 +472,10 @@ export interface Translations extends NoticeTranslations {
       openaiTtsNeedsKey: string
       codeSkewRestartRequired: string
       rpcOutOfSync: string
-      restartHermesFailed: string
+      restartNakoFailed: string
     }
     actions: {
-      restartHermes: string
+      restartNako: string
       openKeys: string
       openGateways: string
       openMaintenance: string
@@ -1258,9 +1258,9 @@ export interface Translations extends NoticeTranslations {
       sshPortDesc: string
       sshKeyTitle: string
       sshKeyDesc: string
-      sshHermesPathTitle: string
-      sshHermesPathDesc: string
-      sshHermesPathPlaceholder: string
+      sshNakoPathTitle: string
+      sshNakoPathDesc: string
+      sshNakoPathPlaceholder: string
       sshTestConnection: string
       sshConnect: string
       sshButtonsHint: string
@@ -1948,7 +1948,7 @@ export interface Translations extends NoticeTranslations {
         serverStates: {
           connected: string
           app_not_running: string
-          hermes_not_connected: string
+          nako_not_connected: string
           endpoint_unavailable: string
           no_interactive_session: string
           version_too_old: string
@@ -2199,7 +2199,7 @@ export interface Translations extends NoticeTranslations {
     noSessions: string
     gatewayRunning: string
     gatewayStopped: string
-    hermesActiveSessions: (version: string, count: number) => string
+    nakoActiveSessions: (version: string, count: number) => string
     restartGateway: string
     openBrowser: string
     toggleBrowser: string
@@ -2208,7 +2208,7 @@ export interface Translations extends NoticeTranslations {
     sharedGatewayRestartDescription: (bots: string) => string
     sharedGatewayRestartConfirm: string
     sharedGatewayRestarted: (count: number) => string
-    updateHermes: string
+    updateNako: string
     reloadWindow: string
     actionRunning: string
     actionDone: string
@@ -3471,8 +3471,8 @@ export interface Translations extends NoticeTranslations {
       notNow: string
     }
     // First-launch set-up failure notice: the free tier could not be created at boot.
-    // One sentence per backend code (`hermes_cli/anon_auth.py::ANON_*`); the copy never says
-    // the free MODEL is off — what is unavailable is using Hermes without signing in.
+    // One sentence per backend code (`nako_cli/anon_auth.py::ANON_*`); the copy never says
+    // the free MODEL is off — what is unavailable is using Nako without signing in.
     setupFailed: {
       gateClosed: string
       paused: string
@@ -4028,8 +4028,8 @@ export interface Translations extends NoticeTranslations {
       /** Error card body when a Nous account is out of credits (its button opens Settings → Billing). */
       errorCompressConversation: string
       errorCompressFailed: string
-      errorOpenHermesFolder: string
-      errorOpenHermesFolderFailed: string
+      errorOpenNakoFolder: string
+      errorOpenNakoFolderFailed: string
       errorUpdateApiKey: string
       /** One-click recovery for an expired/revoked OAuth grant: re-runs that
        *  provider's sign-in flow (auth layer, authKind 'oauth'). */

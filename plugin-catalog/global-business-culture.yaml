@@ -1,5 +1,5 @@
 name: global-business-culture
-repo: https://github.com/pswong661-eng/hermes-global-business-culture
+repo: https://github.com/pswong661-eng/nako-global-business-culture
 sha: "22dae24897350555d517707630871ebf6dac1d27"
 version: "1.0.0"
 title: Global Business Culture
@@ -7,8 +7,8 @@ description: "Cross-cultural business intelligence: country culture briefs and h
 maintainer: pswong661-eng
 tier: community
 category: tools
-requires_hermes: ">=0.21.0"
-image: https://raw.githubusercontent.com/pswong661-eng/hermes-global-business-culture/22dae24897350555d517707630871ebf6dac1d27/assets/banner.png
+requires_nako: ">=0.21.0"
+image: https://raw.githubusercontent.com/pswong661-eng/nako-global-business-culture/22dae24897350555d517707630871ebf6dac1d27/assets/banner.png
 readme: true
 platforms: [linux, macos, windows]
 capabilities:

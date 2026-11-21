@@ -181,11 +181,11 @@ export interface Translations {
     starting: string;
     startedInBackground: string;
     stopped: string;
-    updateHermes: string;
-    updateHermesConfirmMessage?: string;
-    updateHermesConfirmNow?: string;
-    updateHermesConfirmTitle?: string;
-    updatingHermes: string;
+    updateNako: string;
+    updateNakoConfirmMessage?: string;
+    updateNakoConfirmNow?: string;
+    updateNakoConfirmTitle?: string;
+    updatingNako: string;
     waitingForOutput: string;
   };
 
@@ -656,7 +656,7 @@ export interface Translations {
     fontMono?: string;
   };
 
-  // ── Achievements plugin (plugins/hermes-achievements) ──
+  // ── Achievements plugin (plugins/nako-achievements) ──
   achievements: {
     hero: {
       kicker: string;

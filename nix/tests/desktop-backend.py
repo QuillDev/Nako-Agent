@@ -27,13 +27,13 @@ def _processes_under(home: Path) -> list[int]:
 
 
 desktop, expected = sys.argv[1:]
-with tempfile.TemporaryDirectory(prefix="hermes-desktop-backend-") as temporary:
+with tempfile.TemporaryDirectory(prefix="nako-desktop-backend-") as temporary:
     home = Path(temporary)
-    hermes_home = home / ".hermes"
-    legacy = hermes_home / "hermes-agent"
-    (legacy / "hermes_cli").mkdir(parents=True)
-    (legacy / "hermes_cli" / "main.py").touch()
-    launcher = legacy / "venv" / "bin" / "hermes"
+    nako_home = home / ".nako"
+    legacy = nako_home / "nako-agent"
+    (legacy / "nako_cli").mkdir(parents=True)
+    (legacy / "nako_cli" / "main.py").touch()
+    launcher = legacy / "venv" / "bin" / "nako"
     launcher.parent.mkdir(parents=True)
     # The old runtime passes discovery but cannot initialize a session. It
     # must not win merely because it was installed before the Nix desktop.
@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix="hermes-desktop-backend-") as temporary:
         f"#!{sys.executable}\n"
         "import sys\n"
         "if '--version' in sys.argv:\n"
-        "    print('Hermes legacy fixture')\n"
+        "    print('Nako legacy fixture')\n"
         "    sys.exit(0)\n"
         "print('WRONG_BACKEND_SELECTED', flush=True)\n"
         "sys.exit(73)\n"
@@ -52,8 +52,8 @@ with tempfile.TemporaryDirectory(prefix="hermes-desktop-backend-") as temporary:
     env = {
         "PATH": os.environ["PATH"],
         "HOME": str(home),
-        "HERMES_HOME": str(hermes_home),
-        "HERMES_DESKTOP_USER_DATA_DIR": str(home / "electron"),
+        "NAKO_HOME": str(nako_home),
+        "NAKO_DESKTOP_USER_DATA_DIR": str(home / "electron"),
         "XDG_RUNTIME_DIR": str(runtime),
         "XDG_CONFIG_HOME": str(home / ".config"),
         "XDG_CACHE_HOME": str(home / ".cache"),
@@ -74,15 +74,15 @@ with tempfile.TemporaryDirectory(prefix="hermes-desktop-backend-") as temporary:
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 output = log_path.read_text()
-                desktop_log = hermes_home / "logs" / "desktop.log"
+                desktop_log = nako_home / "logs" / "desktop.log"
                 if desktop_log.exists():
                     output += desktop_log.read_text()
                 assert "WRONG_BACKEND_SELECTED" not in output, output
                 assert child.poll() is None, output
-                # Desktop attaches to `hermes gateway ensure` (the daemon serves the dashboard), so
-                # readiness is Desktop's own attach line, not a spawned `hermes serve` sentinel.
-                if "[backend] Hermes gateway is ready" in output:
-                    assert f"[backend] using existing Hermes CLI at {expected}" in output, output
+                # Desktop attaches to `nako gateway ensure` (the daemon serves the dashboard), so
+                # readiness is Desktop's own attach line, not a spawned `nako serve` sentinel.
+                if "[backend] Nako gateway is ready" in output:
+                    assert f"[backend] using existing Nako CLI at {expected}" in output, output
                     print("PASS: packaged desktop selected its pinned backend over the mutable install")
                     break
                 time.sleep(0.1)
@@ -95,9 +95,9 @@ with tempfile.TemporaryDirectory(prefix="hermes-desktop-backend-") as temporary:
             except subprocess.TimeoutExpired:
                 os.killpg(child.pid, signal.SIGKILL)
                 child.wait(timeout=5)
-            # The desktop spawns its backend in its own session (hermes serve outlives a
+            # The desktop spawns its backend in its own session (nako serve outlives a
             # window close on purpose), so killing cage's group leaves that gateway writing
-            # under HERMES_HOME while the tempdir is removed. Stop everything still rooted
+            # under NAKO_HOME while the tempdir is removed. Stop everything still rooted
             # in this home before cleanup; the sandbox has no other processes to confuse.
             survivors = _processes_under(home)
             for pid in survivors:

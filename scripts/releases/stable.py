@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import unquote, urlsplit
 
-from hermes_cli.update_channel import STABLE_TAG_RE
+from nako_cli.update_channel import STABLE_TAG_RE
 from scripts.releases import lanes as lane_set
 from scripts.releases.desktop_targets import MANIFEST_TARGETS
 from scripts.releases.draft_warning import strip_draft_warning
@@ -82,7 +82,7 @@ def require_stable_identity(tag: str, commit: str) -> None:
 
 def is_canary_claim(tag: object) -> bool:
     """A canary runs the stable pipeline on its own annotated ``canary.<stamp>-vX.Y.Z`` tag."""
-    from hermes_cli.update_channel import is_canary_tag
+    from nako_cli.update_channel import is_canary_tag
 
     return is_canary_tag(tag)
 
@@ -96,7 +96,7 @@ def _deb_version(tag: str) -> str:
 
 def payload_version(tag: str) -> str:
     """The version a stable or canary tag publishes (update_channel.release_version)."""
-    from hermes_cli.update_channel import release_version
+    from nako_cli.update_channel import release_version
 
     version = release_version(tag)
     if version is None:
@@ -115,7 +115,7 @@ def require_release_identity(tag: str, commit: str) -> None:
 
 def canary_epoch(tag: str) -> int:
     """The canary's immutable build time: the UTC stamp its tag name carries."""
-    from hermes_cli.update_channel import canary_timestamp
+    from nako_cli.update_channel import canary_timestamp
 
     stamp = canary_timestamp(tag)
     if stamp is None:
@@ -516,7 +516,7 @@ def canary_claim(raw: str, *, tag: str, commit: str) -> dict:
     ``scripts/release.py --canary`` writes it. The lanes are read exactly as a stable claim's
     (lanes.claim_lanes), then held to what a canary can run (lanes.POLICY_REFUSED).
     """
-    from hermes_cli.update_channel import tag_core
+    from nako_cli.update_channel import tag_core
 
     try:
         metadata = tag_record(raw)
@@ -1004,7 +1004,7 @@ def ensure_final_tag(tag: str, commit: str, claim: dict, *, candidate_manifest_s
         except subprocess.CalledProcessError:
             message = json.dumps(expected, sort_keys=True, separators=(",", ":"))
             run([
-                "git", "-c", "user.name=Hermes Release Automation",
+                "git", "-c", "user.name=Nako Release Automation",
                 "-c", "user.email=release-bot@users.noreply.github.com",
                 "tag", "-a", tag, commit, "-m", message,
             ])

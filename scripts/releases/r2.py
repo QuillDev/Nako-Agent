@@ -450,7 +450,7 @@ def _stream_and_hash(url: str, creds: dict[str, str], now: str, algorithm: str):
 
 def channel_for_tag(tag: str) -> str:
     """Return the release channel encoded by a canonical tag."""
-    from hermes_cli.update_channel import is_canary_tag
+    from nako_cli.update_channel import is_canary_tag
 
     return "canary" if is_canary_tag(tag) else "stable"
 
@@ -515,7 +515,7 @@ def commit_prefix_for(commit: str) -> str:
 # Public download origin for object keys. CI supplies the authoritative
 # value as CLOUDFLARE_R2_PUBLIC_URL; the documented production origin is the
 # fallback so a local command can still name a page it is about to publish.
-DEFAULT_PUBLIC_URL = "https://hermes-assets.nousresearch.com"
+DEFAULT_PUBLIC_URL = "https://nako-assets.nousresearch.com"
 
 
 def public_base_url(explicit: str | None = None) -> str:
@@ -1050,7 +1050,7 @@ def prune(
     # The live canary's own objects (its archive, which its upgrade baseline points into, and its
     # Termux pool) stay while it is live however old it is: releases/canary/release-candidates.json
     # names its archive ref, which is in every one of those keys.
-    from hermes_cli.update_channel import is_canary_tag
+    from nako_cli.update_channel import is_canary_tag
 
     pointer_key = "releases/canary/release-candidates.json"
 
@@ -1152,7 +1152,7 @@ def main(argv: list[str] | None = None) -> None:
         i += 1
 
     if cmd == "put":
-        tag = args.get("tag") or os.environ.get("HERMES_PAYLOAD_TAG")
+        tag = args.get("tag") or os.environ.get("NAKO_PAYLOAD_TAG")
         key, file = args.get("key"), args.get("file")
         if not tag or not key or not file:
             print(USAGE, file=sys.stderr)

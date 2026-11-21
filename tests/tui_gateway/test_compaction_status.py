@@ -23,12 +23,12 @@ def server():
     with patch.dict(
         "sys.modules",
         {
-            "hermes_constants": MagicMock(
-                get_hermes_home=MagicMock(return_value="/tmp/hermes_test_compaction")
+            "nako_constants": MagicMock(
+                get_nako_home=MagicMock(return_value="/tmp/nako_test_compaction")
             ),
-            "hermes_cli.env_loader": MagicMock(),
-            "hermes_cli.banner": MagicMock(),
-            "hermes_state": MagicMock(),
+            "nako_cli.env_loader": MagicMock(),
+            "nako_cli.banner": MagicMock(),
+            "nako_state": MagicMock(),
         },
     ):
         mod = importlib.import_module("tui_gateway.server")

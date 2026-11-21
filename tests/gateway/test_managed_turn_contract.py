@@ -31,15 +31,15 @@ def assignment(tmp_path, monkeypatch, *, finite=True, unattended=False, yolo=Fal
 def test_child_executes_under_finite_policy_and_preserves_receipt(tmp_path, monkeypatch, finite, unattended):
     from agent import managed_worker as worker
     from gateway.session_finite import finite_turn_required, unattended_turn
-    from hermes_scope import Fence, current_scope
+    from nako_scope import Fence, current_scope
     from tools.approval import _yolo_active, clear_session
     frame, _ = assignment(tmp_path, monkeypatch, finite=finite, unattended=unattended)
     frame['scope'].update(epoch=3, generation=8)  # distinct, so a swapped fence is caught
-    import hermes_cli.config
+    import nako_cli.config
     from agent.agent_init import _init_prompt_cache_config
 
-    monkeypatch.setattr(hermes_cli.config, "load_config_readonly", dict)
-    for key in ("HERMES_SESSION_SOURCE", "HERMES_SESSION_SOURCE_EXPLICIT", "HERMES_SINGLE_QUERY_SESSION"):
+    monkeypatch.setattr(nako_cli.config, "load_config_readonly", dict)
+    for key in ("NAKO_SESSION_SOURCE", "NAKO_SESSION_SOURCE_EXPLICIT", "NAKO_SINGLE_QUERY_SESSION"):
         monkeypatch.delenv(key, raising=False)
     observed, frames, scopes, cache_ttls, adaptive = [], [], [], [], []
 

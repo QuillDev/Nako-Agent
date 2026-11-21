@@ -25,7 +25,7 @@ from scripts.termux.deb_version import deb_version_for_tag
 
 def release_version(tag: str) -> str:
     """The version a stable or canary tag publishes; packages are named after it."""
-    from hermes_cli.update_channel import release_version as version_for
+    from nako_cli.update_channel import release_version as version_for
 
     version = version_for(tag)
     if version is None:
@@ -38,7 +38,7 @@ def release_channel(tag: str) -> str:
 
     The tag decides, never a caller flag, so a stable candidate can never write a canary feed or
     the reverse (scripts/termux/deb_version.py and scripts/releases/r2.py key on it the same way)."""
-    from hermes_cli.update_channel import is_canary_tag
+    from nako_cli.update_channel import is_canary_tag
 
     return "canary" if is_canary_tag(tag) else "stable"
 
@@ -133,7 +133,7 @@ def _packaged_windows_executable_version(
     if not executable_relpath:
         raise ValueError("MSIX application manifest has no Executable attribute")
     target = PureWindowsPath(executable_relpath).as_posix().lstrip("/")
-    # MakeAppx percent-encodes part names: "Hermes Agent.exe" is stored as Hermes%20Agent.exe.
+    # MakeAppx percent-encodes part names: "Nako Agent.exe" is stored as Nako%20Agent.exe.
     entry = single(
         name for name in archive.namelist()
         if unquote(name.replace("\\", "/")).lstrip("/").casefold() == target.casefold()
@@ -409,7 +409,7 @@ def publish_canary_appinstaller(root: Path, *, tag: str, variant: str, bundle: P
                                identity: str, publisher: str, version: str, public_base: str) -> None:
     """Native SDK work is complete; verify its identity before writing a feed."""
     from scripts.releases.r2 import put
-    from hermes_cli.update_channel import is_canary_tag
+    from nako_cli.update_channel import is_canary_tag
 
     if not is_canary_tag(tag):
         raise ValueError("Only canary feeds publish directly; stable requires accepted candidates")
@@ -507,7 +507,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--tag", default=os.environ.get("RELEASE_TAG"))
-    parser.add_argument("--archive", default=os.environ.get("HERMES_ARCHIVE_TAG"),
+    parser.add_argument("--archive", default=os.environ.get("NAKO_ARCHIVE_TAG"),
                         help="Attempt ref the release archive is keyed under when the payload tag is plain vX.Y.Z")
     # A stable run dispatches from the default branch, so GITHUB_SHA is not the admitted claim commit.
     parser.add_argument("--commit", default=os.environ.get("RELEASE_COMMIT") or os.environ.get("GITHUB_SHA"))

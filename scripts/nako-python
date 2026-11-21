@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Run Python in this checkout's environment: `scripts/nako-python ARGS...`.
+#
+# A GitHub Actions job runs the interpreter setup-pm exported as NAKO_PYTHON,
+# so a recipe never re-runs setup on a runner. Anywhere else NAKO_PYTHON may
+# be inherited from a wrapped `nako` (a release venv without the dev tools),
+# so scripts/run-in-nako-env applies (and if stale, syncs) the environment
+# `source ./activate` gives a shell.
+set -euo pipefail
+
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${__NAKO_ACTIVATED:-}" ] && [ -n "${NAKO_PYTHON:-}" ] \
+    && [ -x "$NAKO_PYTHON" ]; then
+    exec "$NAKO_PYTHON" "$@"
+fi
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-in-nako-env" python "$@"

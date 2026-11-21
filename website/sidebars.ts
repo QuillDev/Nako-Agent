@@ -5,7 +5,7 @@ const sidebars: SidebarsConfig = {
     'user-stories',
     // The Marketplace lives in the navbar. On mobile Docusaurus opens the drawer on the doc sidebar,
     // with the navbar a "Back to main menu" tap away, so without this link it is undiscoverable on a phone.
-    {type: 'link', label: 'Browse the Marketplace', href: 'https://hermes-agent.nousresearch.com/marketplace'},
+    {type: 'link', label: 'Browse the Marketplace', href: 'https://portal.nakode.moe/marketplace'},
     {
       type: 'category',
       label: 'Getting Started',
@@ -23,7 +23,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Using Hermes',
+      label: 'Using Nako',
       collapsed: true,
       items: [
         'user-guide/cli',
@@ -184,7 +184,7 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-claude-code',
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-codex',
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-computer-use',
-                    'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-hermes-agent',
+                    'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-nako-agent',
                   ],
                 },
                 {
@@ -401,7 +401,7 @@ const sidebars: SidebarsConfig = {
                   items: [
                     'user-guide/skills/optional/devops/devops-actual-setup',
                     'user-guide/skills/optional/devops/devops-docker-management',
-                    'user-guide/skills/optional/devops/devops-hermes-s6-container-supervision',
+                    'user-guide/skills/optional/devops/devops-nako-s6-container-supervision',
                     'user-guide/skills/optional/devops/devops-inference-sh-cli',
                     'user-guide/skills/optional/devops/devops-pinggy-tunnel',
                     'user-guide/skills/optional/devops/devops-setup-wizard-generator',
@@ -605,8 +605,8 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/optional/software-development/software-development-ast-grep',
                     'user-guide/skills/optional/software-development/software-development-code-wiki',
                     'user-guide/skills/optional/software-development/software-development-grill-me',
-                    'user-guide/skills/optional/software-development/software-development-hermes-agent-skill-authoring',
-                    'user-guide/skills/optional/software-development/software-development-inspecting-hermes-desktop-dom',
+                    'user-guide/skills/optional/software-development/software-development-nako-agent-skill-authoring',
+                    'user-guide/skills/optional/software-development/software-development-inspecting-nako-desktop-dom',
                     'user-guide/skills/optional/software-development/software-development-node-inspect-debugger',
                     'user-guide/skills/optional/software-development/software-development-pr-lens',
                     'user-guide/skills/optional/software-development/software-development-python-debugpy',
@@ -721,17 +721,17 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       items: [
         'guides/run-nemotron-3-ultra-free',
-        'guides/run-hermes-with-nous-portal',
+        'guides/run-nako-with-nous-portal',
         'guides/tips',
-        'guides/secure-hermes-on-a-work-machine',
+        'guides/secure-nako-on-a-work-machine',
         'guides/local-llm-on-mac',
         'guides/daily-briefing-bot',
         'guides/team-telegram-assistant',
         'guides/python-library',
-        'guides/use-mcp-with-hermes',
-        'guides/manage-hermes-cloud-with-mcp',
-        'guides/use-soul-with-hermes',
-        'guides/use-voice-mode-with-hermes',
+        'guides/use-mcp-with-nako',
+        'guides/manage-nako-cloud-with-mcp',
+        'guides/use-soul-with-nako',
+        'guides/use-voice-mode-with-nako',
         'guides/automate-with-cron',
         'guides/cron-script-only',
         'guides/automation-blueprints',
@@ -891,8 +891,8 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'link',
-      label: 'Compare Hermes Agent',
-      href: 'https://hermes-agent.nousresearch.com/compare',
+      label: 'Compare Nako Agent',
+      href: 'https://portal.nakode.moe/compare',
     },
   ],
 };
