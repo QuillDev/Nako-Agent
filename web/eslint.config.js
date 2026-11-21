@@ -12,7 +12,7 @@ export default defineConfig([
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactHooks.configs.flat.recommended,
+      reactHooks.configs['recommended-latest'],
       reactRefresh.configs.vite,
     ],
     languageOptions: {
@@ -24,13 +24,6 @@ export default defineConfig([
       // (the Provider) and a hook (useContext). Allow constant exports so
       // these don't need to be split into separate files.
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      // TODO: upgrade these react-hooks v7 rules from 'warn' to 'error' after
-      // refactoring set-state-in-effect, ref-as-instance-var, and manual
-      // memoization patterns in the web codebase.
-      'react-hooks/set-state-in-effect': 'warn',
-      'react-hooks/refs': 'warn',
-      'react-hooks/preserve-manual-memoization': 'warn',
-      'react-hooks/static-components': 'warn',
     },
   },
 ])
