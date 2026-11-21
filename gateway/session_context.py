@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator
 
+from hermes_agent.compat.upstream_names import own_spelling
+
 # "Never set here" (falls back to os.environ for CLI/cron) vs "" = explicitly cleared (no fallback).
 _UNSET: Any = object()
 
@@ -244,6 +246,7 @@ def bound_session_env(name: str) -> str:
 def get_session_env(name: str, default: str = "") -> str:
     """Read a session var by legacy ``HERMES_SESSION_*`` name; drop-in for os.getenv.  The
     ContextVar wins if ever set here (even to ``""``); else ``os.environ``; else *default*."""
+    name = own_spelling(name)
     if (value := _bound_session_value(name)) is not _UNSET:
         return value
     return os.getenv(name, default)

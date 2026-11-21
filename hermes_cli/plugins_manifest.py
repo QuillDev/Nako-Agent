@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 from utils import fast_safe_load
+from hermes_agent.compat.upstream_names import own_keys
 from hermes_cli.plugin_capabilities import parse_declared_capabilities as _parse_declared_capabilities
 
 try:
@@ -556,7 +557,7 @@ def parse_manifest_file(
         if yaml is None:
             logger.warning("ruamel.yaml not installed – cannot load %s", manifest_file)
             return None
-        data = fast_safe_load(manifest_file.read_text(encoding="utf-8-sig")) or {}
+        data = own_keys(fast_safe_load(manifest_file.read_text(encoding="utf-8-sig")) or {})
         if not isinstance(data, Mapping):
             logger.warning("Failed to parse %s: top level must be a mapping, got %s (#14066)",
                            manifest_file, type(data).__name__)

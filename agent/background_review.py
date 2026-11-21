@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from agent.i18n import t
+from hermes_agent.compat.upstream_names import offered
 from agent.prompt_cache_scope import conversation_id, resolve_prompt_cache_scope_safe
 from agent.thread_scoped_output import thread_scoped_silence
 
@@ -392,7 +393,7 @@ def _parent_can_emit_tool_calls(agent: Any) -> bool:
     would be a guaranteed no-op that still pays a full spawn. Silence means capable."""
     client = getattr(agent, "client", None)
     for candidate in (client, type(client) if client is not None else None):
-        supported = getattr(candidate, "SUPPORTS_HERMES_TOOL_CALLS", None)
+        supported = offered(candidate, "SUPPORTS_HERMES_TOOL_CALLS", None)
         if candidate is not None and supported is not None:
             return bool(supported)
     return True

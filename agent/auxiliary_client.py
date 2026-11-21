@@ -518,7 +518,9 @@ def _client_declares(client_obj: Any, flag: str) -> bool:
     """Whether ``client_obj`` (or its class) sets ``flag`` truthy; absent → False. Capability declaration,
     not isinstance, so out-of-tree clients can opt out of wrappers unimported (cf. SUPPORTS_HERMES_TOOL_CALLS)."""
     try:
-        return bool(getattr(client_obj, flag, False))
+        from hermes_agent.compat.upstream_names import offered
+
+        return bool(offered(client_obj, flag, False))
     except Exception:
         return False
 

@@ -577,9 +577,11 @@ def validate_plugin_dir(
     import hermes_yaml as yaml
 
     try:
-        manifest = yaml.safe_load(
+        from hermes_agent.compat.upstream_names import own_keys
+
+        manifest = own_keys(yaml.safe_load(
             manifest_file.read_text(encoding="utf-8-sig")
-        )
+        ))
     except Exception as exc:
         report.add("manifest", False, f"plugin.yaml failed to parse: {exc}")
         return report

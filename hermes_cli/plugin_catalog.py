@@ -157,6 +157,9 @@ def entry_from_mapping(data: Any, label: str) -> Optional[PluginCatalogEntry]:
     if not isinstance(data, dict):
         logger.warning("Plugin catalog: %s: entry must be a mapping", label)
         return None
+    from hermes_agent.compat.upstream_names import own_keys
+
+    data = own_keys(data)
     name = str(data.get("name") or "")
     repo = str(data.get("repo") or "")
     sha = str(data.get("sha") or "").strip().lower()
