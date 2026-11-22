@@ -86,6 +86,8 @@ class _HomeLayer:
     stamps: tuple = ()
     # ``plugins.disabled`` when the last scan skipped a plugin it names, else None: enabling it changes no dir
     disabled: frozenset | None = None
+    # Optional bundled providers share code, not activation, across served profiles.
+    disabled_bundled: frozenset[str] = frozenset()
     stamp_checked_at: float | None = None
     # name -> when its miss last forced a stamp check (see ``_miss_recheck_due``)
     misses: dict[str, float] = field(default_factory=dict)
@@ -183,6 +185,8 @@ def provider_source(name: str) -> str | None:
     """
     layer = _home_layer()
     canonical = layer.aliases.get(name) or _ALIASES.get(name, name)
+    if canonical in layer.disabled_bundled:
+        return None
     if canonical in layer.registry:
         return "user"
     return _SOURCES.get(canonical)
@@ -237,6 +241,8 @@ def get_provider_profile(name: str) -> ProviderProfile | None:
 
     def lookup(n: str) -> ProviderProfile | None:
         canonical = layer.aliases.get(n) or _ALIASES.get(n, n)
+        if canonical in layer.disabled_bundled:
+            return None
         return layer.registry.get(canonical) or _REGISTRY.get(canonical)
 
     profile = lookup(name)
@@ -386,7 +392,7 @@ def list_providers() -> list[ProviderProfile]:
         _PROVIDER_LIST_CACHE = cache
     result = [p for p in _PROVIDER_LIST_CACHE if p.name not in layer.registry]
     result.extend({id(p): p for p in layer.registry.values()}.values())
-    return result
+    return [p for p in result if p.name not in layer.disabled_bundled]
 
 
 def unlisted_provider_names() -> set[str]:
@@ -397,8 +403,9 @@ def unlisted_provider_names() -> set[str]:
     turns by name. A raising ``listed()`` counts as unlisted, because a broken gate must never
     advertise a dark launch.
     """
-    hidden: set[str] = set()
-    for profile in list_providers():
+    profiles = list_providers()
+    hidden = set(_bound_home_layer()[0].disabled_bundled)
+    for profile in profiles:
         try:
             if not profile.listed():
                 hidden.add(profile.name)
@@ -420,7 +427,11 @@ def bound_profile_resolver():
 
     def resolve(name: str) -> tuple[ProviderProfile | None, ProviderProfile | None]:
         shared = _ALIASES.get(name, name)
-        return layer.registry.get(layer.aliases.get(name) or shared), _REGISTRY.get(shared)
+        local = layer.aliases.get(name) or shared
+        return (
+            None if local in layer.disabled_bundled else layer.registry.get(local),
+            None if shared in layer.disabled_bundled else _REGISTRY.get(shared),
+        )
     return resolve
 
 
@@ -474,6 +485,8 @@ def _refresh_home_layer(layer: _HomeLayer, home: Path | None, key: str, *, force
         or now - layer.stamp_checked_at >= _PLUGIN_DIR_STAMP_TTL_SECONDS
     ):
         return False
+    layer.stamp_checked_at = now  # config readers can re-enter through auth or the picker
+    gate_changed = _refresh_bundled_provider_gate(layer)
     stamps = _plugin_dir_stamps(home)
     if rescan or stamps != layer.stamps or _skipped_plugin_enabled(layer):
         # Judge the stamps' age before scanning: a slow scan must not let a stamp read before it
@@ -489,10 +502,32 @@ def _refresh_home_layer(layer: _HomeLayer, home: Path | None, key: str, *, force
         # sync: it calls list_providers(), which re-enters this function. An
         # unpublished stamp rescanned forever; an unpublished check time
         # re-stats the plugin dirs inside the TTL.
-        layer.stamp_checked_at = now
-        if _discovered and not _discovering:
-            _sync_auth_registry()
-    layer.stamp_checked_at = now
+        gate_changed = True
+    if gate_changed and _discovered and not _discovering:
+        _sync_auth_registry()
+    return True
+
+
+def _refresh_bundled_provider_gate(layer: _HomeLayer) -> bool:
+    """Apply the bound home's deny-list to optional bundles and any installed copy.
+
+    Bundled code supplies metadata process-wide; only the runtime view is gated. Core providers
+    do not opt in, so a plugin setting cannot turn off a built-in auth path.
+    """
+    global _REGISTRY_GENERATION
+    optional = [(name, plugin) for name, profile in list(_REGISTRY.items())
+                if _SOURCES.get(name) == "bundled" and (plugin := getattr(profile, "plugin_disable_id", ""))]
+    blocked = frozenset()
+    if optional:
+        from hermes_cli.plugins_discovery import _get_disabled_plugins
+
+        disabled = _get_disabled_plugins()
+        blocked = frozenset(name for name, plugin in optional
+                            if plugin in disabled or f"model-providers/{plugin}" in disabled)
+    if blocked == layer.disabled_bundled:
+        return False
+    layer.disabled_bundled = blocked
+    _REGISTRY_GENERATION += 1
     return True
 
 
@@ -957,6 +992,8 @@ def _discover_providers() -> None:
         _run_discovery_steps()
     finally:
         _discovering = False
+        # A lookup during discovery may have checked the home before optional bundles registered.
+        _bound_home_layer()[0].stamp_checked_at = None
         # hermes_cli.auth may have been imported by a plugin during discovery and snapshotted a
         # partial profile list — hand it the complete one (no-op unless auth is already loaded).
         _sync_auth_registry()

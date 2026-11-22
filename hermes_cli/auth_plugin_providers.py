@@ -61,6 +61,12 @@ class HomeScopedRegistry(dict):
                     return None
         user, shared = resolve(row.id)
         mirrored = row.id in PLUGIN_MIRRORED_PROVIDERS
+        if shared is not None and mirrored and getattr(shared, "plugin_disable_id", ""):
+            # The first enabled home may have supplied its installed copy's auth row.
+            # Keep that row's fields and aliases from leaking into other homes.
+            if key != row.id and key not in shared.aliases and (user is None or key not in user.aliases):
+                return None
+            return _home_row(row, user or shared, from_profile=True)
         if user is None:
             return row if shared is not None or not mirrored else None
         if row.id in _REGISTRY_PLUGIN_SKIP or not (mirrored or row.id in _builtin_ids()):
@@ -282,6 +288,9 @@ def sync_plugin_provider_registry() -> int:
             # Only rows core wrote (built-in or mirrored) — a row the plugin injected itself is its
             # own, more specific declaration and stays as written.
             core_row = pp.name in BUILTIN_PROVIDER_IDS or pp.name in PLUGIN_MIRRORED_PROVIDERS
+            if pp.name in PLUGIN_MIRRORED_PROVIDERS and getattr(pp, "plugin_disable_id", ""):
+                # A home with a standalone copy might have mirrored the canonical row first.
+                mirror_aliases(dict.__getitem__(PROVIDER_REGISTRY, pp.name), pp)
             if core_row and pp.name not in _REGISTRY_PLUGIN_SKIP and provider_source(pp.name) == "user":
                 row = dict.__getitem__(PROVIDER_REGISTRY, pp.name)
                 if home_profile(pp.name) is not pp:  # registered process-wide: every home reads it

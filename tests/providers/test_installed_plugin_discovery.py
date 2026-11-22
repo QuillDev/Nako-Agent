@@ -10,6 +10,7 @@ discovery keeps its hands off every other plugin in that directory.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import textwrap
 import time
@@ -104,14 +105,14 @@ def test_disabled_plugins_are_never_imported_or_registered(hermes_home):
 def test_disabled_by_manifest_name_when_directory_name_differs(hermes_home):
     # A flat manifest keys the plugin by its manifest name, not its directory name.
     (hermes_home / "config.yaml").write_text(
-        "plugins:\n  disabled:\n    - claude-subscription-directsdk-experimental\n", encoding="utf-8")
-    _write_plugin(hermes_home / "plugins" / "directsdk-experimental",
-                  name="claude-subscription-directsdk-experimental",
-                  manifest="name: claude-subscription-directsdk-experimental\nkind: model-provider\n")
+        "plugins:\n  disabled:\n    - fixture-manifest-acp\n", encoding="utf-8")
+    _write_plugin(hermes_home / "plugins" / "fixture-directory-acp",
+                  name="fixture-manifest-acp",
+                  manifest="name: fixture-manifest-acp\nkind: model-provider\n")
     from providers import get_provider_profile
 
-    assert get_provider_profile("claude-subscription-directsdk-experimental") is None
-    assert not [m for m in sys.modules if "directsdk_experimental" in m]
+    assert get_provider_profile("fixture-manifest-acp") is None
+    assert not [m for m in sys.modules if "fixture_directory_acp" in m]
 
 
 def test_enabling_a_disabled_plugin_finds_it_without_touching_the_plugin_dirs(hermes_home, monkeypatch):
@@ -130,3 +131,69 @@ def test_enabling_a_disabled_plugin_finds_it_without_touching_the_plugin_dirs(he
     config.write_text("plugins:\n  disabled: []\n", encoding="utf-8")
 
     assert providers.get_provider_profile("installed-acp").base_url == "acp://installed-acp"
+
+
+def test_optional_bundle_disable_applies_to_one_profile_and_its_installed_copy(hermes_home, monkeypatch):
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from providers import get_provider_profile, refresh_bound_home
+    import providers
+
+    bundled = hermes_home / "bundled"
+    directory = bundled / "optional-acp"
+    directory.mkdir(parents=True)
+    (directory / "__init__.py").write_text(
+        "from providers import register_provider\n"
+        "from providers.base import ProviderProfile\n"
+        "class OptionalProfile(ProviderProfile):\n"
+        "    plugin_disable_id = 'optional-acp'\n"
+        "register_provider(OptionalProfile(name='example-acp', aliases=('example-alias',), "
+        "base_url='acp://bundled', auth_type='external_process'))\n",
+        encoding="utf-8",
+    )
+    # Keep real core providers in discovery as a control.
+    shutil.copytree(providers._BUNDLED_PLUGINS_DIR / "openrouter", bundled / "openrouter")
+    monkeypatch.setattr(providers, "_BUNDLED_PLUGINS_DIR", bundled)
+
+    def set_disabled(home, slug=None):
+        disabled = ["openrouter", slug] if slug else []
+        (home / "config.yaml").write_text(f"plugins:\n  disabled: {disabled!r}\n", encoding="utf-8")
+
+    set_disabled(hermes_home, "model-providers/optional-acp")
+    from hermes_cli.auth_plugin_providers import registry_lookup
+    from hermes_cli.models_catalog_static import listed_canonical_providers
+
+    def assert_disabled():
+        assert get_provider_profile("example-acp") is None
+        assert get_provider_profile("example-alias") is None
+        assert registry_lookup("example-acp") is None
+        assert registry_lookup("example-alias") is None
+        assert registry_lookup("example-acp-alias") is None
+        assert "example-acp" not in {entry.slug for entry in listed_canonical_providers()}
+        assert get_provider_profile("openrouter") is not None
+
+    assert_disabled()  # first discovery in this process is from the disabled home
+    other = hermes_home / "other"
+    other.mkdir()
+    _write_plugin(other / "plugins" / "optional-acp", name="example-acp",
+                  manifest="name: optional-acp\nkind: model-provider\n")
+    token = set_hermes_home_override(other)
+    try:
+        profile = get_provider_profile("example-acp")
+        assert profile is not None and profile.base_url == "acp://example-acp"
+        row = registry_lookup("example-acp-alias")
+        assert row is not None and row.id == "example-acp"
+        assert "example-acp" in {entry.slug for entry in listed_canonical_providers()}
+        set_disabled(other, "optional-acp")
+        refresh_bound_home()
+        assert_disabled()  # a previously loaded standalone copy cannot bypass the new setting
+    finally:
+        reset_hermes_home_override(token)
+    assert_disabled()
+    set_disabled(hermes_home)
+    refresh_bound_home()
+    profile = get_provider_profile("example-alias")
+    assert profile is not None and profile.base_url == "acp://bundled"
+    row = registry_lookup("example-alias")
+    assert row is not None and row.inference_base_url == "acp://bundled"
+    assert registry_lookup("example-acp-alias") is None
+    assert "example-acp" in {entry.slug for entry in listed_canonical_providers()}
