@@ -8,10 +8,17 @@ This branch is the source of Nako-Agent: a set of patches on top of an upstream 
 
 The `main` branch is generated from these: the patches applied to the pinned commit, then one rebrand commit on top. Installs and updates pull `main`. Never edit it by hand.
 
+A fresh clone needs the upstream history once:
+
 ```bash
-git remote add upstream <upstream repo url>   # once per clone
+git remote add upstream <upstream repo url>
 git fetch upstream main
-python3 scripts/nako/patches.py apply         # builds the commit stack in work/
+```
+
+Then build the commit stack in `work/`:
+
+```bash
+python3 scripts/nako/patches.py apply
 ```
 
 From there, `scripts/nako/README.md` covers adding and changing patches.

@@ -699,7 +699,7 @@ def cmd_status(repo: Path, args: argparse.Namespace) -> int:
     print(f"Branch:   {branch} ({'dirty' if dirty else 'clean'})")
     print(f"Pinned:   upstream @ {pinned_sha} ({behind} commit(s) behind {args.base} @ {upstream_sha})")
     print(f"Patches:  {args.patches_branch} @ {patches_sha} ({len(patches)} patch(es))")
-    sync_label = "built from this stack" if main_in_sync else "not built from this stack; rebuild: python3 scripts/nako/sync.py --skip-fetch --skip-rebase"
+    sync_label = "built from this stack" if main_in_sync else "not built from this stack; before publishing: python3 scripts/nako/sync.py --skip-fetch --skip-rebase"
     print(f"Main:     {args.target_branch} @ {main_sha} ({sync_label})")
     export_label = "match this stack" if exported else "behind this stack; run: python3 scripts/nako/patches.py export"
     print(f"Files:    {PATCH_DIR} ({export_label})")

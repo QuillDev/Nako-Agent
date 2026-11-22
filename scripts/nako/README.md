@@ -24,9 +24,9 @@ python3 scripts/nako/patches.py edit 2      # pause at patch #2; edit, test, the
 python3 scripts/nako/patches.py sunset 2    # drop a patch
 ```
 
-Then review the diff under `patches/` and commit it here, like any other change. `apply` refuses to throw away commits that were never exported (`--force` overrides).
+Then review the diff under `patches/` and commit it here, like any other change. `apply` stops if `work/` has uncommitted edits, and refuses to throw away commits that were never exported (`--force` overrides).
 
-None of the above touches `main`.
+None of the above touches `main`; it only needs rebuilding before a publish.
 
 ## Updating to newer upstream
 
