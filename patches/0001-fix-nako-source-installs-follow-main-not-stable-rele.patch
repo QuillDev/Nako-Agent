@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Quill <siinspam@gmail.com>
+Date: Sat, 21 Nov 2026 19:25:53 +0000
+Subject: fix(nako): source installs follow main, not stable releases
+
+The fork publishes no releases, and the tags it inherited point at
+upstream code. An install or update that never chose a channel would
+resolve one of those tags instead of this fork's branch.
+
+Co-authored-by: Nako <nako@quill.moe>
+
+diff --git a/hermes_cli/update_channel.py b/hermes_cli/update_channel.py
+index b0459e335c1fee602281854d22099d7e0d2f33a0..2cb68c33955abd685ee9e54a57ebb6430de31bfb 100644
+--- a/hermes_cli/update_channel.py
++++ b/hermes_cli/update_channel.py
+@@ -197,7 +197,7 @@ def default_channel(project_root: Optional[Path] = None) -> str:
+     root = Path(project_root) if project_root is not None else install_root()
+     stamp = _read_stamp(root)
+     if not _package_channel(stamp):
+-        return CHANNEL_STABLE if _tracks_official_origin(root) else CHANNEL_MAIN
++        return CHANNEL_MAIN  # this fork publishes no releases
+     if stamp.get("source") == "channel-build":
+         request = stamp.get("channelBuild")
+         if not isinstance(request, dict):
+diff --git a/scripts/install.ps1 b/scripts/install.ps1
+index f4b3a795e03d8309954f866430cec28562b519cf..0524b3097edc265f0e9d4626bdcac8fe96f5c9f9 100644
+--- a/scripts/install.ps1
++++ b/scripts/install.ps1
+@@ -992,10 +992,7 @@ function Get-LatestStableRelease([string]$Origin) {
+ # releases; hermes_cli.update_channel.default_channel decides the same way).
+ function Get-StableTarget([string]$Origin) {
+     if ($Commit -or $Channel -ceq 'main') { return '' }
+-    if ($Channel -cne 'stable') {
+-        if ($Branch -cne 'main') { return '' }
+-        if ($Origin -notmatch '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)NousResearch/hermes-agent(\.git)?/?$') { return '' }
+-    }
++    if ($Channel -cne 'stable') { return '' }  # this fork publishes no releases
+     $release = Get-LatestStableRelease $Origin
+     if ($release) { return $release }
+     return '-'
+diff --git a/scripts/install.sh b/scripts/install.sh
+index e3a2c18cf225c1ef95a2c82d28848e9d9d30aaee..9d552299462ba7749a4e203dec07f15377554ce4 100755
+--- a/scripts/install.sh
++++ b/scripts/install.sh
+@@ -695,7 +695,7 @@ stable_target() {
+     case "$CHANNEL" in
+         main) return 0 ;;
+         stable) ;;
+-        *) [ "$BRANCH" = main ] && is_official_repo "$1" || return 0 ;;
++        *) return 0 ;;  # this fork publishes no releases
+     esac
+     local release
+     release="$(latest_stable_release "$1")"

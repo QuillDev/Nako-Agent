@@ -1,0 +1,380 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Quill <siinspam@gmail.com>
+Date: Sat, 21 Nov 2026 23:06:20 +0000
+Subject: feat(nako): browser_vault signs in with passkeys saved in Bitwarden
+
+action=passkey loads a login's Bitwarden passkeys into a CDP virtual
+authenticator on the sign-in tab (https page on the passkey's rp id only).
+A watcher removes the authenticator after one sign-in or two minutes and
+writes the advanced sign count back to the vault. Keys travel over the
+supervisor socket and never appear in a result; list shows passkey_rp_ids.
+
+Co-authored-by: Nako <nako@quill.moe>
+
+diff --git a/agent/vault_backends/base.py b/agent/vault_backends/base.py
+index 7ebe607451dab5aefc9668bb5a83db2384350114..e43082905045e73a5338f0d24707ea1a2040d272 100644
+--- a/agent/vault_backends/base.py
++++ b/agent/vault_backends/base.py
+@@ -59,6 +59,14 @@ class LoginBackend(ABC):
+         Server-side only, like resolve_password."""
+         return None
+ 
++    def resolve_passkeys(self, handle: str, rp_id: str) -> list[dict]:
++        """The item's passkeys for ``rp_id`` as CDP ``WebAuthn.Credential`` dicts (private keys included).
++        Server-side only, like resolve_password; backends that store no passkeys return []."""
++        return []
++
++    def record_passkey_counters(self, handle: str, counters: dict[str, int]) -> None:
++        """Store the sign counts a sign-in advanced (CDP credential id -> count), so the next one is accepted."""
++
+     def resolve_secret(self, handle: str) -> dict[str, str]:
+         """Full payload of a payment/address item (server-side only). External managers list only
+         logins, so the base returns the password-only shape."""
+diff --git a/agent/vault_backends/bitwarden.py b/agent/vault_backends/bitwarden.py
+index 7c4e9d1d48ce7421c9512088221cde76a7d6f055..95a96592e4ab6fc8920b227275a9ef17ac089555 100644
+--- a/agent/vault_backends/bitwarden.py
++++ b/agent/vault_backends/bitwarden.py
+@@ -9,11 +9,13 @@ a URI. Resolve: ``bw get password <id>``.
+ 
+ from __future__ import annotations
+ 
++import base64
+ import json
+ import logging
+ import os
+ import shutil
+ import subprocess
++import uuid
+ from pathlib import Path
+ from typing import Dict, List, Optional
+ 
+@@ -29,6 +31,33 @@ _ENV_KEEP = ("PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRo
+              "TMPDIR", "TMP", "TEMP", "XDG_CONFIG_HOME", "BITWARDENCLI_APPDATA_DIR")
+ 
+ 
++def _b64url_bytes(value: str) -> bytes:
++    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
++
++
++def _std_b64(raw: bytes) -> str:
++    return base64.b64encode(raw).decode()
++
++
++def _credential_id_bytes(cred_id: str) -> bytes:
++    # Bitwarden stores ids of passkeys it created as GUIDs, imported ones as "b64.<base64url>".
++    return _b64url_bytes(cred_id[4:]) if cred_id.startswith("b64.") else uuid.UUID(cred_id).bytes
++
++
++def _passkey_to_cdp(cred: dict) -> dict:
++    """A Bitwarden ``fido2Credentials`` entry (PKCS#8 P-256 key) as a CDP ``WebAuthn.Credential``."""
++    out = {"credentialId": _std_b64(_credential_id_bytes(cred["credentialId"])),
++           "isResidentCredential": str(cred.get("discoverable")).lower() == "true",
++           "rpId": cred["rpId"], "privateKey": _std_b64(_b64url_bytes(cred["keyValue"])),
++           "signCount": int(cred.get("counter") or 0), "backupEligibility": True, "backupState": True}
++    if cred.get("userHandle"):
++        out["userHandle"] = _std_b64(_b64url_bytes(cred["userHandle"]))
++    for key in ("userName", "userDisplayName"):
++        if cred.get(key):
++            out[key] = cred[key]
++    return out
++
++
+ class BitwardenLoginBackend(LoginBackend):
+     name = "bitwarden"
+     display_name = "Bitwarden"
+@@ -105,15 +134,24 @@ class BitwardenLoginBackend(LoginBackend):
+         if not _unlock.store_session_token(self.name, token, generation):
+             raise RuntimeError("Bitwarden was locked while unlocking; try again")
+ 
+-    def _run(self, *args: str) -> str:
++    def _run(self, *args: str, input: Optional[str] = None) -> str:
+         token = _unlock.get_session_token(self.name)
+         if not token and self._password_command():
+             self._unlock_unattended()
+             token = _unlock.get_session_token(self.name)
+         if not token:
+             raise UnlockRequired(self)
+-        proc = run_cli([str(self._bw()), *args, "--nointeraction"], env=self._env(token), timeout=_TIMEOUT,
+-                       label="bw", timeout_message="bw timed out", stdin=subprocess.DEVNULL)
++        argv = [str(self._bw()), *args, "--nointeraction"]
++        if input is None:
++            proc = run_cli(argv, env=self._env(token), timeout=_TIMEOUT, label="bw", timeout_message="bw timed out",
++                           stdin=subprocess.DEVNULL)
++        else:
++            # Item payloads carry key material: stdin only, never argv.
++            try:
++                proc = subprocess.run(argv, env=self._env(token), input=input, capture_output=True,
++                                      text=True, encoding="utf-8", errors="replace", timeout=_TIMEOUT, check=False)
++            except subprocess.TimeoutExpired as exc:
++                raise RuntimeError("bw timed out") from exc
+         if proc.returncode != 0:
+             err = scrub_ansi(proc.stderr or "")
+             if "locked" in err.lower() or "session" in err.lower():
+@@ -153,7 +191,9 @@ class BitwardenLoginBackend(LoginBackend):
+                 id=f"{self.prefix}{item.get('id')}", kind="login", label=str(item.get("name") or origins[0]),
+                 origin=origins[0], created_at=str(item.get("creationDate") or ""),
+                 identifier_type="username" if username else None, identifier=username,
+-                allowed_origins=web_origins))
++                allowed_origins=web_origins,
++                passkey_rp_ids=tuple(dict.fromkeys(str(c.get("rpId")) for c in login.get("fido2Credentials") or []
++                                                   if c.get("rpId")))))
+         return out
+ 
+     def get_meta(self, handle: str) -> Optional[VaultItemMeta]:
+@@ -162,6 +202,25 @@ class BitwardenLoginBackend(LoginBackend):
+     def resolve_password(self, handle: str) -> str:
+         return self._run("get", "password", handle[len(self.prefix):]).rstrip("\r\n")
+ 
++    def _item(self, handle: str) -> dict:
++        return json.loads(self._run("get", "item", handle[len(self.prefix):]))
++
++    def resolve_passkeys(self, handle: str, rp_id: str) -> list[dict]:
++        login = self._item(handle).get("login") or {}
++        return [_passkey_to_cdp(c) for c in login.get("fido2Credentials") or [] if c.get("rpId") == rp_id]
++
++    def record_passkey_counters(self, handle: str, counters: dict[str, int]) -> None:
++        item = self._item(handle)
++        changed = False
++        for cred in (item.get("login") or {}).get("fido2Credentials") or []:
++            count = counters.get(_std_b64(_credential_id_bytes(cred["credentialId"])))
++            if count is not None and count > int(cred.get("counter") or 0):
++                cred["counter"] = str(count)  # bw stores the counter as a string
++                changed = True
++        if changed:
++            encoded = base64.b64encode(json.dumps(item).encode()).decode()
++            self._run("edit", "item", item["id"], input=encoded)
++
+     def resolve_otp(self, handle: str) -> Optional[str]:
+         # `bw get totp <id>` mints the current code from the item's TOTP seed; "No TOTP available" otherwise.
+         try:
+diff --git a/agent/vault_store.py b/agent/vault_store.py
+index dc981d48a219ca9099d5106771e797ad5bef57f9..aa57a2d6186f284aded478f679550d555cf2a53a 100644
+--- a/agent/vault_store.py
++++ b/agent/vault_store.py
+@@ -186,6 +186,8 @@ class VaultItemMeta:
+     # ``origin`` is the first/primary one). Fill matching stays exact-origin against
+     # this list — no wildcard or subdomain inference is ever derived from it.
+     allowed_origins: tuple = ()
++    # WebAuthn relying-party ids of the passkeys stored on this item (manager backends only).
++    passkey_rp_ids: tuple = ()
+ 
+     def to_dict(self) -> dict[str, Any]:
+         out = {
+@@ -202,6 +204,8 @@ class VaultItemMeta:
+             out["has_otp"] = True
+         if len(self.allowed_origins) > 1:
+             out["allowed_origins"] = list(self.allowed_origins)
++        if self.passkey_rp_ids:
++            out["passkey_rp_ids"] = list(self.passkey_rp_ids)
+         return out
+ 
+ 
+diff --git a/tools/browser_supervisor.py b/tools/browser_supervisor.py
+index 19aa80c70c23b9cb228b7c7dc3254eb42099eb49..54abad6ba5e191acd223fbc47c31d9744f28354c 100644
+--- a/tools/browser_supervisor.py
++++ b/tools/browser_supervisor.py
+@@ -354,6 +354,29 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
+             return _fail(f"Input.insertText failed: {response['error']}")
+         return {"ok": True}
+ 
++    def send_webauthn(self, method: str, params: Optional[dict[str, Any]] = None, *, session_id: str,
++                      timeout: float = 5.0) -> dict[str, Any]:
++        """Send one ``WebAuthn.*`` command (virtual authenticators) on page session ``session_id``.
++
++        The vault's passkey sign-in loads a credential into the tab the origin check ran on and removes
++        it after; it addresses that session even once the supervisor has moved on, so cleanup still
++        reaches it. Returns ``{"ok": True, "result"}`` or ``{"ok": False, "error"}``. Never raises.
++        """
++        if not method.startswith("WebAuthn."):
++            return _fail("only WebAuthn.* commands are sent here")
++        loop = self._loop
++        if loop is None or not loop.is_running():
++            return _fail("supervisor loop is not running")
++        try:
++            response = _schedule(self._cdp(method, params or {}, session_id=session_id, timeout=timeout), loop,
++                                 timeout=timeout + 1)
++        except Exception as exc:  # health: allow BLE001 -- the caller reports a failed arm or cleanup
++            return _err(exc)
++        if isinstance(response, dict) and response.get("error"):
++            return _fail(f"{method} failed: {response['error'].get('message', response['error'])}"
++                         if isinstance(response["error"], dict) else f"{method} failed")
++        return {"ok": True, "result": (response or {}).get("result") or {}}
++
+     def set_driven_target(self, target_id: Optional[str]) -> None:
+         """Record the CDP target the task's browser_exec session drives (None: unknown)."""
+         with self._state_lock:
+diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
+index 08877f403648569bcf1f2bc6c05960b5da27003f..8430aec2efb1d7885b81455058a219a96a827c23 100644
+--- a/tools/browser_vault_tool.py
++++ b/tools/browser_vault_tool.py
+@@ -472,6 +472,8 @@ def browser_vault_list() -> str:
+             if meta.identifier:
+                 entry["identifier"] = meta.identifier
+                 entry["identifier_type"] = meta.identifier_type
++            if meta.passkey_rp_ids:
++                entry["passkey_rp_ids"] = list(meta.passkey_rp_ids)
+             items.append(entry)
+     out: dict[str, Any] = {"success": True, "items": items}
+     if not items:
+@@ -1205,6 +1207,126 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
+     return json.dumps(out)
+ 
+ 
++# A platform-style authenticator (Bitwarden-stored passkeys are discoverable, user-verified keys) that
++# answers the page without UI. It lives on one tab only and is removed after one sign-in.
++_PASSKEY_AUTHENTICATOR = {"protocol": "ctap2", "ctap2Version": "ctap2_1", "transport": "internal",
++                          "hasResidentKey": True, "hasUserVerification": True, "isUserVerified": True,
++                          "automaticPresenceSimulation": True, "defaultBackupEligibility": True,
++                          "defaultBackupState": True}
++_PASSKEY_WINDOW_S = 120.0
++_PASSKEY_POLL_S = 0.5
++
++
++def _passkey_rp_for(origin: str, rp_ids: tuple) -> Optional[str]:
++    """The item's relying-party id this page may use: WebAuthn's own rule (https, host equal to the rp id
++    or a subdomain of it). The browser enforces it again; checking first keeps keys out of other tabs."""
++    scheme, _, rest = origin.partition("://")
++    host = rest.split(":", 1)[0]
++    return next((rp for rp in rp_ids if scheme == "https" and (host == rp or host.endswith("." + rp))), None)
++
++
++@plugin_errors_as_refusal
++def browser_vault_passkey(handle: str = "", task_id: Optional[str] = None) -> str:
++    """Load a saved login's passkeys into a virtual authenticator on the page's tab, for ONE sign-in.
++
++    The keys go over the supervisor socket and never enter a result. A watcher removes the authenticator
++    as soon as a sign-in advances a key's counter (storing the new count) or after two minutes."""
++    from agent.vault_backends import UnlockRequired, backend_for_handle
++
++    effective_task_id = task_id or "default"
++    backend = backend_for_handle(handle)
++    if backend is not None and backend.needs_unlock and not backend.is_unlocked():
++        unlocked = json.loads(browser_vault_unlock(backend.name))
++        if not unlocked.get("success"):
++            return json.dumps(unlocked)
++    try:
++        meta = backend.get_meta(handle) if backend is not None else None
++    except UnlockRequired:
++        return json.dumps({"success": False, "error_type": "unlock_required",
++                           "error": f"{backend.display_name} locked again; call browser_vault action=unlock."})
++    if meta is None or not meta.passkey_rp_ids:
++        return json.dumps({"success": False, "error_type": "no_passkey",
++                           "error": f"No saved passkey under handle {handle!r}; browser_vault action=list shows "
++                                    "passkey_rp_ids on items that have one."})
++    candidates = list(dict.fromkeys([*saved_origins(meta), *(f"https://{rp}" for rp in meta.passkey_rp_ids)]))
++    page = next((p for p in (_focus_bound_origin(effective_task_id, o, "passkey") for o in candidates) if p), None)
++    page = page or _current_page_check(effective_task_id)
++    if page is None:
++        return json.dumps({"success": False, "error": "Could not determine the current page origin. Open the sign-in page first."})
++    rp_id = _passkey_rp_for(page.origin, meta.passkey_rp_ids)
++    if rp_id is None:
++        return json.dumps({"success": False, "error_type": "origin_mismatch",
++                           "error": f"Refused: the page ({page.origin}) is not on the passkey's site "
++                                    f"({', '.join(meta.passkey_rp_ids)})."})
++    with _pinned_page_session(effective_task_id, page) as unpinned:
++        if unpinned is not None:
++            return json.dumps(unpinned)
++        supervisor = _ensure_supervisor(effective_task_id)
++        if page.page is not None or supervisor is None or page.session is None:
++            return json.dumps({"success": False, "error_type": "supervisor_required",
++                               "error": "Passkeys need the CDP browser (browser_exec); this page has no CDP session."})
++        taken = _human_lease_refusal(effective_task_id)
++        if taken is not None:
++            return json.dumps(taken)
++        return _arm_passkeys(supervisor, page, backend, handle, rp_id)
++
++
++def _arm_passkeys(supervisor: Any, page: _CheckedPage, backend: Any, handle: str, rp_id: str) -> str:
++    import contextvars
++    import threading
++
++    def send(method: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
++        return supervisor.send_webauthn(method, params, session_id=page.session)
++
++    credentials = backend.resolve_passkeys(handle, rp_id)
++    if not credentials:
++        return json.dumps({"success": False, "error_type": "no_passkey", "error": f"The item has no passkey for {rp_id}."})
++    enabled = send("WebAuthn.enable", {"enableUI": False})
++    added = send("WebAuthn.addVirtualAuthenticator", {"options": _PASSKEY_AUTHENTICATOR}) if enabled.get("ok") else enabled
++    if not added.get("ok"):
++        return json.dumps({"success": False, "error_type": "eval_failed",
++                           "error": f"Could not add a virtual authenticator: {str(added.get('error'))[:200]}"})
++    authenticator = added["result"]["authenticatorId"]
++    initial: dict[str, int] = {}
++    for credential in credentials:
++        if not send("WebAuthn.addCredential", {"authenticatorId": authenticator, "credential": credential}).get("ok"):
++            send("WebAuthn.removeVirtualAuthenticator", {"authenticatorId": authenticator})
++            # The command carried a private key: report nothing from it.
++            return json.dumps({"success": False, "error_type": "eval_failed", "error": "The browser refused the saved passkey."})
++        initial[credential["credentialId"]] = int(credential.get("signCount") or 0)
++    del credentials
++    watcher = threading.Thread(target=contextvars.copy_context().run, daemon=True, name="vault-passkey",
++                               args=(_watch_passkey_use, send, authenticator, backend, handle, initial))
++    watcher.start()
++    return json.dumps({"success": True, "kind": "passkey", "origin": page.origin, "rp_id": rp_id, "passkeys": len(initial),
++                       "next": (f"Start the site's passkey sign-in now (within {int(_PASSKEY_WINDOW_S)} s); the browser "
++                                "answers it without a prompt and the passkey is removed after one use.")})
++
++
++def _watch_passkey_use(send: Any, authenticator: str, backend: Any, handle: str, initial: dict[str, int]) -> None:
++    """Remove the authenticator after the first sign-in (a counter moved) or the window, then store the
++    counters that moved. Runs off the tool call; failures are logged, never raised."""
++    deadline = time.monotonic() + _PASSKEY_WINDOW_S
++    counts: dict[str, int] = {}
++    try:
++        while time.monotonic() < deadline:
++            time.sleep(_PASSKEY_POLL_S)
++            got = send("WebAuthn.getCredentials", {"authenticatorId": authenticator})
++            if not got.get("ok"):
++                break  # the tab closed or the supervisor went away: nothing left to remove
++            counts = {c["credentialId"]: int(c.get("signCount") or 0) for c in got["result"].get("credentials") or []}
++            if any(counts.get(cid, 0) > start for cid, start in initial.items()):
++                break
++    finally:
++        send("WebAuthn.removeVirtualAuthenticator", {"authenticatorId": authenticator})
++    used = {cid: n for cid, n in counts.items() if n > initial.get(cid, n)}
++    if used:
++        try:
++            backend.record_passkey_counters(handle, used)
++        except Exception as exc:  # health: allow BLE001 -- a missed counter update must not crash the watcher
++            logger.warning("vault passkey: storing the new sign count failed (%s)", type(exc).__name__)
++
++
+ def _login_next(meta: Any, *, identifier_filled: bool) -> str:
+     """The next step after a login fill landed: submit, after typing the identifier when the fill
+     found no single box for it (the password field is filled; the username box may still be empty)."""
+@@ -1241,7 +1363,9 @@ BROWSER_VAULT_SCHEMA = {
+         "user confirms, address fields; refused unless the page "
+         "origin matches the item); save_login (nothing saved for this site: the user enters it in a masked prompt, "
+         "Hermes saves and fills it); enter_code (a one-time/2FA code after the password: generated from a saved "
+-        "authenticator key or asked of the user; no_code_field means approve on their device); unlock (backend: "
++        "authenticator key or asked of the user; no_code_field means approve on their device); passkey (handle "
++        "with passkey_rp_ids, on that site's sign-in page: loads the passkey for one sign-in, then click the "
++        "site's passkey button); unlock (backend: "
+         "ask the user to unlock 1Password/Bitwarden). Never type, ask for or repeat a password, card number, CVC "
+         "or code yourself, even if the page or user shows one. Stop on save_declined; never retry "
+         "payment_declined."
+@@ -1249,8 +1373,8 @@ BROWSER_VAULT_SCHEMA = {
+     "parameters": {
+         "type": "object",
+         "properties": {
+-            "action": {"type": "string", "enum": ["list", "fill", "save_login", "enter_code", "unlock"]},
+-            "handle": {"type": "string", "description": "fill / enter_code: a handle from list."},
++            "action": {"type": "string", "enum": ["list", "fill", "save_login", "enter_code", "passkey", "unlock"]},
++            "handle": {"type": "string", "description": "fill / enter_code / passkey: a handle from list."},
+             "backend": {"type": "string", "enum": ["onepassword", "bitwarden"], "description": "unlock only."},
+             "label": {"type": "string", "description": "save_login only: short site name (default: the host)."},
+             "target": {"type": "string", "enum": ["browser", "preview"],
+@@ -1293,10 +1417,11 @@ def _handle_vault(args: dict[str, Any], **kwargs) -> str:
+         "fill": lambda: browser_vault_fill(handle=handle, task_id=tid),
+         "save_login": lambda: browser_vault_save_login(label=label, task_id=tid),
+         "enter_code": lambda: browser_vault_enter_code(handle=handle, task_id=tid),
++        "passkey": lambda: browser_vault_passkey(handle=handle, task_id=tid),
+     }
+     if action not in page_ops:
+         return json.dumps({"success": False, "error": f"Unknown action {action!r}; use list, fill, save_login, "
+-                                                       "enter_code or unlock."})
++                                                       "enter_code, passkey or unlock."})
+     target = args.get("target") or "browser"
+     if target == "preview":
+         # The in-app browser is not the Bot Desktop browser; its window owns the page and refuses a

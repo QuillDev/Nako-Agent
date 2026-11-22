@@ -1,0 +1,456 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Quill <siinspam@gmail.com>
+Date: Sat, 21 Nov 2026 19:31:45 +0000
+Subject: build(nako): pin eslint-plugin-react-hooks to 5.2.0
+
+From 6.0 the plugin depends on two outside parser packages whose names
+carry the upstream brand. The rebrand renames them and the registry has
+no such packages, so every install failed fetching Node dependencies.
+5.2.0 has no such dependency and keeps rules-of-hooks and
+exhaustive-deps; the web config drops the rules only 7.x provides.
+
+Co-authored-by: Nako <nako@quill.moe>
+
+diff --git a/package.json b/package.json
+index 124a1444291670930075940a1c279a5bb60f56d9..d6962fb22cac7571f5907581d86fa1b2a98a9d7d 100644
+--- a/package.json
++++ b/package.json
+@@ -33,7 +33,7 @@
+     "@eslint/js": "9.39.5",
+     "eslint": "10.12.0",
+     "eslint-plugin-perfectionist": "5.12.1",
+-    "eslint-plugin-react-hooks": "7.1.1",
++    "eslint-plugin-react-hooks": "5.2.0",
+     "eslint-plugin-unused-imports": "4.4.1",
+     "globals": "17.13.0",
+     "lefthook": "2.2.1",
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 5e1d91ea0187c9f72e28a7b500d88a1abdde39c3..559d9f9af0a99b32a9d84dfe15df6dbbb754033e 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -46,8 +46,8 @@ importers:
+         specifier: 5.12.1
+         version: 5.12.1(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)
+       eslint-plugin-react-hooks:
+-        specifier: 7.1.1
+-        version: 7.1.1(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)
++        specifier: 5.2.0
++        version: 5.2.0(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2))
+       eslint-plugin-unused-imports:
+         specifier: 4.4.1
+         version: 4.4.1(@typescript-eslint/eslint-plugin@8.71.1(@typescript-eslint/parser@8.71.1(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2))
+@@ -947,56 +947,26 @@ packages:
+     resolution: {integrity: sha512-uMHhvmDmwFiLuiozaoRYTZHqMFuu3fem/X9JY78lohAuLoh8LSGGC8JqUzo2cVuBsBxkjMZNk56CE7ock8Xxkw==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/compat-data@7.29.7':
+-    resolution: {integrity: sha512-locTkQyKvwIEgBzVrn8693ebc97F2U8ZHjbXwDXJ5Fn2TCpNwTlKcaKLkdHop5c/icOFE7qt7Q9JC5hnKNa6Gg==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/compat-data@8.0.5':
+     resolution: {integrity: sha512-YLsYoQMvL8l8WrGpN3Zj7O1wK5LEBN+cQtux7BcuHyxIXve724XG+zuJ1n3U1cUweRtTzQOA4IHbuQw3N34SZw==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/core@7.29.7':
+-    resolution: {integrity: sha512-RgHBCvtjbOK2gXSNBNIkNoEc9qoVEtau3hj8gEqKQuL3HZAibKarWFEI3Lfm6EYKkLalOh8eSrj9b+ch9H/VBA==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/core@8.0.7':
+     resolution: {integrity: sha512-ZIsZWBG6Y1oa+8fkQVp0xeCdjCHBkXFCCIWrmg9SvejVvfcVQgKKRmGrBDWfM7rilhvnRoEuaqa5dkK7KB3pHA==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/generator@7.29.8':
+-    resolution: {integrity: sha512-gZbepsdh3WDtgZKWL+vTPh71LSBrm/Y4/QDZBVCcYfmeTEEuoOYwlSy+G1StfJg+/Zy550u/3TATbm7qDbbMtg==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/generator@8.0.6':
+     resolution: {integrity: sha512-/pcanjdRsonCexCuxgGD8fKnBLLzk2i9uM4kmcmGyyev2R5YDs+rafMYZ89RvaGY1mW8T7C5au0TyYaEeHBGng==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/helper-compilation-targets@7.29.7':
+-    resolution: {integrity: sha512-wem6WaBj4NaVYVdNhLPPVacES6ZJ+KBBfSkTMD3YZxbP3rm3Di85tJU5ljaUNhaOynt+Aj0xruhYuzQBt8n71g==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/helper-compilation-targets@8.0.7':
+     resolution: {integrity: sha512-ilAZCdOOlOVA7dQbaFNw2f/59p6GW33NxTopc3DvEE3efp3ZXTrGX/yZScaKw8/vd9bq31Ag0EcXiLw32bAgJg==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/helper-globals@7.29.7':
+-    resolution: {integrity: sha512-3nQVUAtvkKH9zahfWgw96Jc/uFOmjACE1kQz82E2lqWmHBgjzbNlsC22nuQTfahmWeQtTq5nQ/4Nnd2A1wj4zA==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/helper-globals@8.0.6':
+     resolution: {integrity: sha512-OdnA/N52LhzFpeUuVz5YGuSWjc7TPHiFmVYZbPlSgExocO2GwbxVpSni9MVs5wwW+wZ4kPuwBEBN9pIPDYz1mA==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/helper-module-imports@7.29.7':
+-    resolution: {integrity: sha512-ejHwrQQYcm9xnTivShn2IDOlIzInN34AXskvq9QicvCtEzq1Vzclu/tKF8Jq1Cg8JG2GL6/EmjgsCT7lXepE3g==}
+-    engines: {node: '>=6.9.0'}
+-
+-  '@babel/helper-module-transforms@7.29.7':
+-    resolution: {integrity: sha512-UPUVSyXbOh627KiCIGQSgwWzGeBKLkaJ9PJEdrngIwMSzxLR4jS4+f1f1jb7VzBbg8nFLaYotvVPFCTqdrmTAg==}
+-    engines: {node: '>=6.9.0'}
+-    peerDependencies:
+-      '@babel/core': ^7.0.0
+-
+   '@babel/helper-string-parser@7.29.7':
+     resolution: {integrity: sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw==}
+     engines: {node: '>=6.9.0'}
+@@ -1013,18 +983,10 @@ packages:
+     resolution: {integrity: sha512-HYx0YmuchRxRSpnjvcNffnPS8DCauKNmnumIuHG3jnQAVewRA7kfJGwF13ayEpSZs7s4R/oBH4eppuXcAQd5JQ==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/helper-validator-option@7.29.7':
+-    resolution: {integrity: sha512-N9ZErrD+yW5geCDtBqnOoxmR8+tNKiGuxKlDpuJxfsqpa2dFcexaziGAE/qoHLiDDreVNMupxGmSoNlyvsA3gw==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/helper-validator-option@8.0.0':
+     resolution: {integrity: sha512-U4Dybxh4WESWHt5XhBeExi4DrY0/DNK1aHpQbsrQXCUbFHuMweT0TpLEWKvaraV2Y6fS+ZXunsZ8zIuZIgvF2Q==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/helpers@7.29.10':
+-    resolution: {integrity: sha512-EMCx3AGZ3WfAl6ht7AyQoPm2Lh+BGYEMdc4Q6Hf7uSCDOZFuLq44qNwL+iaim8VlyYhRAo4X43+weadK8ZB4Yg==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/helpers@8.0.7':
+     resolution: {integrity: sha512-5dMj5kFwS2AY7Dt4PZp4px3c5ThMbbEa7tZfuHTncCGSFYq8uoA1ufDE1IS/lYpQedE+3+GQ3cPZUiplIu195w==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+@@ -1043,18 +1005,10 @@ packages:
+     resolution: {integrity: sha512-NpugTzbKgGrNe45Ui32cN8vCFFMxVtP/9rtfwv0nP5FRDAjvYBxJcLVpYA9mr1jxP6cnIT7x9LUzuDTbWYYNRA==}
+     engines: {node: '>=6.9.0'}
+ 
+-  '@babel/template@7.29.7':
+-    resolution: {integrity: sha512-puq+Gf35oI24FeN11LkoUQFqv9uwNeWpxXZi/Ji3rRIoKAzKnxRaZ+Gkj0vKS9ZCiTESfng1N9LyOyXvo+m+Gg==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/template@8.0.0':
+     resolution: {integrity: sha512-eAD0QW/AlbamBbw0FeGiwasbCVPq5ncW0HNVyLP3B9czqLyh4gvw+5JTSNt6le9+ziAU7mqDZsKTHf3jTb4chQ==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+ 
+-  '@babel/traverse@7.29.10':
+-    resolution: {integrity: sha512-B3lYAs2nkKskbgQ1nfy8Ma9ao9Q1rntTAQHrzzyDuj+TSO+X3le6PfWwqDvodsb+OumE10eMFfuMCTQSQ5iuIQ==}
+-    engines: {node: '>=6.9.0'}
+-
+   '@babel/traverse@8.0.7':
+     resolution: {integrity: sha512-bVV0brinsTWgc6ptSIoQo3GbITtl0VZAqEUJbHHcyfDPEu+q/fEvlYEa+6H85HoK8IdksKBFtKJbJFZ6Kff+zg==}
+     engines: {node: ^22.18.0 || >=24.11.0}
+@@ -3919,11 +3873,11 @@ packages:
+       eslint:
+         optional: true
+ 
+-  eslint-plugin-react-hooks@7.1.1:
+-    resolution: {integrity: sha512-f2I7Gw6JbvCexzIInuSbZpfdQ44D7iqdWX01FKLvrPgqxoE7oMj8clOfto8U6vYiz4yd5oKu39rRSVOe1zRu0g==}
+-    engines: {node: '>=18'}
++  eslint-plugin-react-hooks@5.2.0:
++    resolution: {integrity: sha512-+f15FfK64YQwZdJNELETdn5ibXEUQmW1DZL6KXhNnc2heoy/sg9VJJeT7n8TlMWouzWqSWavFkIhHyIbIAEapg==}
++    engines: {node: '>=10'}
+     peerDependencies:
+-      eslint: ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0 || ^9.0.0 || ^10.0.0
++      eslint: ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0 || ^9.0.0
+ 
+   eslint-plugin-react-refresh@0.5.7:
+     resolution: {integrity: sha512-XhJSzLljuYD4UjNuFGJu2v7aD3sqNVK12w5/DCUfrNfHWegZo2+TsavNx8MuxMwEquuFAzNbNfXKU0WoZ+YUIg==}
+@@ -4269,12 +4223,6 @@ packages:
+   hastscript@9.0.1:
+     resolution: {integrity: sha512-g7df9rMFX/SPi34tyGCyUBREQoKkapwdY/T04Qn9TDWfHhAYt4/I0gMVirzK5wEzeUqIjEB+LXC/ypb7Aqno5w==}
+ 
+-  hermes-estree@0.25.1:
+-    resolution: {integrity: sha512-0wUoCcLp+5Ev5pDW2OriHC2MJCbwLwuRx+gAqMTOkGKJJiBCLjtrvy4PWUGn6MIVefecRpzoOZ/UV6iGdOr+Cw==}
+-
+-  hermes-parser@0.25.1:
+-    resolution: {integrity: sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA==}
+-
+   hoist-non-react-statics@3.3.2:
+     resolution: {integrity: sha512-/gGivxi8JPKWNm/W0jSmzcMPpfpPLc3dY/6GxhX2hQ9iGj3aDfklV4ET7NjKpSinLpJ5vafa9iiGIEZg10SfBw==}
+ 
+@@ -4813,9 +4761,6 @@ packages:
+     resolution: {integrity: sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==}
+     engines: {node: 20 || >=22}
+ 
+-  lru-cache@5.1.1:
+-    resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
+-
+   lru-cache@6.0.0:
+     resolution: {integrity: sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA==}
+     engines: {node: '>=10'}
+@@ -6405,9 +6350,6 @@ packages:
+     resolution: {integrity: sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA==}
+     engines: {node: '>=10'}
+ 
+-  yallist@3.1.1:
+-    resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
+-
+   yallist@4.0.0:
+     resolution: {integrity: sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A==}
+ 
+@@ -6451,12 +6393,6 @@ packages:
+   yoga-layout@3.2.1:
+     resolution: {integrity: sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ==}
+ 
+-  zod-validation-error@4.0.2:
+-    resolution: {integrity: sha512-Q6/nZLe6jxuU80qb/4uJ4t5v2VEZ44lzQjPDhYJNztRQ4wyWc6VF3D3Kb/fAuPetZQnhS3hnajCf9CsWesghLQ==}
+-    engines: {node: '>=18.0.0'}
+-    peerDependencies:
+-      zod: ^3.25.0 || ^4.0.0
+-
+   zod@4.6.7:
+     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+ 
+@@ -6619,30 +6555,8 @@ snapshots:
+       '@babel/helper-validator-identifier': 8.0.6
+       js-tokens: 10.0.0
+ 
+-  '@babel/compat-data@7.29.7': {}
+-
+   '@babel/compat-data@8.0.5': {}
+ 
+-  '@babel/core@7.29.7(supports-color@10.2.2)':
+-    dependencies:
+-      '@babel/code-frame': 7.29.7
+-      '@babel/generator': 7.29.8
+-      '@babel/helper-compilation-targets': 7.29.7
+-      '@babel/helper-module-transforms': 7.29.7(@babel/core@7.29.7(supports-color@10.2.2))(supports-color@10.2.2)
+-      '@babel/helpers': 7.29.10
+-      '@babel/parser': 7.29.9
+-      '@babel/template': 7.29.7
+-      '@babel/traverse': 7.29.10(supports-color@10.2.2)
+-      '@babel/types': 7.29.8
+-      '@jridgewell/remapping': 2.3.5
+-      convert-source-map: 2.0.0
+-      debug: 4.4.3(supports-color@10.2.2)
+-      gensync: 1.0.0-beta.2
+-      json5: 2.2.3
+-      semver: 6.3.1
+-    transitivePeerDependencies:
+-      - supports-color
+-
+   '@babel/core@8.0.7':
+     dependencies:
+       '@babel/code-frame': 8.0.6
+@@ -6662,14 +6576,6 @@ snapshots:
+       obug: 3.0.0
+       verkit: 0.5.0
+ 
+-  '@babel/generator@7.29.8':
+-    dependencies:
+-      '@babel/parser': 7.29.9
+-      '@babel/types': 7.29.8
+-      '@jridgewell/gen-mapping': 0.3.13
+-      '@jridgewell/trace-mapping': 0.3.31
+-      jsesc: 3.1.0
+-
+   '@babel/generator@8.0.6':
+     dependencies:
+       '@babel/parser': 8.0.7
+@@ -6679,14 +6585,6 @@ snapshots:
+       '@types/jsesc': 2.5.1
+       jsesc: 3.1.0
+ 
+-  '@babel/helper-compilation-targets@7.29.7':
+-    dependencies:
+-      '@babel/compat-data': 7.29.7
+-      '@babel/helper-validator-option': 7.29.7
+-      browserslist: 4.29.3
+-      lru-cache: 5.1.1
+-      semver: 6.3.1
+-
+   '@babel/helper-compilation-targets@8.0.7':
+     dependencies:
+       '@babel/compat-data': 8.0.5
+@@ -6695,26 +6593,8 @@ snapshots:
+       flru: 1.0.2
+       verkit: 0.5.0
+ 
+-  '@babel/helper-globals@7.29.7': {}
+-
+   '@babel/helper-globals@8.0.6': {}
+ 
+-  '@babel/helper-module-imports@7.29.7(supports-color@10.2.2)':
+-    dependencies:
+-      '@babel/traverse': 7.29.10(supports-color@10.2.2)
+-      '@babel/types': 7.29.8
+-    transitivePeerDependencies:
+-      - supports-color
+-
+-  '@babel/helper-module-transforms@7.29.7(@babel/core@7.29.7(supports-color@10.2.2))(supports-color@10.2.2)':
+-    dependencies:
+-      '@babel/core': 7.29.7(supports-color@10.2.2)
+-      '@babel/helper-module-imports': 7.29.7(supports-color@10.2.2)
+-      '@babel/helper-validator-identifier': 7.29.7
+-      '@babel/traverse': 7.29.10(supports-color@10.2.2)
+-    transitivePeerDependencies:
+-      - supports-color
+-
+   '@babel/helper-string-parser@7.29.7': {}
+ 
+   '@babel/helper-string-parser@8.0.6': {}
+@@ -6723,15 +6603,8 @@ snapshots:
+ 
+   '@babel/helper-validator-identifier@8.0.6': {}
+ 
+-  '@babel/helper-validator-option@7.29.7': {}
+-
+   '@babel/helper-validator-option@8.0.0': {}
+ 
+-  '@babel/helpers@7.29.10':
+-    dependencies:
+-      '@babel/template': 7.29.7
+-      '@babel/types': 7.29.8
+-
+   '@babel/helpers@8.0.7':
+     dependencies:
+       '@babel/template': 8.0.0
+@@ -6747,30 +6620,12 @@ snapshots:
+ 
+   '@babel/runtime@7.29.10': {}
+ 
+-  '@babel/template@7.29.7':
+-    dependencies:
+-      '@babel/code-frame': 7.29.7
+-      '@babel/parser': 7.29.9
+-      '@babel/types': 7.29.8
+-
+   '@babel/template@8.0.0':
+     dependencies:
+       '@babel/code-frame': 8.0.6
+       '@babel/parser': 8.0.7
+       '@babel/types': 8.0.6
+ 
+-  '@babel/traverse@7.29.10(supports-color@10.2.2)':
+-    dependencies:
+-      '@babel/code-frame': 7.29.7
+-      '@babel/generator': 7.29.8
+-      '@babel/helper-globals': 7.29.7
+-      '@babel/parser': 7.29.9
+-      '@babel/template': 7.29.7
+-      '@babel/types': 7.29.8
+-      debug: 4.4.3(supports-color@10.2.2)
+-    transitivePeerDependencies:
+-      - supports-color
+-
+   '@babel/traverse@8.0.7':
+     dependencies:
+       '@babel/code-frame': 8.0.6
+@@ -9938,16 +9793,9 @@ snapshots:
+       - supports-color
+       - typescript
+ 
+-  eslint-plugin-react-hooks@7.1.1(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2):
++  eslint-plugin-react-hooks@5.2.0(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2)):
+     dependencies:
+-      '@babel/core': 7.29.7(supports-color@10.2.2)
+-      '@babel/parser': 7.29.9
+       eslint: 10.12.0(jiti@2.7.0)(supports-color@10.2.2)
+-      hermes-parser: 0.25.1
+-      zod: 4.6.7
+-      zod-validation-error: 4.0.2(zod@4.6.7)
+-    transitivePeerDependencies:
+-      - supports-color
+ 
+   eslint-plugin-react-refresh@0.5.7(eslint@10.12.0(jiti@2.7.0)(supports-color@10.2.2)):
+     dependencies:
+@@ -10402,12 +10250,6 @@ snapshots:
+       property-information: 7.2.0
+       space-separated-tokens: 2.0.2
+ 
+-  hermes-estree@0.25.1: {}
+-
+-  hermes-parser@0.25.1:
+-    dependencies:
+-      hermes-estree: 0.25.1
+-
+   hoist-non-react-statics@3.3.2:
+     dependencies:
+       react-is: 16.13.1
+@@ -10899,10 +10741,6 @@ snapshots:
+ 
+   lru-cache@11.5.3: {}
+ 
+-  lru-cache@5.1.1:
+-    dependencies:
+-      yallist: 3.1.1
+-
+   lru-cache@6.0.0:
+     dependencies:
+       yallist: 4.0.0
+@@ -12126,7 +11964,8 @@ snapshots:
+ 
+   semver@5.7.2: {}
+ 
+-  semver@6.3.1: {}
++  semver@6.3.1:
++    optional: true
+ 
+   semver@7.7.4: {}
+ 
+@@ -12817,8 +12656,6 @@ snapshots:
+ 
+   y18n@5.0.8: {}
+ 
+-  yallist@3.1.1: {}
+-
+   yallist@4.0.0: {}
+ 
+   yallist@5.0.0: {}
+@@ -12871,10 +12708,6 @@ snapshots:
+ 
+   yoga-layout@3.2.1: {}
+ 
+-  zod-validation-error@4.0.2(zod@4.6.7):
+-    dependencies:
+-      zod: 4.6.7
+-
+   zod@4.6.7: {}
+ 
+   zustand@3.7.2(react@19.3.0):
+diff --git a/web/eslint.config.js b/web/eslint.config.js
+index aba2670175ec9b9a8e17310130ea3d89fe0889c0..3cabe3b26382da03d6fdafeb62ddd67a5ecd936c 100644
+--- a/web/eslint.config.js
++++ b/web/eslint.config.js
+@@ -12,7 +12,7 @@ export default defineConfig([
+     extends: [
+       js.configs.recommended,
+       tseslint.configs.recommended,
+-      reactHooks.configs.flat.recommended,
++      reactHooks.configs['recommended-latest'],
+       reactRefresh.configs.vite,
+     ],
+     languageOptions: {
+@@ -24,13 +24,6 @@ export default defineConfig([
+       // (the Provider) and a hook (useContext). Allow constant exports so
+       // these don't need to be split into separate files.
+       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+-      // TODO: upgrade these react-hooks v7 rules from 'warn' to 'error' after
+-      // refactoring set-state-in-effect, ref-as-instance-var, and manual
+-      // memoization patterns in the web codebase.
+-      'react-hooks/set-state-in-effect': 'warn',
+-      'react-hooks/refs': 'warn',
+-      'react-hooks/preserve-manual-memoization': 'warn',
+-      'react-hooks/static-components': 'warn',
+     },
+   },
+ ])
+diff --git a/web/src/components/ChatSessionList.tsx b/web/src/components/ChatSessionList.tsx
+index b286b98bb11b3625d503410225b7aad9d3c9ef98..2d71f2c08468eb63ccb71adfecd9c59ad7a99f90 100644
+--- a/web/src/components/ChatSessionList.tsx
++++ b/web/src/components/ChatSessionList.tsx
+@@ -121,7 +121,6 @@ export function ChatSessionList({
+     // Dashboard data surfaces fetch from an effect on mount + scope change;
+     // keep this local and explicit until the shared lint profile is updated
+     // for async loaders (matches FilesPage).
+-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     load();
+     // `reloadNonce` is a manual refetch trigger (Refresh button / row pick).
+   }, [isActive, load, reloadNonce]);
+diff --git a/web/src/pages/FilesPage.tsx b/web/src/pages/FilesPage.tsx
+index f972130651b2946a13f9b0ca1b575864f339ff05..202982e54b4f5aca611a20458dd9fcba3c249bd4 100644
+--- a/web/src/pages/FilesPage.tsx
++++ b/web/src/pages/FilesPage.tsx
+@@ -122,7 +122,6 @@ export default function FilesPage() {
+   useEffect(() => {
+     // Existing dashboard data pages fetch from effects; keep this local and explicit
+     // until the shared lint profile is updated for async page loaders.
+-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     void load(currentPath);
+   }, [currentPath]); // eslint-disable-line react-hooks/exhaustive-deps
+ 

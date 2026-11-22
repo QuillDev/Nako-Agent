@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Quill <29633071+QuillDev@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 23:34:40 +0000
+Subject: feat(nako): add the turn voice reminder in core
+
+Keep the existing profile opt-in and do not double-inject if the standalone copy is still installed.
+
+Co-authored-by: Nako <nako@quill.moe>
+
+diff --git a/agent/turn_context.py b/agent/turn_context.py
+index a9627f246ae6717f3ac7a101119af1c86f3dd941..3e7ec5f8b2ea0dccd81b6f3f1e971184aba4625f 100644
+--- a/agent/turn_context.py
++++ b/agent/turn_context.py
+@@ -909,6 +909,26 @@ def _withhold_blocked_prompt(agent: Any, turn_user_msg: dict[str, Any], typed: A
+             logger.warning("withheld-prompt rewrite failed for session=%s", agent.session_id or "none", exc_info=True)
+ 
+ 
++_TURN_VOICE_MARKER = "[runtime note from Nako's own setup, not part of the user's message or anyone else's post]"
++_TURN_VOICE_REMINDER = (
++    f"{_TURN_VOICE_MARKER} "
++    "Voice (SOUL.md), for this reply and final reports: all lowercase, plain short sentences. "
++    "no bullets, bold, headers or tables unless the user asks. code, paths, IDs and URLs stay exact. "
++    "dumb version by default: plain words, no code/field/PR names unless asked; the user pushes "
++    "for depth. lead with the answer, then cut it in half."
++)
++
++
++def _turn_voice_reminder() -> str:
++    from hermes_cli.config import load_config_readonly
++
++    # Keep the existing per-profile opt-in when the standalone copy is removed.
++    plugins = load_config_readonly().get("plugins") or {}
++    enabled = plugins.get("enabled") or ()
++    disabled = plugins.get("disabled") or ()
++    return _TURN_VOICE_REMINDER if "voice-reminder" in enabled and "voice-reminder" not in disabled else ""
++
++
+ def _collect_pre_llm_call_context(
+     agent: Any, *, effective_task_id: str, turn_id: str, original_user_message: Any,
+     messages: list[Any], conversation_history: Optional[list[Any]], blocks: Optional[list[str]] = None,
+@@ -920,6 +940,7 @@ def _collect_pre_llm_call_context(
+     without a message is ignored, as for ``pre_tool_call``."""
+     if getattr(agent, "_persist_disabled", False):
+         return ""
++    reminder = _turn_voice_reminder()
+     try:
+         from hermes_cli.lifecycle import invoke_hook as _invoke_hook
+         _pre_results = _invoke_hook(
+@@ -966,11 +987,15 @@ def _collect_pre_llm_call_context(
+                     )
+                 except Exception as _spill_exc:
+                     logger.warning("hook context spill failed: %s", _spill_exc)
++            if reminder and _piece.startswith(_TURN_VOICE_MARKER):
++                continue  # The in-tree note replaces any installed copy's wording.
+             _ctx_parts.append(_piece)
++        if reminder:
++            _ctx_parts.append(reminder)
+         return "\n\n".join(_ctx_parts)
+     except Exception as exc:
+         logger.warning("pre_llm_call hook failed: %s", exc)
+-    return ""
++    return reminder
+ 
+ 
+ def _merge_gateway_notes(
