@@ -8,7 +8,7 @@ To work on them, `apply` builds the files into a commit stack: the `patches` bra
 
 ## Changing patches
 
-`work/` is an ordinary checkout of the code with the patches applied as commits. Edit, run and test there; its `AGENTS.md` says how.
+`work/` is an ordinary checkout of the code with the patches applied as commits. Edit, run and test there; its `AGENTS.md` says how. Everything in it keeps upstream's names, and patches must too: the rename to Nako happens only when `main` is built.
 
 ```bash
 python3 scripts/nako/patches.py apply       # patches/ -> commit stack in work/ (safe to rerun)
