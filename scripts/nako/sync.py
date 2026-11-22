@@ -170,10 +170,10 @@ def main(argv: list[str] | None = None) -> int:
         capture=True,
     ).stdout.strip()
     upstream_sha = _run(
-        ["git", "rev-parse", "--short", upstream_ref],
+        ["git", "merge-base", args.patches_branch, upstream_ref],
         cwd=repo,
         capture=True,
-    ).stdout.strip()
+    ).stdout.strip()[:10]
 
     print(f"==> Rebuilding {args.target_branch} from {args.patches_branch} ({patches_sha})")
     _run(["git", "checkout", "-B", args.target_branch, args.patches_branch], cwd=repo)
@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     commit_msg = (
         "Rebrand to Nako-Agent\n\n"
         f"Generated from {args.patches_branch} ({patches_sha}) "
-        f"based on {upstream_ref} ({upstream_sha}) via scripts/nako/rebrand.py."
+        f"based on upstream {upstream_sha} via scripts/nako/rebrand.py."
     )
     _run(["git", "commit", "-m", commit_msg], cwd=repo)
     new_sha = _run(["git", "rev-parse", "--short", "HEAD"], cwd=repo, capture=True).stdout.strip()
