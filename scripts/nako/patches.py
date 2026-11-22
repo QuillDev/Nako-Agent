@@ -523,8 +523,6 @@ def build_update_plan(
     }
     if behind == 0:
         next_cmd = "Already up to date with upstream."
-    elif counts["conflict"] == 0:
-        next_cmd = "python3 scripts/nako/patches.py update --skip-fetch --push"
     else:
         next_cmd = "python3 scripts/nako/patches.py update --skip-fetch"
 
@@ -638,12 +636,12 @@ def _run_internal_seq_edit(todo_path: Path) -> int:
 
 
 def cmd_list(repo: Path, args: argparse.Namespace) -> int:
-    base_sha = run_git(repo, "rev-parse", "--short", args.base).stdout.strip()
+    base_sha = run_git(repo, "merge-base", args.branch, args.base).stdout.strip()[:10]
     patches = list_patches(repo, base_ref=args.base, branch=args.branch)
     if args.json:
         print(json.dumps({"base": base_sha, "branch": args.branch, "patches": [asdict(p) for p in patches]}, indent=2))
         return 0
-    print(f"Patch stack on {args.branch} above {args.base} ({base_sha}): {len(patches)} patch(es)")
+    print(f"Patch stack on {args.branch} above upstream {base_sha}: {len(patches)} patch(es)")
     if not patches:
         return 0
     for p in patches:
@@ -667,6 +665,7 @@ def cmd_status(repo: Path, args: argparse.Namespace) -> int:
     upstream_sha = run_git(repo, "rev-parse", "--short", args.base).stdout.strip()
     patches_sha = run_git(repo, "rev-parse", "--short", args.patches_branch).stdout.strip()
     behind = int(run_git(repo, "rev-list", "--count", f"{args.patches_branch}..{args.base}").stdout.strip())
+    pinned_sha = run_git(repo, "merge-base", args.patches_branch, args.base).stdout.strip()[:10]
     patches = list_patches(repo, base_ref=args.base, branch=args.patches_branch)
 
     main_sha = run_git(repo, "rev-parse", "--short", args.target_branch).stdout.strip()
@@ -683,6 +682,7 @@ def cmd_status(repo: Path, args: argparse.Namespace) -> int:
                     "state": "idle",
                     "branch": branch,
                     "dirty": dirty,
+                    "pinned": pinned_sha,
                     "upstream": upstream_sha,
                     "patches": patches_sha,
                     "patch_count": len(patches),
@@ -697,11 +697,11 @@ def cmd_status(repo: Path, args: argparse.Namespace) -> int:
         return 0
 
     print(f"Branch:   {branch} ({'dirty' if dirty else 'clean'})")
-    print(f"Upstream: {args.base} @ {upstream_sha}")
-    print(f"Patches:  {args.patches_branch} @ {patches_sha} ({len(patches)} patch(es), {behind} commit(s) behind {args.base})")
-    sync_label = "in sync" if main_in_sync else "OUT OF SYNC — run: python3 scripts/nako/sync.py --skip-fetch --skip-rebase"
+    print(f"Pinned:   upstream @ {pinned_sha} ({behind} commit(s) behind {args.base} @ {upstream_sha})")
+    print(f"Patches:  {args.patches_branch} @ {patches_sha} ({len(patches)} patch(es))")
+    sync_label = "built from this stack" if main_in_sync else "not built from this stack; rebuild: python3 scripts/nako/sync.py --skip-fetch --skip-rebase"
     print(f"Main:     {args.target_branch} @ {main_sha} ({sync_label})")
-    export_label = "current" if exported else "STALE — run: python3 scripts/nako/patches.py export"
+    export_label = "match this stack" if exported else "behind this stack; run: python3 scripts/nako/patches.py export"
     print(f"Files:    {PATCH_DIR} ({export_label})")
     return 0
 
@@ -1047,6 +1047,7 @@ def cmd_abort(repo: Path, _args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    sys.stdout.reconfigure(line_buffering=True)  # keep our lines in order with git's when piped
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if len(raw_argv) == 2 and raw_argv[0] == "_seq-edit":
         return _run_internal_seq_edit(Path(raw_argv[1]))
@@ -1055,7 +1056,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", help="Path to the work tree (defaults to work/ beside patches/).")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_list = sub.add_parser("list", help="List patches above upstream/main.")
+    p_list = sub.add_parser("list", help="List the patches in the stack.")
     p_list.add_argument("--base", default="upstream/main")
     p_list.add_argument("--branch", default="patches")
     p_list.add_argument("--files", action="store_true", help="Also show files touched by each patch.")

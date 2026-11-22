@@ -13,3 +13,5 @@ git remote add upstream <upstream repo url>   # once per clone
 git fetch upstream main
 python3 scripts/nako/patches.py apply         # builds the commit stack in work/
 ```
+
+From there, `scripts/nako/README.md` covers adding and changing patches.

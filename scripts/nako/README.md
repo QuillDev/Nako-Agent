@@ -8,41 +8,40 @@ To work on them, `apply` builds the files into a commit stack: the `patches` bra
 
 ## Changing patches
 
-```bash
-python3 scripts/nako/patches.py apply                  # patches/ -> commit stack in work/
-python3 scripts/nako/patches.py list --files           # inspect stack
-python3 scripts/nako/patches.py status                 # sync state or active pause dossier
-
-# New patch: commit it in work/, then write it out
-python3 scripts/nako/patches.py export                 # commit stack -> patches/
-
-# Existing patch (each of these exports when it finishes)
-python3 scripts/nako/patches.py fixup 2 --rebuild      # fold staged edits into patch #2
-python3 scripts/nako/patches.py edit 2                 # pause at patch #2, edit/test, then `continue --rebuild`
-python3 scripts/nako/patches.py sunset 2 --rebuild     # drop an upstreamed/obsolete patch
-```
-
-Review the diff under `patches/` and commit it here. `apply` refuses to throw away commits that were never exported (`--force` overrides).
-
-## Turn-based update flow (non-interactive)
+`work/` is an ordinary checkout of the code with the patches applied as commits. Edit, run and test there.
 
 ```bash
-# 1. Dry-run preflight (never mutates branches): see clean / upstreamed / conflicting patches
-python3 scripts/nako/patches.py plan
-python3 scripts/nako/patches.py plan --json
+python3 scripts/nako/patches.py apply       # patches/ -> commit stack in work/ (safe to rerun)
+python3 scripts/nako/patches.py list        # the stack, numbered
+python3 scripts/nako/patches.py status      # the pin, the stack, and whether patches/ and main match it
 
-# 2. Apply the update (rewrites patches/ and the pin, rebuilds main if clean; pauses with a dossier on conflict)
-python3 scripts/nako/patches.py update --skip-fetch
+# New patch: commit it in work/ (subject like the others, e.g. `feat(nako): ...`), then write it out
+python3 scripts/nako/patches.py export      # commit stack -> patches/
 
-# 3. After fixing conflicted files in work/, validate + auto-stage + advance (or drop/abort)
-python3 scripts/nako/patches.py continue --rebuild
-python3 scripts/nako/patches.py skip --rebuild
-python3 scripts/nako/patches.py abort
+# Existing patch, picked by number, sha or a piece of its subject. Each of these exports when it finishes.
+python3 scripts/nako/patches.py fixup 2     # fold changes staged in work/ into patch #2
+python3 scripts/nako/patches.py edit 2      # pause at patch #2; edit, test, then `continue`
+python3 scripts/nako/patches.py sunset 2    # drop a patch
 ```
 
-## Publishing
+Then review the diff under `patches/` and commit it here, like any other change. `apply` refuses to throw away commits that were never exported (`--force` overrides).
 
-`--push` pushes this branch and `main` together, `main` with `--force-with-lease`. It stops while this checkout has uncommitted changes, so `main` is never published ahead of the patches it was built from. After committing: `python3 scripts/nako/sync.py --skip-fetch --skip-rebase --push`.
+None of the above touches `main`.
+
+## Updating to newer upstream
+
+```bash
+python3 scripts/nako/patches.py plan                  # dry run: which patches are clean / upstreamed / conflicting
+python3 scripts/nako/patches.py update --skip-fetch   # rebase the stack, rewrite patches/ and the pin, rebuild main
+```
+
+On a conflict `update` pauses and lists the files. Fix them in `work/`, then `continue --rebuild` (or `skip --rebuild` to drop the patch, `abort` to back out).
+
+## Building and publishing main
+
+`--rebuild` on `fixup`, `sunset`, `continue` or `skip` also regenerates the local `main` branch from the stack. On its own that is `python3 scripts/nako/sync.py --skip-fetch --skip-rebase`.
+
+`--push` rebuilds, then pushes this branch and `main` together, `main` with `--force-with-lease`. It stops while this checkout has uncommitted changes, so `main` is never published ahead of the patches it was built from.
 
 ## Brand lint guard
 

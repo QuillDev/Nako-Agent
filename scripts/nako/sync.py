@@ -52,6 +52,7 @@ def _ensure_clean(repo: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    sys.stdout.reconfigure(line_buffering=True)  # keep our lines in order with git's when piped
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", help="Path to the work tree (defaults to work/ beside patches/).")
     parser.add_argument("--upstream-remote", default="upstream")
