@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Manage the Nako-Agent patch stack on the `patches` branch.
+"""Manage the Nako-Agent patch stack.
+
+The patches live as files in `patches/`, applying to the upstream commit named in `upstream`.
+`apply` turns them into a commit stack on the `patches` branch in `work/`, where every other
+command operates; each finished change is written back to `patches/`.
 
 Designed for turn-based, non-interactive agent workflows (no TTY menus or
 interactive editors). Every command prints structured state and exact next
@@ -12,13 +16,17 @@ import argparse
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-_TOOLING_PREFIXES = ("scripts/nako/",)
-_TOOLING_EXACT = frozenset({".github/workflows/nako-brand-lint.yml"})
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+PATCH_DIR = SOURCE_ROOT / "patches"
+PIN_FILE = SOURCE_ROOT / "upstream"
+WORK_DIR = SOURCE_ROOT / "work"
 _META_FILENAME = "nako-rebase-meta.json"
 
 
@@ -30,13 +38,6 @@ class PatchInfo:
     subject: str
     files: tuple[str, ...]
 
-    @property
-    def is_tooling(self) -> bool:
-        return bool(self.files) and all(
-            f in _TOOLING_EXACT or f.startswith(_TOOLING_PREFIXES)
-            for f in self.files
-        )
-
 
 @dataclass(frozen=True)
 class PlanEntry:
@@ -44,7 +45,6 @@ class PlanEntry:
     sha: str
     short_sha: str
     subject: str
-    is_tooling: bool
     status: str  # clean | upstreamed | conflict
     files: tuple[str, ...]
     conflict_files: tuple[str, ...] = ()
@@ -76,11 +76,12 @@ def run_git(
     )
 
 
-def repo_root(explicit: str | None = None) -> Path:
-    if explicit:
-        return Path(explicit).resolve()
-    proc = run_git(Path.cwd(), "rev-parse", "--show-toplevel")
-    return Path(proc.stdout.strip())
+def repo_root(explicit: str | None = None, must_exist: bool = True) -> Path:
+    """The work tree holding the applied stack: `work/` beside `patches/` unless overridden."""
+    repo = Path(explicit).resolve() if explicit else WORK_DIR
+    if must_exist and not repo.is_dir():
+        raise RuntimeError(f"No work tree at {repo}. Run `python3 scripts/nako/patches.py apply` first.")
+    return repo
 
 
 def git_dir(repo: Path) -> Path:
@@ -159,6 +160,52 @@ def list_patches(repo: Path, base_ref: str = "upstream/main", branch: str = "HEA
 def _stack_base(repo: Path, base_ref: str) -> str:
     """The commit the stack sits on now, so reworking a patch never pulls in new upstream."""
     return run_git(repo, "merge-base", "HEAD", base_ref).stdout.strip()
+
+
+# Fixed diff settings so the same stack always exports the same bytes, whatever the local git config.
+_FORMAT_PATCH = (
+    "format-patch", "-k", "--zero-commit", "--full-index", "--binary", "--no-signature", "--no-stat",
+    "--no-renames", "--diff-algorithm=myers", "-U3", "--src-prefix=a/", "--dst-prefix=b/",
+)
+
+
+def read_pin() -> str:
+    if not PIN_FILE.is_file():
+        raise RuntimeError(f"Missing {PIN_FILE}: it names the upstream commit the patches apply to.")
+    return PIN_FILE.read_text(encoding="utf-8-sig").strip()
+
+
+def _render_stack(repo: Path, base_ref: str, branch: str, out_dir: Path) -> str:
+    """Write the stack on `branch` as patch files into `out_dir`; return the commit it sits on."""
+    base = run_git(repo, "merge-base", branch, base_ref).stdout.strip()
+    run_git(repo, *_FORMAT_PATCH, "-o", str(out_dir), f"{base}..{branch}")
+    return base
+
+
+def _patch_files(directory: Path) -> dict[str, bytes]:
+    return {f.name: f.read_bytes() for f in sorted(directory.glob("*.patch"))}
+
+
+def exported_matches(repo: Path, base_ref: str = "upstream/main", branch: str = "patches") -> bool:
+    """True when `patches/` and the pin already describe the stack on `branch`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = _render_stack(repo, base_ref, branch, Path(tmp))
+        return PIN_FILE.is_file() and read_pin() == base and _patch_files(Path(tmp)) == _patch_files(PATCH_DIR)
+
+
+def export_patches(repo: Path, base_ref: str = "upstream/main", branch: str = "patches") -> None:
+    """Rewrite `patches/` and the pin from the stack on `branch`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = _render_stack(repo, base_ref, branch, Path(tmp))
+        PATCH_DIR.mkdir(exist_ok=True)
+        for old in PATCH_DIR.glob("*.patch"):
+            old.unlink()
+        count = 0
+        for new in sorted(Path(tmp).glob("*.patch")):
+            shutil.copy(new, PATCH_DIR / new.name)
+            count += 1
+    PIN_FILE.write_text(base + "\n", encoding="utf-8")
+    print(f"==> Exported {count} patch(es) to {PATCH_DIR} (upstream {base[:10]})")
 
 
 def resolve_target(patches: list[PatchInfo], selector: str) -> PatchInfo:
@@ -387,7 +434,6 @@ def build_update_plan(
                     sha=p.sha,
                     short_sha=p.short_sha,
                     subject=p.subject,
-                    is_tooling=p.is_tooling,
                     status="clean",
                     files=p.files,
                 )
@@ -416,7 +462,6 @@ def build_update_plan(
                         sha=p.sha,
                         short_sha=p.short_sha,
                         subject=p.subject,
-                        is_tooling=p.is_tooling,
                         status="upstreamed",
                         files=p.files,
                         overlap_files=overlap,
@@ -437,7 +482,6 @@ def build_update_plan(
                         sha=p.sha,
                         short_sha=p.short_sha,
                         subject=p.subject,
-                        is_tooling=p.is_tooling,
                         status="clean",
                         files=p.files,
                         overlap_files=overlap,
@@ -461,7 +505,6 @@ def build_update_plan(
                     sha=p.sha,
                     short_sha=p.short_sha,
                     subject=p.subject,
-                    is_tooling=p.is_tooling,
                     status="conflict",
                     files=p.files,
                     conflict_files=tuple(conflict_files),
@@ -509,10 +552,9 @@ def print_update_plan(plan: dict, stream=sys.stdout) -> None:
         file=stream,
     )
     for item in plan["patches"]:
-        tag = " [tooling]" if item["is_tooling"] else ""
         status = item["status"].upper()
         print(
-            f"  {item['index']}. [{status:10}] {item['short_sha']}{tag} {item['subject']}",
+            f"  {item['index']}. [{status:10}] {item['short_sha']} {item['subject']}",
             file=stream,
         )
         if item["note"]:
@@ -526,16 +568,24 @@ def print_update_plan(plan: dict, stream=sys.stdout) -> None:
     print(f"Next: {plan['next_command']}", file=stream)
 
 
-def _run_rebuild(repo: Path, push: bool) -> int:
+def _finish(repo: Path, args: argparse.Namespace) -> int:
+    """A finished stack change is written to `patches/` before anything is built from it."""
     branch = current_branch(repo)
     if branch != "patches":
         print(
-            f"Note: on `{branch}`, not `patches` — fast-forward `patches` to `{branch}` "
-            "and run `python3 scripts/nako/sync.py --skip-fetch --skip-rebase` from the main repo.",
+            f"Note: on `{branch}`, not `patches` — nothing exported. Fast-forward `patches` to `{branch}` "
+            "and run `python3 scripts/nako/patches.py export`.",
             file=sys.stderr,
         )
-        return 2
-    sync_script = repo / "scripts" / "nako" / "sync.py"
+        return 2 if args.rebuild or args.push else 0
+    export_patches(repo)
+    if args.rebuild or args.push:
+        return _run_rebuild(repo, push=args.push)
+    return 0
+
+
+def _run_rebuild(repo: Path, push: bool) -> int:
+    sync_script = Path(__file__).resolve().parent / "sync.py"
     cmd = [sys.executable, str(sync_script), "--repo", str(repo), "--skip-fetch", "--skip-rebase"]
     if push:
         cmd.append("--push")
@@ -597,8 +647,7 @@ def cmd_list(repo: Path, args: argparse.Namespace) -> int:
     if not patches:
         return 0
     for p in patches:
-        tag = " [tooling]" if p.is_tooling else ""
-        print(f"  {p.index}. {p.short_sha}{tag} {p.subject} ({len(p.files)} file(s))")
+        print(f"  {p.index}. {p.short_sha} {p.subject} ({len(p.files)} file(s))")
         if args.files:
             for f in p.files:
                 print(f"       {f}")
@@ -625,6 +674,7 @@ def cmd_status(repo: Path, args: argparse.Namespace) -> int:
     patches_full = run_git(repo, "rev-parse", args.patches_branch).stdout.strip()
     main_in_sync = main_parent_proc.returncode == 0 and main_parent_proc.stdout.strip() == patches_full
     dirty = bool(run_git(repo, "status", "--porcelain").stdout.strip())
+    exported = exported_matches(repo, args.base, args.patches_branch)
 
     if args.json:
         print(
@@ -639,6 +689,7 @@ def cmd_status(repo: Path, args: argparse.Namespace) -> int:
                     "behind_upstream": behind,
                     "main": main_sha,
                     "main_in_sync": main_in_sync,
+                    "exported": exported,
                 },
                 indent=2,
             )
@@ -650,6 +701,57 @@ def cmd_status(repo: Path, args: argparse.Namespace) -> int:
     print(f"Patches:  {args.patches_branch} @ {patches_sha} ({len(patches)} patch(es), {behind} commit(s) behind {args.base})")
     sync_label = "in sync" if main_in_sync else "OUT OF SYNC — run: python3 scripts/nako/sync.py --skip-fetch --skip-rebase"
     print(f"Main:     {args.target_branch} @ {main_sha} ({sync_label})")
+    export_label = "current" if exported else "STALE — run: python3 scripts/nako/patches.py export"
+    print(f"Files:    {PATCH_DIR} ({export_label})")
+    return 0
+
+
+def cmd_apply(repo: Path, args: argparse.Namespace) -> int:
+    pin = read_pin()
+    files = sorted(PATCH_DIR.glob("*.patch"))
+    if run_git(SOURCE_ROOT, "cat-file", "-e", f"{pin}^{{commit}}", check=False).returncode != 0:
+        raise RuntimeError(f"Pinned upstream commit {pin} is not in this clone. Run `git fetch upstream main` first.")
+
+    if repo.is_dir():
+        if rebase_dir(repo) is not None:
+            report_rebase_conflict(repo)
+            return 1
+        if run_git(repo, "status", "--porcelain").stdout.strip():
+            print(f"{repo} is dirty; commit or discard the changes before applying.", file=sys.stderr)
+            return 2
+    has_branch = run_git(SOURCE_ROOT, "rev-parse", "-q", "--verify", "refs/heads/patches", check=False).returncode == 0
+    if has_branch and not args.force and not exported_matches(SOURCE_ROOT, args.base):
+        print(
+            "`patches` holds commits that are not in patches/. Keep them with "
+            "`python3 scripts/nako/patches.py export`, or discard them with `apply --force`.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if repo.is_dir():
+        run_git(repo, "checkout", "-q", "-B", "patches", pin)
+    else:
+        run_git(SOURCE_ROOT, "worktree", "add", "-q", "-B", "patches", str(repo), pin)
+    if files:
+        # Committer date follows the author date so the same files always rebuild the same commits.
+        proc = run_git(
+            repo, "am", "-k", "--keep-cr", "--3way", "--committer-date-is-author-date",
+            *(str(f) for f in files), check=False,
+        )
+        if proc.returncode != 0:
+            run_git(repo, "am", "--abort", check=False)
+            print(proc.stdout + proc.stderr, file=sys.stderr)
+            print(f"patches/ does not apply to {pin[:10]}; `patches` was left at the pin.", file=sys.stderr)
+            return 1
+    print(f"==> Applied {len(files)} patch(es) onto upstream {pin[:10]} in {repo}")
+    return 0
+
+
+def cmd_export(repo: Path, args: argparse.Namespace) -> int:
+    if rebase_dir(repo) is not None:
+        report_rebase_conflict(repo)
+        return 1
+    export_patches(repo, base_ref=args.base)
     return 0
 
 
@@ -675,7 +777,7 @@ def cmd_update(repo: Path, args: argparse.Namespace) -> int:
             json=args.json,
         )
         return cmd_plan(repo, plan_args)
-    sync_script = repo / "scripts" / "nako" / "sync.py"
+    sync_script = Path(__file__).resolve().parent / "sync.py"
     cmd = [
         sys.executable,
         str(sync_script),
@@ -796,9 +898,7 @@ def cmd_fixup(repo: Path, args: argparse.Namespace) -> int:
 
     clear_rebase_meta(repo)
     print(f"==> Folded fix into patch #{target.index} ({target.subject}) cleanly.")
-    if args.rebuild or args.push:
-        return _run_rebuild(repo, push=args.push)
-    return 0
+    return _finish(repo, args)
 
 
 def cmd_sunset(repo: Path, args: argparse.Namespace) -> int:
@@ -817,14 +917,6 @@ def cmd_sunset(repo: Path, args: argparse.Namespace) -> int:
 
     patches = list_patches(repo, base_ref=args.base, branch="HEAD")
     target = resolve_target(patches, args.target)
-    if target.is_tooling and not args.allow_tooling:
-        print(
-            f"Refusing to sunset Nako tooling commit #{target.index} {target.short_sha} "
-            "without --allow-tooling.",
-            file=sys.stderr,
-        )
-        return 2
-
     print(f"==> Sunsetting patch #{target.index} {target.short_sha}: {target.subject}")
     save_rebase_meta(repo, {"mode": "sunset", "base_ref": args.base, "patches_branch": branch})
     proc = run_git(
@@ -844,9 +936,7 @@ def cmd_sunset(repo: Path, args: argparse.Namespace) -> int:
 
     clear_rebase_meta(repo)
     print(f"==> Sunsetted {target.short_sha}: {target.subject}")
-    if args.rebuild or args.push:
-        return _run_rebuild(repo, push=args.push)
-    return 0
+    return _finish(repo, args)
 
 
 def cmd_continue(repo: Path, args: argparse.Namespace) -> int:
@@ -920,9 +1010,7 @@ def cmd_continue(repo: Path, args: argparse.Namespace) -> int:
     _report_auto_sunsetted(repo, meta)
     clear_rebase_meta(repo)
     print("==> Rebase completed cleanly.")
-    if args.rebuild or args.push:
-        return _run_rebuild(repo, push=args.push)
-    return 0
+    return _finish(repo, args)
 
 
 def cmd_skip(repo: Path, args: argparse.Namespace) -> int:
@@ -944,9 +1032,7 @@ def cmd_skip(repo: Path, args: argparse.Namespace) -> int:
     _report_auto_sunsetted(repo, meta)
     clear_rebase_meta(repo)
     print("==> Rebase completed cleanly.")
-    if args.rebuild or args.push:
-        return _run_rebuild(repo, push=args.push)
-    return 0
+    return _finish(repo, args)
 
 
 def cmd_abort(repo: Path, _args: argparse.Namespace) -> int:
@@ -966,7 +1052,7 @@ def main(argv: list[str] | None = None) -> int:
         return _run_internal_seq_edit(Path(raw_argv[1]))
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", help="Path to the repository root (defaults to git toplevel).")
+    parser.add_argument("--repo", help="Path to the work tree (defaults to work/ beside patches/).")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_list = sub.add_parser("list", help="List patches above upstream/main.")
@@ -980,6 +1066,13 @@ def main(argv: list[str] | None = None) -> int:
     p_status.add_argument("--patches-branch", default="patches")
     p_status.add_argument("--target-branch", default="main")
     p_status.add_argument("--json", action="store_true", help="Emit JSON output.")
+
+    p_apply = sub.add_parser("apply", help="Build the `patches` commit stack in the work tree from patches/.")
+    p_apply.add_argument("--base", default="upstream/main")
+    p_apply.add_argument("--force", action="store_true", help="Discard commits on `patches` that were never exported.")
+
+    p_export = sub.add_parser("export", help="Rewrite patches/ and the upstream pin from the `patches` commit stack.")
+    p_export.add_argument("--base", default="upstream/main")
 
     p_plan = sub.add_parser("plan", help="Non-destructive preflight: test every patch against upstream.")
     p_plan.add_argument("--base", default="upstream/main")
@@ -1012,7 +1105,6 @@ def main(argv: list[str] | None = None) -> int:
     p_sunset = sub.add_parser("sunset", help="Remove an upstreamed or obsolete patch from the stack.")
     p_sunset.add_argument("target", help="Patch index (from `list`), SHA prefix, or unique subject substring.")
     p_sunset.add_argument("--base", default="upstream/main")
-    p_sunset.add_argument("--allow-tooling", action="store_true", help="Allow removing the Nako tooling commit.")
     p_sunset.add_argument("--rebuild", action="store_true", help="Rebuild `main` after sunsetting.")
     p_sunset.add_argument("--push", action="store_true", help="Rebuild `main` and push both branches.")
 
@@ -1030,8 +1122,10 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(raw_argv)
     try:
-        repo = repo_root(args.repo)
+        repo = repo_root(args.repo, must_exist=args.command != "apply")
         handlers = {
+            "apply": cmd_apply,
+            "export": cmd_export,
             "list": cmd_list,
             "status": cmd_status,
             "plan": cmd_plan,

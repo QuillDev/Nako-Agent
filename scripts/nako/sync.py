@@ -7,9 +7,10 @@ Workflow:
      in upstream naming and auto-drops patches already merged upstream).
      On conflict, prints a structured dossier (files, conflict line numbers,
      upstream commits touching those files, and exact next commands).
+     When it lands, rewrite patches/ and the upstream pin.
   3. Reset `main` to `patches`, run scripts/nako/rebrand.py, verify the brand lint,
      and create a single rebrand commit on top.
-  4. Optionally push `patches` and `main` with --force-with-lease.
+  4. Optionally push the source branch and `main` (`main` with --force-with-lease).
 
 Pass `--plan` for a non-destructive preflight check before rebasing.
 """
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +53,7 @@ def _ensure_clean(repo: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", help="Path to the repository root (defaults to git toplevel).")
+    parser.add_argument("--repo", help="Path to the work tree (defaults to work/ beside patches/).")
     parser.add_argument("--upstream-remote", default="upstream")
     parser.add_argument("--upstream-branch", default="main")
     parser.add_argument("--patches-branch", default="patches")
@@ -154,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             patch_lib.report_rebase_conflict(repo)
             return proc.returncode
         patch_lib.clear_rebase_meta(repo)
+        patch_lib.export_patches(repo, base_ref=upstream_ref, branch=args.patches_branch)
         after = patch_lib.list_patches(repo, base_ref=upstream_ref, branch=args.patches_branch)
         after_subjects = {p.subject for p in after}
         for dropped in before:
@@ -174,14 +177,20 @@ def main(argv: list[str] | None = None) -> int:
     print(f"==> Rebuilding {args.target_branch} from {args.patches_branch} ({patches_sha})")
     _run(["git", "checkout", "-B", args.target_branch, args.patches_branch], cwd=repo)
 
-    rebrand_script = repo / "scripts" / "nako" / "rebrand.py"
+    # The stack carries no tooling, so `main` gets its brand guard and workflow from here.
+    tooling = Path(__file__).resolve().parent
+    (repo / "scripts" / "nako").mkdir(parents=True, exist_ok=True)
+    shutil.copy(tooling / "check_no_upstream_brand.py", repo / "scripts" / "nako")
+    shutil.copy(tooling / "nako-brand-lint.yml", repo / ".github" / "workflows")
+
+    rebrand_script = tooling / "rebrand.py"
     _run(
         [sys.executable, str(rebrand_script), "--repo", str(repo), "--stage", "--no-verify"],
         cwd=repo,
     )
 
     print("==> Running upstream brand lint guard")
-    guard_script = repo / "scripts" / "nako" / "check_no_upstream_brand.py"
+    guard_script = tooling / "check_no_upstream_brand.py"
     _run([sys.executable, str(guard_script), "--repo", str(repo), "--tracked-only"], cwd=repo)
 
     commit_msg = (
@@ -192,11 +201,24 @@ def main(argv: list[str] | None = None) -> int:
     _run(["git", "commit", "-m", commit_msg], cwd=repo)
     new_sha = _run(["git", "rev-parse", "--short", "HEAD"], cwd=repo, capture=True).stdout.strip()
     print(f"==> {args.target_branch} is ready at {new_sha}")
+    _run(["git", "checkout", "--quiet", args.patches_branch], cwd=repo)
 
     if args.push:
-        print(f"==> Pushing {args.patches_branch} and {args.target_branch} to origin")
+        source = patch_lib.SOURCE_ROOT
+        if _run(["git", "status", "--porcelain"], cwd=source, capture=True).stdout.strip():
+            print(
+                f"Not pushed: {source} has uncommitted changes. Commit them, then run "
+                "`python3 scripts/nako/sync.py --skip-fetch --skip-rebase --push`.",
+                file=sys.stderr,
+            )
+            return 1
+        source_branch = patch_lib.current_branch(source)
+        print(f"==> Pushing {source_branch} and {args.target_branch} to origin")
         _run(
-            ["git", "push", "--force-with-lease", "origin", args.patches_branch, args.target_branch],
+            [
+                "git", "push", "--atomic", f"--force-with-lease={args.target_branch}",
+                "origin", source_branch, args.target_branch,
+            ],
             cwd=repo,
         )
         _run(["git", "push", "--force", "--quiet", "origin", "--tags"], cwd=repo)
