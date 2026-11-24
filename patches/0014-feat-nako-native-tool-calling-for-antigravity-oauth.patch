@@ -257,10 +257,10 @@ index 0000000000000000000000000000000000000000..1e04650bf368b0700c89ae3a4d834a41
 +    main()
 diff --git a/plugins/model-providers/antigravity-oauth/native.py b/plugins/model-providers/antigravity-oauth/native.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..082819decf6400d46b39364f91cccdd4cebb728d
+index 0000000000000000000000000000000000000000..1d24e1b627e69cecd855faf1ef5baed8782d894f
 --- /dev/null
 +++ b/plugins/model-providers/antigravity-oauth/native.py
-@@ -0,0 +1,629 @@
+@@ -0,0 +1,678 @@
 +"""Native tool calling for ``agy acp``: the host's tools reach the model as real functions.
 +
 +agy keeps the conversation and calls the host's tools through a local MCP server
@@ -610,6 +610,30 @@ index 0000000000000000000000000000000000000000..082819decf6400d46b39364f91cccdd4
 +    return [{"type": "text", "text": _mask(text)}, *_extract_images_from_content(message.get("content"))]
 +
 +
++def _parsed_result(text: str) -> Any:
++    try:
++        return json.loads(text)
++    except ValueError:
++        return text
++
++
++def _merged_result_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
++    if len(messages) == 1:
++        return _result_content(messages[0])
++    entries: list[dict[str, Any]] = []
++    images: list[dict[str, Any]] = []
++    for index, message in enumerate(messages):
++        content = message.get("content")
++        entry: dict[str, Any] = {"index": index}
++        name = str(message.get("name") or "")
++        if name:
++            entry["name"] = name
++        entry["result"] = _parsed_result(_render_message_content(content))
++        entries.append(entry)
++        images.extend(_extract_images_from_content(content))
++    return [{"type": "text", "text": _mask(json.dumps({"results": entries}, ensure_ascii=False))}, *images]
++
++
 +class NativeSession:
 +    """The agy session behind one client, and what the host has last seen of it."""
 +
@@ -677,11 +701,36 @@ index 0000000000000000000000000000000000000000..082819decf6400d46b39364f91cccdd4
 +            self.bridge = None
 +
 +    def _answers(self, delta: list[dict[str, Any]]) -> list[tuple[PendingCall, list[dict[str, Any]]]] | None:
-+        """Each pending call with its result from ``delta``; None when the host skipped one."""
-+        results = {str(m.get("tool_call_id") or ""): m for m in delta if _role(m) == "tool"}
++        """Each pending call with its result(s) from ``delta``; None when the host skipped one."""
++        tool_messages = [m for m in delta if _role(m) == "tool"]
++        results = {str(m.get("tool_call_id") or ""): m for m in tool_messages}
 +        if any(call.id not in results for call in self.pending):
 +            return None
-+        return [(call, _result_content(results[call.id])) for call in self.pending]
++        pending_ids = {call.id for call in self.pending}
++        emitted_ids = [
++            str(tc.get("id") or "")
++            for m in delta if _role(m) == "assistant"
++            for tc in (m.get("tool_calls") or ())
++            if isinstance(tc, dict) and tc.get("id")
++        ]
++        # The host splits a local tool_call batch into one assistant tool_call per entry, keeping
++        # the original call id on entry 0 and giving the rest new ids. Group those back onto their
++        # owning pending call in emitted order so none of the expanded results are dropped.
++        ordered_ids = (emitted_ids if emitted_ids and pending_ids.issubset(emitted_ids)
++                       else [str(m.get("tool_call_id") or "") for m in tool_messages if m.get("tool_call_id")])
++        grouped: dict[str, list[dict[str, Any]]] = {}
++        current: str | None = None
++        for call_id in ordered_ids:
++            if call_id in pending_ids:
++                current = call_id
++                grouped[current] = [results[call_id]]
++            elif current is not None:
++                if call_id not in results:
++                    return None
++                grouped[current].append(results[call_id])
++            else:
++                return None
++        return [(call, _merged_result_content(grouped[call.id])) for call in self.pending]
 +
 +    def begin(self, messages: list[dict[str, Any]], model: str, effort: str | None,
 +              tools: list[dict[str, Any]] | None) -> bool:
@@ -904,10 +953,10 @@ index 9fef792073ab1060fd091469bb79e0d0ccadbe20..914b092693bce151021a99100f75208c
      def _make_client(self, **kwargs) -> AntigravityClient:
 diff --git a/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py b/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..53590598850474f14362e865a1902810f0ff15f0
+index 0000000000000000000000000000000000000000..77c8d3285d6dc8b815efffd3fe3ff179022178fd
 --- /dev/null
 +++ b/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,309 @@
 +"""Behavior of native tool calling: a host request loop against a stand-in for ``agy acp``.
 +
 +The stand-in follows what the real runtime was seen to do: it reads the MCP server from the
@@ -1034,9 +1083,11 @@ index 0000000000000000000000000000000000000000..53590598850474f14362e865a1902810
 +        self.client = AntigravityClient(cwd=tmp.name, command="agy")
 +        self.addCleanup(self.client.close)
 +
-+    def ask(self, messages: list[dict[str, Any]]):
++    def ask(self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None):
 +        """One host request; the reply is appended to ``messages`` the way the host keeps it."""
-+        reply = self.client.chat.completions.create(model="gemini-4-neon-high", messages=list(messages), tools=TOOLS).choices[0]
++        reply = self.client.chat.completions.create(
++            model="gemini-4-neon-high", messages=list(messages), tools=TOOLS if tools is None else tools,
++        ).choices[0]
 +        kept: dict[str, Any] = {"role": "assistant", "content": reply.message.content or ""}
 +        if reply.message.tool_calls:
 +            kept["tool_calls"] = [{"id": c.id, "type": "function", "function": {"name": c.function.name, "arguments": c.function.arguments}}
@@ -1125,6 +1176,92 @@ index 0000000000000000000000000000000000000000..53590598850474f14362e865a1902810
 +
 +        self.brain = self.weather_brain
 +        self.assertEqual(self.ask(messages).message.tool_calls[0].function.name, "lookup")
++
++    def test_expanded_batch_tool_call_returns_every_split_result_in_order(self):
++        batch_tools = [{"type": "function", "function": {
++            "name": "tool_call", "description": "Invoke deferred tools.",
++            "parameters": {"type": "object", "properties": {"calls": {"type": "array"}}, "required": ["calls"]},
++        }}]
++
++        def brain(agy: _Agy, text: str) -> None:
++            if "Check status" in text:
++                raw = agy.call_tool("tool_call", {"calls": [
++                    {"name": "group_list", "arguments": {}},
++                    {"name": "mesh_machines", "arguments": {}},
++                ]})
++                parsed = json.loads(raw)
++                items = parsed.get("results") if isinstance(parsed, dict) else None
++                if isinstance(items, list) and len(items) == 2:
++                    agy.say(f"{items[0]['name']}={items[0]['result']['groups'][0]} {items[1]['name']}={items[1]['result']}")
++                else:
++                    agy.say("missing:" + raw)
++            else:
++                agy.say("heard: " + text)
++
++        self.brain = brain
++        messages: list[dict[str, Any]] = [SYSTEM, {"role": "user", "content": "Check status"}]
++        first = self.ask(messages, tools=batch_tools)
++        self.assertEqual(first.finish_reason, "tool_calls")
++        call = first.message.tool_calls[0]
++        # Host expand_local_tool_batches splits one batch call into one entry per child:
++        # index 0 keeps call.id and later entries get new ids.
++        messages[-1]["tool_calls"] = [
++            {"id": call.id, "type": "function", "function": {
++                "name": "tool_call", "arguments": json.dumps({"calls": [{"name": "group_list", "arguments": {}}]})}
++            },
++            {"id": "call_expanded_2", "type": "function", "function": {
++                "name": "tool_call", "arguments": json.dumps({"calls": [{"name": "mesh_machines", "arguments": {}}]})}
++            },
++        ]
++        # Append out of emitted order to verify the connector restores assistant call order.
++        messages.append({"role": "tool", "tool_call_id": "call_expanded_2", "name": "mesh_machines",
++                         "content": "laptop-1 online"})
++        messages.append({"role": "tool", "tool_call_id": call.id, "name": "group_list",
++                         "content": json.dumps({"groups": ["Inbox"]})})
++
++        second = self.ask(messages, tools=batch_tools)
++        self.assertEqual((second.finish_reason, second.message.content),
++                         ("stop", "group_list=Inbox mesh_machines=laptop-1 online"))
++        self.assertEqual(len(self.spawned), 1)
++
++        messages.append({"role": "user", "content": "All good?"})
++        third = self.ask(messages, tools=batch_tools)
++        self.assertEqual(third.message.content, "heard: All good?")
++        self.assertEqual(len(self.spawned), 1)
++
++    def test_expanded_batch_missing_a_split_result_rebuilds_session(self):
++        batch_tools = [{"type": "function", "function": {
++            "name": "tool_call", "description": "Invoke deferred tools.",
++            "parameters": {"type": "object", "properties": {"calls": {"type": "array"}}, "required": ["calls"]},
++        }}]
++
++        def brain(agy: _Agy, text: str) -> None:
++            if "CONVERSATION SO FAR" in text:
++                agy.say("rebuilt")
++            else:
++                agy.say("same:" + agy.call_tool("tool_call", {"calls": [
++                    {"name": "group_list", "arguments": {}},
++                    {"name": "mesh_machines", "arguments": {}},
++                ]}))
++
++        self.brain = brain
++        messages: list[dict[str, Any]] = [SYSTEM, {"role": "user", "content": "Check status"}]
++        call = self.ask(messages, tools=batch_tools).message.tool_calls[0]
++        messages[-1]["tool_calls"] = [
++            {"id": call.id, "type": "function", "function": {
++                "name": "tool_call", "arguments": json.dumps({"calls": [{"name": "group_list", "arguments": {}}]})}
++            },
++            {"id": "call_expanded_2", "type": "function", "function": {
++                "name": "tool_call", "arguments": json.dumps({"calls": [{"name": "mesh_machines", "arguments": {}}]})}
++            },
++        ]
++        # Only child 0's result is present; child 1 was skipped.
++        messages.append({"role": "tool", "tool_call_id": call.id, "name": "group_list",
++                         "content": json.dumps({"groups": ["Inbox"]})})
++
++        second = self.ask(messages, tools=batch_tools)
++        self.assertEqual(second.message.content, "rebuilt")
++        self.assertEqual(len(self.spawned), 2)
 +
 +
 +if __name__ == "__main__":
