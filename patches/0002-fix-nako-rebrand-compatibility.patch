@@ -59,7 +59,7 @@ index 83d5bb2c08b60aa930298c1d9bb6982962412d1a..9b22e363f35064045dfb8f2b1261e9c5
              return bool(supported)
      return True
 diff --git a/gateway/session_context.py b/gateway/session_context.py
-index 6b7c947024183e3a1e17e0c57e129c03fa660f45..4b1877a5af14c91cc349ed4171dd5ad7adc3530d 100644
+index b83f484018527bbfcc7fedb7c22a7d846ab5c6a3..4812f4717c37c95e6b0030e97af487fa10667ff2 100644
 --- a/gateway/session_context.py
 +++ b/gateway/session_context.py
 @@ -10,6 +10,8 @@ from contextlib import contextmanager
@@ -71,7 +71,7 @@ index 6b7c947024183e3a1e17e0c57e129c03fa660f45..4b1877a5af14c91cc349ed4171dd5ad7
  # "Never set here" (falls back to os.environ for CLI/cron) vs "" = explicitly cleared (no fallback).
  _UNSET: Any = object()
  
-@@ -230,6 +232,7 @@ def _bound_session_value(name: str) -> Any:
+@@ -244,6 +246,7 @@ def bound_session_env(name: str) -> str:
  def get_session_env(name: str, default: str = "") -> str:
      """Read a session var by legacy ``HERMES_SESSION_*`` name; drop-in for os.getenv.  The
      ContextVar wins if ever set here (even to ``""``); else ``os.environ``; else *default*."""
@@ -208,7 +208,7 @@ index 0000000000000000000000000000000000000000..717d833a3bf290e9f98ca46f1a83df10
 +    if not isinstance(os.environ, _Environ):
 +        os.environ.__class__ = _Environ
 diff --git a/hermes_cli/plugin_catalog.py b/hermes_cli/plugin_catalog.py
-index c4263aa7f244ca6d4d71f44a535ef39ae45e0701..3a838661a24681d59f54830bb6bbf5ebf8119d26 100644
+index f69aa561f4705747d10dc7cea34a144abce360ad..6c61833aca31a4ea4287fb238727fe417415dbb1 100644
 --- a/hermes_cli/plugin_catalog.py
 +++ b/hermes_cli/plugin_catalog.py
 @@ -157,6 +157,9 @@ def entry_from_mapping(data: Any, label: str) -> Optional[PluginCatalogEntry]:

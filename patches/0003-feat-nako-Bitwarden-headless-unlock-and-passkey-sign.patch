@@ -37,7 +37,7 @@ index 7ebe607451dab5aefc9668bb5a83db2384350114..e43082905045e73a5338f0d24707ea1a
          """Full payload of a payment/address item (server-side only). External managers list only
          logins, so the base returns the password-only shape."""
 diff --git a/agent/vault_backends/bitwarden.py b/agent/vault_backends/bitwarden.py
-index 37c7faf7088f22cbcaac4012f375d4026b86f6a7..95a96592e4ab6fc8920b227275a9ef17ac089555 100644
+index e4370a9324111fa614c8db0815ed89686259c323..76f612fff6fb7c399a0b3fb52b5e8728dfe5fcb7 100644
 --- a/agent/vault_backends/bitwarden.py
 +++ b/agent/vault_backends/bitwarden.py
 @@ -9,11 +9,13 @@ a URI. Resolve: ``bw get password <id>``.
@@ -88,7 +88,7 @@ index 37c7faf7088f22cbcaac4012f375d4026b86f6a7..95a96592e4ab6fc8920b227275a9ef17
  class BitwardenLoginBackend(LoginBackend):
      name = "bitwarden"
      display_name = "Bitwarden"
-@@ -48,12 +77,46 @@ class BitwardenLoginBackend(LoginBackend):
+@@ -51,12 +80,46 @@ class BitwardenLoginBackend(LoginBackend):
      def _env(self, session_token: Optional[str]) -> dict[str, str]:
          env = {k: os.environ[k] for k in _ENV_KEEP if k in os.environ}
          env["NO_COLOR"] = "1"
@@ -136,7 +136,7 @@ index 37c7faf7088f22cbcaac4012f375d4026b86f6a7..95a96592e4ab6fc8920b227275a9ef17
  
      def unlock(self, master_password: str) -> None:
          # bw refuses a piped password ("Master password is required"); its non-interactive contract is
-@@ -71,12 +134,24 @@ class BitwardenLoginBackend(LoginBackend):
+@@ -74,12 +137,24 @@ class BitwardenLoginBackend(LoginBackend):
          if not _unlock.store_session_token(self.name, token, generation):
              raise RuntimeError("Bitwarden was locked while unlocking; try again")
  
@@ -164,7 +164,7 @@ index 37c7faf7088f22cbcaac4012f375d4026b86f6a7..95a96592e4ab6fc8920b227275a9ef17
          if proc.returncode != 0:
              err = scrub_ansi(proc.stderr or "")
              if "locked" in err.lower() or "session" in err.lower():
-@@ -110,11 +185,15 @@ class BitwardenLoginBackend(LoginBackend):
+@@ -113,11 +188,15 @@ class BitwardenLoginBackend(LoginBackend):
              # Fill targets are browser pages, so app URIs (androidapp:// etc.) never widen
              # the fill set; an app-URI-only item keeps its single origin exactly as before.
              web_origins = tuple(o for o in origins if o.startswith(("http://", "https://"))) or (origins[0],)
@@ -181,7 +181,7 @@ index 37c7faf7088f22cbcaac4012f375d4026b86f6a7..95a96592e4ab6fc8920b227275a9ef17
          return out
  
      def get_meta(self, handle: str) -> Optional[VaultItemMeta]:
-@@ -123,6 +202,25 @@ class BitwardenLoginBackend(LoginBackend):
+@@ -126,6 +205,25 @@ class BitwardenLoginBackend(LoginBackend):
      def resolve_password(self, handle: str) -> str:
          return self._run("get", "password", handle[len(self.prefix):]).rstrip("\r\n")
  

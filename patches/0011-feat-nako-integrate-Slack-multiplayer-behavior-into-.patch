@@ -8,10 +8,10 @@ Wire adapter and gateway behavior at its owning call sites instead of patching l
 Co-authored-by: Nako <nako@quill.moe>
 
 diff --git a/gateway/response_filters.py b/gateway/response_filters.py
-index f0b8cd5c5910a993a6380bbdc690aa36273e46bf..c893d86fab1120d3a8dbc0a732672f76e981249b 100644
+index bac26e68f794eeb929267f427ec5ef238b2c8edc..17cf4185cf2707fada8b8ac8d63d410be59e9dc8 100644
 --- a/gateway/response_filters.py
 +++ b/gateway/response_filters.py
-@@ -248,6 +248,10 @@ def silence_allowed(
+@@ -358,6 +358,10 @@ def silence_allowed(
      Marker recognition stays with the caller. Extra health restrictions apply only to the new
      room permission, preserving the established internal/unaddressed semantics.
      """
@@ -23,10 +23,10 @@ index f0b8cd5c5910a993a6380bbdc690aa36273e46bf..c893d86fab1120d3a8dbc0a732672f76
          return True
      return (allow_silence is True and isinstance(agent_result, dict)
 diff --git a/gateway/run_busy.py b/gateway/run_busy.py
-index 85c90b2ec479710d756937f29f87c09038271937..9647b85cfa8e15a924111a7c2671c070addc42e5 100644
+index 805c72c63ab9d429cce230cf3f3387044017f8b4..c3c07fba93a75b0b093646ea77d4d11d5f5571a3 100644
 --- a/gateway/run_busy.py
 +++ b/gateway/run_busy.py
-@@ -575,9 +575,19 @@ class GatewayBusySessionMixin:
+@@ -585,9 +585,19 @@ class GatewayBusySessionMixin:
          from gateway.session import label_shared_sender
  
          source = event.source

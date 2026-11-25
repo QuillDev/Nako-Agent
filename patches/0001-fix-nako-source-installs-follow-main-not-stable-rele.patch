@@ -10,10 +10,10 @@ resolve one of those tags instead of this fork's branch.
 Co-authored-by: Nako <nako@quill.moe>
 
 diff --git a/hermes_cli/update_channel.py b/hermes_cli/update_channel.py
-index b0459e335c1fee602281854d22099d7e0d2f33a0..2cb68c33955abd685ee9e54a57ebb6430de31bfb 100644
+index 143a2fe456e3ca30158ce0e053fdcd9a9bb1166c..2dddf74bd66ad61b10af0adc6c372d52c0892bc6 100644
 --- a/hermes_cli/update_channel.py
 +++ b/hermes_cli/update_channel.py
-@@ -197,7 +197,7 @@ def default_channel(project_root: Optional[Path] = None) -> str:
+@@ -240,7 +240,7 @@ def default_channel(project_root: Optional[Path] = None) -> str:
      root = Path(project_root) if project_root is not None else install_root()
      stamp = _read_stamp(root)
      if not _package_channel(stamp):

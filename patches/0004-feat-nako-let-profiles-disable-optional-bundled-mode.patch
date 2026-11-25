@@ -32,7 +32,7 @@ index 3658c209de8fe43bc4e7f73595307c34bd11bb79..602259fbf0c9f7e270cc287d6e36b1f5
                  row = dict.__getitem__(PROVIDER_REGISTRY, pp.name)
                  if home_profile(pp.name) is not pp:  # registered process-wide: every home reads it
 diff --git a/providers/__init__.py b/providers/__init__.py
-index 014336fcdf7466ac4cb048618d1f54575d828338..636d0e011357473d272a93c823ae087e7cd463dc 100644
+index 4d59a5c774e3bf2f5ffcfb9a31a29778b4a57bf1..ce3dd7d43e4b93ac7ccf2a8fc924713709207e89 100644
 --- a/providers/__init__.py
 +++ b/providers/__init__.py
 @@ -86,6 +86,8 @@ class _HomeLayer:
@@ -142,7 +142,7 @@ index 014336fcdf7466ac4cb048618d1f54575d828338..636d0e011357473d272a93c823ae087e
      return True
  
  
-@@ -936,6 +971,8 @@ def _discover_providers() -> None:
+@@ -957,6 +992,8 @@ def _discover_providers() -> None:
          _run_discovery_steps()
      finally:
          _discovering = False
