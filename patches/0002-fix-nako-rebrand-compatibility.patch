@@ -1,16 +1,265 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Quill <siinspam@gmail.com>
 Date: Sat, 21 Nov 2026 19:31:45 +0000
-Subject: build(nako): pin eslint-plugin-react-hooks to 5.2.0
+Subject: fix(nako): rebrand compatibility
 
-From 6.0 the plugin depends on two outside parser packages whose names
-carry the upstream brand. The rebrand renames them and the registry has
-no such packages, so every install failed fetching Node dependencies.
-5.2.0 has no such dependency and keeps rules-of-hooks and
-exhaustive-deps; the web config drops the rules only 7.x provides.
+The rebrand renames everything that carries the upstream name. Two things
+outside the fork still use it and broke.
+
+Installs: from 6.0 eslint-plugin-react-hooks depends on two outside parser
+packages whose names carry the upstream brand. The rebrand renames them and
+the registry has no such packages, so every install failed fetching Node
+dependencies. Pin 5.2.0, which has no such dependency and keeps
+rules-of-hooks and exhaustive-deps; the web config drops the rules only 7.x
+provides.
+
+Plugins: the rebrand renames the core packages, their helpers and the
+environment variables, so every plugin written for upstream failed at its
+first core import. Serve the upstream module names as the real modules,
+resolve upstream-spelled attributes on them, and read an upstream-spelled
+environment variable from its renamed one. A build that kept the upstream
+name is unaffected.
 
 Co-authored-by: Nako <nako@quill.moe>
 
+diff --git a/agent/auxiliary_client.py b/agent/auxiliary_client.py
+index 8139e671933c8d35f641ae644b7d4043409544da..13839a098a85668b3ab788f2d1bfc4f7c3c7acc4 100644
+--- a/agent/auxiliary_client.py
++++ b/agent/auxiliary_client.py
+@@ -518,7 +518,9 @@ def _client_declares(client_obj: Any, flag: str) -> bool:
+     """Whether ``client_obj`` (or its class) sets ``flag`` truthy; absent → False. Capability declaration,
+     not isinstance, so out-of-tree clients can opt out of wrappers unimported (cf. SUPPORTS_HERMES_TOOL_CALLS)."""
+     try:
+-        return bool(getattr(client_obj, flag, False))
++        from hermes_agent.compat.upstream_names import offered
++
++        return bool(offered(client_obj, flag, False))
+     except Exception:
+         return False
+ 
+diff --git a/agent/background_review.py b/agent/background_review.py
+index 83d5bb2c08b60aa930298c1d9bb6982962412d1a..9b22e363f35064045dfb8f2b1261e9c552864afb 100644
+--- a/agent/background_review.py
++++ b/agent/background_review.py
+@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
+ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+ 
+ from agent.i18n import t
++from hermes_agent.compat.upstream_names import offered
+ from agent.prompt_cache_scope import conversation_id, resolve_prompt_cache_scope_safe
+ from agent.thread_scoped_output import thread_scoped_silence
+ 
+@@ -392,7 +393,7 @@ def _parent_can_emit_tool_calls(agent: Any) -> bool:
+     would be a guaranteed no-op that still pays a full spawn. Silence means capable."""
+     client = getattr(agent, "client", None)
+     for candidate in (client, type(client) if client is not None else None):
+-        supported = getattr(candidate, "SUPPORTS_HERMES_TOOL_CALLS", None)
++        supported = offered(candidate, "SUPPORTS_HERMES_TOOL_CALLS", None)
+         if candidate is not None and supported is not None:
+             return bool(supported)
+     return True
+diff --git a/gateway/session_context.py b/gateway/session_context.py
+index 6b7c947024183e3a1e17e0c57e129c03fa660f45..4b1877a5af14c91cc349ed4171dd5ad7adc3530d 100644
+--- a/gateway/session_context.py
++++ b/gateway/session_context.py
+@@ -10,6 +10,8 @@ from contextlib import contextmanager
+ from contextvars import ContextVar
+ from typing import Any, Iterator
+ 
++from hermes_agent.compat.upstream_names import own_spelling
++
+ # "Never set here" (falls back to os.environ for CLI/cron) vs "" = explicitly cleared (no fallback).
+ _UNSET: Any = object()
+ 
+@@ -230,6 +232,7 @@ def _bound_session_value(name: str) -> Any:
+ def get_session_env(name: str, default: str = "") -> str:
+     """Read a session var by legacy ``HERMES_SESSION_*`` name; drop-in for os.getenv.  The
+     ContextVar wins if ever set here (even to ``""``); else ``os.environ``; else *default*."""
++    name = own_spelling(name)
+     if (value := _bound_session_value(name)) is not _UNSET:
+         return value
+     return os.getenv(name, default)
+diff --git a/hermes_agent/compat/__init__.py b/hermes_agent/compat/__init__.py
+index 82cd8bd30a38e546232ee46be17e591fe858243e..21d32ec36c78687b7e2284ed9d83554668c6e2a3 100644
+--- a/hermes_agent/compat/__init__.py
++++ b/hermes_agent/compat/__init__.py
+@@ -9,6 +9,9 @@ def install() -> None:
+ 
+     Stdlib only and idempotent. A finder already installed (the strict one in tests) is kept.
+     """
++    from hermes_agent.compat import upstream_names
++
++    upstream_names.install(sys.meta_path)
+     if any(type(finder).__name__ == "Finder" and type(finder).__module__.startswith("hermes_agent.compat")
+            for finder in sys.meta_path):
+         return
+diff --git a/hermes_agent/compat/upstream_names.py b/hermes_agent/compat/upstream_names.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..717d833a3bf290e9f98ca46f1a83df10d078ebc6
+--- /dev/null
++++ b/hermes_agent/compat/upstream_names.py
+@@ -0,0 +1,108 @@
++"""Plugins written for the upstream project keep working on a renamed build.
++
++A build that renames the project (its packages, helpers and environment variables) would break
++every plugin that imports the upstream spellings. On such a build this serves the upstream module
++names as the real modules, resolves upstream-spelled attributes on them, and reads an upstream-spelled
++environment variable from its renamed one. Core also asks plugins for names by string (a capability
++flag on a client, a manifest key, a session variable); ``offered``, ``own_keys`` and ``own_spelling``
++are what those call sites use to hear the upstream spelling too. On an unrenamed build it does nothing.
++"""
++from __future__ import annotations
++
++import importlib
++import os
++
++from .finder import Finder, current_name
++
++_UPSTREAM = bytes((104, 101, 114, 109, 101, 115)).decode()
++_OWN = __name__.partition("_")[0]
++_SPELLINGS = tuple((spell(_UPSTREAM), spell(_OWN)) for spell in (str.lower, str.upper, str.capitalize))
++
++
++def own_spelling(name: str) -> str:
++    """``name`` with the upstream project name replaced by this build's, case kept."""
++    for upstream, own in _SPELLINGS:
++        name = name.replace(upstream, own)
++    return name
++
++
++def upstream_spelling(name: str) -> str:
++    """``name`` with this build's project name replaced by the upstream one, case kept."""
++    for upstream, own in _SPELLINGS:
++        name = name.replace(own, upstream)
++    return name
++
++
++def offered(obj, name: str, default=None):
++    """An attribute core asks a plugin's object for, under this build's spelling or the upstream one."""
++    value = getattr(obj, name, default)
++    if value is default and _OWN != _UPSTREAM:
++        value = getattr(obj, upstream_spelling(name), default)
++    return value
++
++
++def own_keys(mapping):
++    """A plugin's manifest with its top-level keys in this build's spelling."""
++    if _OWN == _UPSTREAM or not isinstance(mapping, dict):
++        return mapping
++    return {own_spelling(key) if isinstance(key, str) else key: value for key, value in mapping.items()}
++
++
++class _TopLevelNames(dict):
++    """Every upstream-named top-level module maps to its renamed one; nothing is listed."""
++
++    def __contains__(self, name) -> bool:
++        return "." not in name and (name == _UPSTREAM or name.startswith(f"{_UPSTREAM}_"))
++
++    def __getitem__(self, name):
++        return own_spelling(name)
++
++
++def _serve_upstream_attributes(module) -> None:
++    if module.__dict__.get("_serves_upstream_names"):
++        return
++    earlier = module.__dict__.get("__getattr__")
++
++    def __getattr__(name: str):
++        if earlier is not None:
++            try:
++                return earlier(name)
++            except AttributeError:
++                pass
++        own = own_spelling(name)
++        if own != name:
++            if own in module.__dict__:
++                return module.__dict__[own]
++            if earlier is not None:
++                return earlier(own)
++        raise AttributeError(f"module {module.__name__!r} has no attribute {name!r}")
++
++    module.__getattr__ = __getattr__
++    module._serves_upstream_names = True
++
++
++class UpstreamNames(Finder):
++    def find_spec(self, fullname, path=None, target=None):
++        spec = super().find_spec(fullname, path, target)
++        if spec is not None:
++            _serve_upstream_attributes(importlib.import_module(current_name(fullname, self.moves)))
++        return spec
++
++
++class _Environ(type(os.environ)):
++    def __getitem__(self, key):
++        try:
++            return super().__getitem__(key)
++        except KeyError:
++            if isinstance(key, str) and key.startswith(f"{_UPSTREAM.upper()}_"):
++                return super().__getitem__(own_spelling(key))
++            raise
++
++
++def install(meta_path: list) -> None:
++    """Idempotent; a no-op on a build that kept the upstream name."""
++    if _OWN == _UPSTREAM or any(isinstance(finder, UpstreamNames) for finder in meta_path):
++        return
++    meta_path.insert(0, UpstreamNames(_TopLevelNames()))
++    if not isinstance(os.environ, _Environ):
++        os.environ.__class__ = _Environ
+diff --git a/hermes_cli/plugin_catalog.py b/hermes_cli/plugin_catalog.py
+index c4263aa7f244ca6d4d71f44a535ef39ae45e0701..3a838661a24681d59f54830bb6bbf5ebf8119d26 100644
+--- a/hermes_cli/plugin_catalog.py
++++ b/hermes_cli/plugin_catalog.py
+@@ -157,6 +157,9 @@ def entry_from_mapping(data: Any, label: str) -> Optional[PluginCatalogEntry]:
+     if not isinstance(data, dict):
+         logger.warning("Plugin catalog: %s: entry must be a mapping", label)
+         return None
++    from hermes_agent.compat.upstream_names import own_keys
++
++    data = own_keys(data)
+     name = str(data.get("name") or "")
+     repo = str(data.get("repo") or "")
+     sha = str(data.get("sha") or "").strip().lower()
+diff --git a/hermes_cli/plugin_validate.py b/hermes_cli/plugin_validate.py
+index e9ffca1f433fa542c08802a93791ad1c400de515..11f5cf68932861fa17e18c2a456138ac2b6f7543 100644
+--- a/hermes_cli/plugin_validate.py
++++ b/hermes_cli/plugin_validate.py
+@@ -577,9 +577,11 @@ def validate_plugin_dir(
+     import hermes_yaml as yaml
+ 
+     try:
+-        manifest = yaml.safe_load(
++        from hermes_agent.compat.upstream_names import own_keys
++
++        manifest = own_keys(yaml.safe_load(
+             manifest_file.read_text(encoding="utf-8-sig")
+-        )
++        ))
+     except Exception as exc:
+         report.add("manifest", False, f"plugin.yaml failed to parse: {exc}")
+         return report
+diff --git a/hermes_cli/plugins_manifest.py b/hermes_cli/plugins_manifest.py
+index 22ecbc213b62c869847f60d34f586204d2c98fdf..55b5ec5c0d140d7631fa673236db1ca3d608ad2f 100644
+--- a/hermes_cli/plugins_manifest.py
++++ b/hermes_cli/plugins_manifest.py
+@@ -15,6 +15,7 @@ from pathlib import Path
+ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Union
+ 
+ from utils import fast_safe_load
++from hermes_agent.compat.upstream_names import own_keys
+ from hermes_cli.plugin_capabilities import parse_declared_capabilities as _parse_declared_capabilities
+ 
+ try:
+@@ -556,7 +557,7 @@ def parse_manifest_file(
+         if yaml is None:
+             logger.warning("ruamel.yaml not installed – cannot load %s", manifest_file)
+             return None
+-        data = fast_safe_load(manifest_file.read_text(encoding="utf-8-sig")) or {}
++        data = own_keys(fast_safe_load(manifest_file.read_text(encoding="utf-8-sig")) or {})
+         if not isinstance(data, Mapping):
+             logger.warning("Failed to parse %s: top level must be a mapping, got %s (#14066)",
+                            manifest_file, type(data).__name__)
 diff --git a/package.json b/package.json
 index 124a1444291670930075940a1c279a5bb60f56d9..d6962fb22cac7571f5907581d86fa1b2a98a9d7d 100644
 --- a/package.json
