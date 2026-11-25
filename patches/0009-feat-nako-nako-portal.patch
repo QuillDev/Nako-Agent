@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Quill <29633071+QuillDev@users.noreply.github.com>
 Date: Sat, 21 Nov 2026 23:34:12 +0000
-Subject: feat(nako): bundle nako-portal
+Subject: feat(nako): nako portal
 
 Carry the installed source snapshot (65e7d4880959d53c64532c6e0778674ef7559560), including its built web assets. Adapt the bundled mesh origin and use the fork's Windows text I/O conventions.
 

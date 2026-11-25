@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Quill <29633071+QuillDev@users.noreply.github.com>
 Date: Sat, 21 Nov 2026 23:33:38 +0000
-Subject: feat(nako): bundle model-controls
+Subject: feat(nako): model controls
 
 Carry the installed source snapshot (7f57793b557645cb6eb38d8e1ae20de02a959378) without changing its plugin contract or including profile state.
 
