@@ -15183,7 +15183,7 @@ index 0000000000000000000000000000000000000000..f68cfd8898994b3254b83b533d026a12
 +    unittest.main()
 diff --git a/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py b/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..45785bf8e130612f3412ec7c5570f0c95554e3c1
+index 0000000000000000000000000000000000000000..d862a43727c0c8c07452a8258dc930d582323e3d
 --- /dev/null
 +++ b/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py
 @@ -0,0 +1,316 @@
@@ -15267,7 +15267,7 @@ index 0000000000000000000000000000000000000000..45785bf8e130612f3412ec7c5570f0c9
 +
 +    def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
 +        if self._mcp is None:
-+            config = json.loads((Path(self._env["HOME"]) / ".gemini" / "config" / "mcp_config.json").read_text())
++            config = json.loads((Path(self._env["HOME"]) / ".gemini" / "config" / "mcp_config.json").read_text(encoding="utf-8-sig"))
 +            self._server = config["mcpServers"]["host"]
 +            self._mcp = _REAL_POPEN([self._server["command"], *self._server["args"]], text=True,
 +                                    env={**os.environ, **self._server["env"]}, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
