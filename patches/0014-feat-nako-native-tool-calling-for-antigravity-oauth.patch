@@ -185,7 +185,7 @@ index ca81b2439070ec46550403bd6f48bfc15124a2b7..0b99b5920b698c035fa3dcc3b48c2dc7
          self,
          *,
 diff --git a/plugins/model-providers/antigravity-oauth/docs/architecture.md b/plugins/model-providers/antigravity-oauth/docs/architecture.md
-index 6a653c288c3ceb773943d2040b238aaddaf56e12..5dec372f4e3e2ce6fdab1ac2afea6879e6e9ba65 100644
+index 6a653c288c3ceb773943d2040b238aaddaf56e12..cc6503c4457c3f7efe5d58b5efe9e5062aa74432 100644
 --- a/plugins/model-providers/antigravity-oauth/docs/architecture.md
 +++ b/plugins/model-providers/antigravity-oauth/docs/architecture.md
 @@ -26,7 +26,19 @@ Local auth probes check file metadata or OS credential-store metadata. On Linux,
@@ -199,7 +199,7 @@ index 6a653c288c3ceb773943d2040b238aaddaf56e12..5dec372f4e3e2ce6fdab1ac2afea6879
 +
 +- agy keeps the conversation. Hermes sends it only what is new: the first prompt, a tool result, the next user message. A message sent while a tool runs goes in as a steer.
 +- Hermes' tools are served to agy by a local MCP server inside the plugin, declared in the `mcp_config.json` of a private HOME with the per-call time limit lifted. The model calls them as functions (`mcp_host_<tool>`). Each call returns to Hermes as an ordinary tool call and is answered when Hermes sends the result, so one agy turn spans several Hermes requests. agy issues the calls of one model step one at a time.
-+- agy's built-in tools are refused at the permission prompt. A refusal ends agy's turn with nothing said, so the plugin tells the model to use the host's tools and carries on.
++- agy's built-in tools are refused at the permission prompt, except `read_file` on an image: agy drops any image over 10 KiB from a tool result and leaves a file path, so its own reader is how the model sees images. A refusal ends agy's turn with nothing said, so the plugin tells the model to use the host's tools and carries on.
 +- When the conversation changed some other way (an edited message, a compaction, a new client, an interrupted reply), agy cannot rewind: the plugin starts a new session and sends the kept conversation once, shortening the oldest entries first when it does not fit agy's prompt limit.
 +- A request fails after five minutes without a word from agy (`ANTIGRAVITY_IDLE_TIMEOUT_SECONDS`).
 +
@@ -257,10 +257,10 @@ index 0000000000000000000000000000000000000000..1e04650bf368b0700c89ae3a4d834a41
 +    main()
 diff --git a/plugins/model-providers/antigravity-oauth/native.py b/plugins/model-providers/antigravity-oauth/native.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..1d24e1b627e69cecd855faf1ef5baed8782d894f
+index 0000000000000000000000000000000000000000..ab7ed0cfcd1f7f8a6aef8ec24c66f1943618c628
 --- /dev/null
 +++ b/plugins/model-providers/antigravity-oauth/native.py
-@@ -0,0 +1,678 @@
+@@ -0,0 +1,689 @@
 +"""Native tool calling for ``agy acp``: the host's tools reach the model as real functions.
 +
 +agy keeps the conversation and calls the host's tools through a local MCP server
@@ -339,13 +339,17 @@ index 0000000000000000000000000000000000000000..1d24e1b627e69cecd855faf1ef5baed8
 +# agy retries a rate-limited model call on its own for a little over two minutes without a word.
 +_DEFAULT_IDLE_TIMEOUT_SECONDS = 300.0
 +_MAX_BUILTIN_TOOL_REMINDERS = 2
++_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 +
 +_CONTRACT = (
 +    f"This session is driven by {_HOST_TITLE} Agent, a host program. Its instructions say who you are "
 +    "and how to work; follow them in place of your default persona. "
 +    f"Your tools are the functions named {_TOOL_PREFIX}*. The host runs them and returns the real results. "
 +    "Built-in tools (run_command, file reads and edits, web access, subagents, tasks) are switched off "
-+    "here: calling one ends your turn without doing anything."
++    "here: calling one ends your turn without doing anything. The one exception is read_file on an image "
++    f"({', '.join(suffix[1:] for suffix in _IMAGE_SUFFIXES)}): to look at an image on disk, open it with "
++    "read_file yourself rather than asking a host tool to load or describe it. When a tool result says an "
++    "image was offloaded to a file, it is not in your context yet: open that file the same way."
 +)
 +
 +
@@ -775,6 +779,13 @@ index 0000000000000000000000000000000000000000..1d24e1b627e69cecd855faf1ef5baed8
 +    return name.startswith(_TOOL_PREFIX) or str(tool_call.get("title") or "").startswith(f"Run {_TOOL_PREFIX}")
 +
 +
++def _reads_an_image(tool_call: dict[str, Any]) -> bool:
++    raw_input = tool_call.get("rawInput")
++    path = raw_input.get("Path") if isinstance(raw_input, dict) else None
++    return (tool_call.get("name") == "read_file" and isinstance(path, str)
++            and os.path.realpath(path).lower().endswith(_IMAGE_SUFFIXES))
++
++
 +class NativeToolStream(AntigravityACPStream):
 +    """One host request's share of an agy turn: up to the next tool call, or to the end of the turn."""
 +
@@ -871,7 +882,7 @@ index 0000000000000000000000000000000000000000..1d24e1b627e69cecd855faf1ef5baed8
 +                    tool_call = params.get("toolCall") if isinstance(params.get("toolCall"), dict) else {}
 +                    allow = next((o.get("optionId") for o in params.get("options") or ()
 +                                  if isinstance(o, dict) and str(o.get("kind") or "").startswith("allow")), None)
-+                    if allow and _is_host_tool(tool_call):
++                    if allow and (_is_host_tool(tool_call) or _reads_an_image(tool_call)):
 +                        worker.respond_permission(message["id"], allow)
 +                    else:
 +                        # Only the host runs tools; agy's own would act on this machine unasked.
@@ -953,10 +964,10 @@ index 9fef792073ab1060fd091469bb79e0d0ccadbe20..914b092693bce151021a99100f75208c
      def _make_client(self, **kwargs) -> AntigravityClient:
 diff --git a/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py b/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..77c8d3285d6dc8b815efffd3fe3ff179022178fd
+index 0000000000000000000000000000000000000000..45785bf8e130612f3412ec7c5570f0c95554e3c1
 --- /dev/null
 +++ b/plugins/model-providers/antigravity-oauth/tests/test_native_tool_calls.py
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,316 @@
 +"""Behavior of native tool calling: a host request loop against a stand-in for ``agy acp``.
 +
 +The stand-in follows what the real runtime was seen to do: it reads the MCP server from the
@@ -1026,8 +1037,8 @@ index 0000000000000000000000000000000000000000..77c8d3285d6dc8b815efffd3fe3ff179
 +            time.sleep(0.01)
 +        raise AssertionError("the client never answered a permission request")
 +
-+    def builtin(self, name: str) -> bool:
-+        return self._permitted(name, {"CommandLine": "echo native"})
++    def builtin(self, name: str, raw_input: dict[str, Any] | None = None) -> bool:
++        return self._permitted(name, raw_input or {"CommandLine": "echo native"})
 +
 +    def _mcp_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
 +        self._rpc += 1
@@ -1149,6 +1160,13 @@ index 0000000000000000000000000000000000000000..77c8d3285d6dc8b815efffd3fe3ff179
 +        messages.append({"role": "tool", "tool_call_id": first.message.tool_calls[0].id, "content": "sunny, 21C"})
 +        self.assertEqual(self.ask(messages).message.content, "It is sunny, 21C")
 +        self.assertEqual(ran_natively, [])
++
++    def test_the_model_may_open_an_image_with_agy_s_reader_and_no_other_file(self):
++        paths = ["/srv/shots/front.PNG", "/srv/shots/notes.txt", "/srv/shots/key.pem"]
++        self.brain = lambda agy, text: agy.say(
++            "opened: " + ", ".join(p for p in paths if agy.builtin("read_file", {"Path": p})))
++        messages = [SYSTEM, {"role": "user", "content": "What is in these files?"}]
++        self.assertEqual(self.ask(messages).message.content, "opened: /srv/shots/front.PNG")
 +
 +    def test_a_changed_conversation_is_rebuilt_in_a_new_session_with_old_tool_results_whole(self):
 +        self.brain = lambda agy, text: (agy.call_tool("lookup", {"city": "Tokyo"}), agy.say("Noted."))
