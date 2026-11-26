@@ -510,10 +510,10 @@ index 0000000000000000000000000000000000000000..b6fe5952f7349673fa2a22f7ab65ce2b
 +MIT licensed; see `LICENSE`.
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/__init__.py b/plugins/model-providers/claude-subscription-directsdk-experimental/__init__.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..1c09dc4b40cef6bf04b105dc1e816db514fc096c
+index 0000000000000000000000000000000000000000..a8f84f9880ca546edda4d36bf4f103f1aeb87698
 --- /dev/null
 +++ b/plugins/model-providers/claude-subscription-directsdk-experimental/__init__.py
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,287 @@
 +"""Claude Subscription DirectSDK (Experimental) — standalone Hermes model-provider registration."""
 +from datetime import datetime, timezone
 +import logging
@@ -699,16 +699,21 @@ index 0000000000000000000000000000000000000000..1c09dc4b40cef6bf04b105dc1e816db5
 +        pool = get_pool(_resolve(None, os.environ) or ['claude'], os.environ)
 +        if pool is None:
 +            return None
++        resets_mod = _resets()
 +        accounts = []
 +        for account, limits, reason, cooldown in pool.snapshots(_resolve(None, os.environ), os.environ, cache_seconds()):
 +            windows, details = usage_windows(limits or {})
 +            if cooldown > 0:
 +                details = (*details, 'Temporarily skipped after an auth or rate-limit failure')
++            summary = resets_mod.summarize_resets(pool.cedar_ember_for(account), account=account.label)
 +            accounts.append((account.label, AccountUsageSnapshot(
 +                provider=self.name, source='claude_code_get_usage', fetched_at=datetime.now(timezone.utc),
 +                title=f'Claude plan limits ({account.label})', windows=tuple(windows), details=tuple(details),
-+                unavailable_reason=reason)))
++                unavailable_reason=reason, raw={'usage_resets': summary} if summary else None)))
 +        return accounts
++
++    def redeem_account_reset(self, account='', *, grant='', force=False):
++        return _resets().redeem_reset(account=account, grant=grant, force=force)
 +
 +    def fetch_account_usage(self, *, base_url=None, api_key=None):
 +        """`/usage` plan limits, asked of Claude Code itself; every failure is an `Unavailable:` line, never a raise."""
@@ -732,9 +737,11 @@ index 0000000000000000000000000000000000000000..1c09dc4b40cef6bf04b105dc1e816db5
 +
 +        limits, reason = fetch_usage()
 +        windows, details = usage_windows(limits) if limits is not None else ((), ())
++        resets_mod = _resets()
++        summary = resets_mod.summarize_resets(resets_mod.fetch_cedar_ember()) if limits is not None else None
 +        return AccountUsageSnapshot(provider=self.name, source='claude_code_get_usage', fetched_at=datetime.now(timezone.utc),
 +                                    title='Claude plan limits', windows=tuple(windows), details=tuple(details),
-+                                    unavailable_reason=reason)
++                                    unavailable_reason=reason, raw={'usage_resets': summary} if summary else None)
 +
 +
 +def _logins():
@@ -743,6 +750,14 @@ index 0000000000000000000000000000000000000000..1c09dc4b40cef6bf04b105dc1e816db5
 +    except ImportError:
 +        import logins
 +    return logins
++
++
++def _resets():
++    try:
++        from . import resets
++    except ImportError:
++        import resets
++    return resets
 +
 +
 +def classify_api_error(error, **_):
@@ -788,10 +803,10 @@ index 0000000000000000000000000000000000000000..1c09dc4b40cef6bf04b105dc1e816db5
 +    logger.warning("%s: %s", profile.display_name, INSTALL_HINT)
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/account_pool.py b/plugins/model-providers/claude-subscription-directsdk-experimental/account_pool.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..8991b2ca4118fec7d5eae483ec759e1f874e16da
+index 0000000000000000000000000000000000000000..41f1e91e13e8ee39b9fd0db69abc8721d65267ad
 --- /dev/null
 +++ b/plugins/model-providers/claude-subscription-directsdk-experimental/account_pool.py
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,230 @@
 +"""Usage-aware routing over isolated, official-CLI-managed Claude logins.
 +
 +Only config-directory names and usage answers live here. Tokens remain owned by Claude Code.
@@ -810,9 +825,11 @@ index 0000000000000000000000000000000000000000..8991b2ca4118fec7d5eae483ec759e1f
 +try:
 +    from .directsdk_setup import _setting, _resolve, fetch_usage, telemetry_enabled
 +    from .model_catalog import native_model
++    from .resets import fetch_cedar_ember, forget_cedar_ember
 +except ImportError:
 +    from directsdk_setup import _setting, _resolve, fetch_usage, telemetry_enabled
 +    from model_catalog import native_model
++    from resets import fetch_cedar_ember, forget_cedar_ember
 +
 +
 +@dataclass(frozen=True)
@@ -908,6 +925,13 @@ index 0000000000000000000000000000000000000000..8991b2ca4118fec7d5eae483ec759e1f
 +    checked_at: float = -math.inf
 +    checked_wall: float = -math.inf
 +    cooldowns: dict = field(default_factory=dict)
++    cedar_ember: dict | None = None
++
++
++def _probe_account(command, env, config_dir):
++    limits, reason = fetch_usage(command=command, env=env, timeout=3, config_dir=config_dir)
++    cedar_ember = fetch_cedar_ember(config_dir=config_dir, command=command, env=env, timeout=4) if limits is not None else None
++    return limits, reason, cedar_ember
 +
 +
 +class Pool:
@@ -927,13 +951,27 @@ index 0000000000000000000000000000000000000000..8991b2ca4118fec7d5eae483ec759e1f
 +            if not pending:
 +                return
 +            with ThreadPoolExecutor(max_workers=4, thread_name_prefix='claude-usage') as executor:
-+                futures = [(account, executor.submit(copy_context().run, fetch_usage, command=command,
-+                            env=env, timeout=3, config_dir=account.config_dir)) for account in pending]
++                futures = [(account, executor.submit(copy_context().run, _probe_account, command, env, account.config_dir))
++                           for account in pending]
 +                for account, future in futures:
-+                    limits, reason = future.result()
++                    limits, reason, cedar_ember = future.result()
 +                    state = self.states[account]
-+                    state.limits, state.reason, state.checked_at = limits, reason, time.monotonic()
++                    state.limits, state.reason, state.cedar_ember = limits, reason, cedar_ember
++                    state.checked_at = time.monotonic()
 +                    state.checked_wall = time.time()
++
++    def invalidate(self, config_dir):
++        target = os.path.normcase(os.path.realpath(os.path.expanduser(config_dir)))
++        with self.lock:
++            for account, state in self.states.items():
++                if os.path.normcase(os.path.realpath(account.config_dir)) == target:
++                    state.checked_at = -math.inf
++                    state.cedar_ember = None
++
++    def cedar_ember_for(self, account):
++        with self.lock:
++            state = self.states.get(account)
++            return state.cedar_ember if state is not None else None
 +
 +    def candidates(self, model, command, env, ttl):
 +        self.refresh(command, env, ttl)
@@ -984,6 +1022,14 @@ index 0000000000000000000000000000000000000000..8991b2ca4118fec7d5eae483ec759e1f
 +        if key not in _pools:
 +            _pools[key] = Pool(accounts)
 +        return _pools[key]
++
++
++def invalidate_account(config_dir):
++    forget_cedar_ember(config_dir)
++    with _pools_lock:
++        pools = list(_pools.values())
++    for pool in pools:
++        pool.invalidate(config_dir)
 +
 +
 +def cache_seconds():
@@ -65309,10 +65355,10 @@ HcmV?d00001
 
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/conftest.py b/plugins/model-providers/claude-subscription-directsdk-experimental/conftest.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..a68a54b53a90a954943f93a272d6baa18f3ed79e
+index 0000000000000000000000000000000000000000..d1f110b9fb2af9c2200a93ac563c3b462fc32267
 --- /dev/null
 +++ b/plugins/model-providers/claude-subscription-directsdk-experimental/conftest.py
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,94 @@
 +"""Test bootstrap and shared fixture.
 +
 +The standalone plugin imports Hermes core (`providers`, `agent`) from a checkout: set
@@ -65335,8 +65381,57 @@ index 0000000000000000000000000000000000000000..a68a54b53a90a954943f93a272d6baa1
 +    if path not in sys.path:
 +        sys.path.insert(0, path)
 +
++import host
++
 +collect_ignore = ["__init__.py", "host.py", "directsdk.py", "directsdk_setup.py", "admission.py", "model_catalog.py",
 +                  "inert_mcp.py", "evals"]
++
++
++def host_name() -> str:
++    """Return the active core's short name (`hermes`, or a rebranded build's own name)."""
++    return host._name()
++
++
++def user_provider_prefix() -> str:
++    return f"_{host_name()}_user_provider_"
++
++
++def isolate_home(monkeypatch, home: Path) -> None:
++    """Point the active core at *home* (both HERMES_HOME and any rebranded <HOST>_HOME) and fail closed."""
++    home.mkdir(parents=True, exist_ok=True)
++    name = host_name()
++    monkeypatch.setenv("HERMES_HOME", str(home))
++    monkeypatch.setenv(f"{name.upper()}_HOME", str(home))
++    try:
++        import hermes_constants
++        if hasattr(hermes_constants, "reset_hermes_home_key_cache"):
++            hermes_constants.reset_hermes_home_key_cache()
++    except ImportError:
++        pass
++    try:
++        from hermes_cli.config import get_config_path
++        resolved_cfg = get_config_path().resolve()
++        assert resolved_cfg.parent == home.resolve(), (
++            f"Refusing to run tests outside isolated home: get_config_path()={resolved_cfg}, expected under {home.resolve()}"
++        )
++    except ImportError:
++        pass
++    prefixes = ("_hermes_user_provider_", f"_{name}_user_provider_")
++    for mod in tuple(sys.modules):
++        if mod.startswith(prefixes):
++            monkeypatch.delitem(sys.modules, mod)
++    try:
++        import providers
++        if hasattr(providers, "_HOME_LAYERS"):
++            monkeypatch.setattr(providers, "_HOME_LAYERS", {})
++    except ImportError:
++        pass
++
++
++@pytest.fixture(autouse=True)
++def _isolate_default_home(tmp_path, monkeypatch):
++    """Ensure no test can ever read or overwrite the user's real agent config directory."""
++    isolate_home(monkeypatch, tmp_path / "isolated-home")
 +
 +
 +@pytest.fixture
@@ -65346,13 +65441,10 @@ index 0000000000000000000000000000000000000000..a68a54b53a90a954943f93a272d6baa1
 +    home = tmp_path / "hermes-home"
 +    installed = home / "plugins" / PLUGIN_NAME
 +    shutil.copytree(REPO_ROOT, installed, ignore=shutil.ignore_patterns(".git", "tests", "evals", "__pycache__"))
-+    monkeypatch.setenv("HERMES_HOME", str(home))
++    isolate_home(monkeypatch, home)
 +    (home / "config.yaml").write_text("plugins:\n  enabled: []\n", encoding="utf-8")
 +    # A machine with Claude Code installed must not leak it into offline tests.
 +    monkeypatch.setenv("CLAUDE_SUBSCRIPTION_DIRECTSDK_COMMAND", str(tmp_path / "no-such-claude"))
-+    for name in tuple(sys.modules):
-+        if name.startswith("_hermes_user_provider_"):
-+            monkeypatch.delitem(sys.modules, name)
 +    monkeypatch.setattr(providers, "_REGISTRY", {})
 +    monkeypatch.setattr(providers, "_ALIASES", {})
 +    monkeypatch.setattr(providers, "_PROVIDER_LIST_CACHE", None)
@@ -67833,13 +67925,13 @@ index 0000000000000000000000000000000000000000..b33dea1791642a9b09c54b844dfa12f1
 +}
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/plugin.yaml b/plugins/model-providers/claude-subscription-directsdk-experimental/plugin.yaml
 new file mode 100644
-index 0000000000000000000000000000000000000000..0f102bbbc37e023b3afa63519d9264383be1fc22
+index 0000000000000000000000000000000000000000..bf8027042819ad7c67511a4784b57ffe1ec87c5d
 --- /dev/null
 +++ b/plugins/model-providers/claude-subscription-directsdk-experimental/plugin.yaml
 @@ -0,0 +1,46 @@
 +name: claude-subscription-directsdk-experimental
 +kind: model-provider
-+version: 0.6.0
++version: 0.7.0
 +manifest_version: 2
 +description: Claude Subscription DirectSDK (Experimental) — drive your Claude Pro/Max subscription through the official Claude Code CLI; Hermes owns tools, approvals and compaction
 +author: Nous Research
@@ -67904,6 +67996,483 @@ index 0000000000000000000000000000000000000000..b69f8b91897bcd40eb8b0565aed4dd33
 +# importlib mode: the repo root carries the plugin's __init__.py, which must not be collected as a package.
 +addopts = "-p no:cacheprovider --import-mode=importlib"
 +pythonpath = [".", "tests"]
+diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/resets.py b/plugins/model-providers/claude-subscription-directsdk-experimental/resets.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d4c15efbb7f647b1d9146491e6f9a5851ac45f70
+--- /dev/null
++++ b/plugins/model-providers/claude-subscription-directsdk-experimental/resets.py
+@@ -0,0 +1,471 @@
++"""Banked usage resets (`cedar_ember`) for Claude Pro/Max accounts.
++
++Claude Code's `get_usage` control request omits the `cedar_ember` grant block and `/limit-reset` is
++interactive-only, so this module reads the login directory's OAuth credentials to query
++`/api/oauth/usage?cedar_ember=1&skip_spend=1` and claim a grant through
++`POST /api/organizations/{org_uuid}/reset_rate_limits`. Missing or unreadable credentials degrade
++to `None` without affecting usage windows or ever touching Hermes core's credential-adoption hooks.
++"""
++from datetime import datetime, timezone
++import json
++import os
++import re
++import subprocess
++import threading
++import time
++import urllib.error
++import urllib.request
++import uuid
++
++try:
++    from .directsdk_setup import _child_env, _resolve, apply_config_dir, fetch_usage, telemetry_enabled
++except ImportError:
++    from directsdk_setup import _child_env, _resolve, apply_config_dir, fetch_usage, telemetry_enabled
++
++API_ORIGIN = "https://api.anthropic.com"
++OAUTH_BETA = "oauth-2025-04-20"
++PROGRAM = "cedar_ember"
++DEFAULT_CLI_VERSION = "2.1.322"
++
++_GRANT_ID_RE = re.compile(r"^[a-z0-9_-]{1,40}$")
++_ORG_UUID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
++_VERSION_RE = re.compile(r"\b(\d+\.\d+\.\d+)\b")
++
++_KIND_ORDER = ("session", "weekly", "fable", "full")
++_KIND_LABELS = {
++    "session": "5-hour reset",
++    "weekly": "weekly reset",
++    "fable": "Fable reset",
++    "full": "full reset",
++}
++
++# Anthropic rate-limits the reset check far below the usage-window poll, and banked resets change
++# rarely: ask at most every five minutes per login, and wait ten after a refusal or failure.
++CHECK_SECONDS = 300
++RETRY_SECONDS = 600
++
++_version_cache: dict[str, str] = {}
++_version_lock = threading.Lock()
++_checks: dict[str, tuple[float, dict | None]] = {}
++_checks_lock = threading.Lock()
++
++
++def _parse_iso(value):
++    if not isinstance(value, str) or not value.strip():
++        return None
++    try:
++        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
++    except ValueError:
++        return None
++    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
++
++
++def _single_directory(env):
++    child = dict(env)
++    apply_config_dir(child)
++    return os.path.expanduser(child.get("CLAUDE_CONFIG_DIR") or "~/.claude")
++
++
++def _cli_version(command=None, env=None):
++    resolved = _resolve(command, env if env is not None else os.environ)
++    exe = resolved[0] if resolved else ""
++    if not exe:
++        return DEFAULT_CLI_VERSION
++    with _version_lock:
++        cached = _version_cache.get(exe)
++    if cached:
++        return cached
++    version = DEFAULT_CLI_VERSION
++    try:
++        run = subprocess.run([exe, "--version"], stdin=subprocess.DEVNULL, capture_output=True,
++                             text=True, encoding="utf-8", errors="replace", timeout=3)
++        match = _VERSION_RE.search((run.stdout or "") + " " + (run.stderr or ""))
++        if match:
++            version = match.group(1)
++    except (OSError, subprocess.SubprocessError):
++        pass
++    with _version_lock:
++        _version_cache[exe] = version
++    return version
++
++
++def _headers(token, command=None, env=None):
++    return {
++        "Authorization": f"Bearer {token}",
++        "anthropic-beta": OAUTH_BETA,
++        "Content-Type": "application/json",
++        "User-Agent": f"claude-cli/{_cli_version(command, env)} (external, cli)",
++    }
++
++
++def _read_json(path):
++    try:
++        with open(path, encoding="utf-8-sig") as handle:
++            data = json.load(handle)
++        return data if isinstance(data, dict) else {}
++    except (OSError, ValueError):
++        return {}
++
++
++def _read_credentials(config_dir):
++    """Return `(access_token, org_uuid)` from a Claude Code config directory, or `(None, None)`."""
++    if not config_dir:
++        return None, None
++    directory = os.path.expanduser(config_dir)
++    creds = _read_json(os.path.join(directory, ".credentials.json"))
++    oauth = creds.get("claudeAiOauth")
++    token = oauth.get("accessToken") if isinstance(oauth, dict) else None
++    token = token.strip() if isinstance(token, str) and token.strip() else None
++
++    config = _read_json(os.path.join(directory, ".claude.json"))
++    account = config.get("oauthAccount")
++    org_uuid = account.get("organizationUuid") if isinstance(account, dict) else None
++    org_uuid = org_uuid.strip() if isinstance(org_uuid, str) and org_uuid.strip() else None
++    return token, org_uuid
++
++
++def _quiet(env, config_dir):
++    if not telemetry_enabled():
++        return True
++    child = _child_env(env, config_dir=config_dir)
++    return bool(child.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"))
++
++
++def _http_json(method, path, *, token, body=None, command=None, env=None, timeout=5):
++    data = json.dumps(body).encode("utf-8") if body is not None else None
++    req = urllib.request.Request(API_ORIGIN + path, data=data, headers=_headers(token, command, env), method=method)
++    with urllib.request.urlopen(req, timeout=timeout) as resp:
++        raw = resp.read().decode("utf-8", errors="replace")
++        parsed = json.loads(raw) if raw.strip() else {}
++        return parsed if isinstance(parsed, dict) else {}
++
++
++def _retry_after(exc):
++    headers = getattr(exc, "headers", None)
++    raw = headers.get("Retry-After") if headers else None
++    try:
++        return max(0.0, float(raw)) if raw is not None else 0.0
++    except (TypeError, ValueError):
++        return 0.0
++
++
++def fetch_cedar_ember(config_dir=None, *, command=None, env=None, timeout=5):
++    """Return the raw `cedar_ember` block from Anthropic's OAuth usage endpoint, else `None`."""
++    env = dict(env if env is not None else os.environ)
++    directory = config_dir or _single_directory(env)
++    if _quiet(env, directory):
++        return None
++    token, _ = _read_credentials(directory)
++    if not token:
++        return None
++    key = os.path.normcase(os.path.realpath(os.path.expanduser(directory)))
++    with _checks_lock:
++        next_at, last = _checks.get(key, (-float("inf"), None))
++    if time.monotonic() < next_at:
++        return last
++    try:
++        payload = _http_json("GET", "/api/oauth/usage?cedar_ember=1&skip_spend=1",
++                             token=token, command=command, env=env, timeout=timeout)
++    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
++        wait = max(RETRY_SECONDS, _retry_after(exc))
++        with _checks_lock:
++            _checks[key] = (time.monotonic() + wait, last)
++        return last
++    block = payload.get("cedar_ember")
++    block = block if isinstance(block, dict) else None
++    with _checks_lock:
++        _checks[key] = (time.monotonic() + CHECK_SECONDS, block)
++    return block
++
++
++def forget_cedar_ember(config_dir):
++    """Drop a login's remembered reset check so the next read asks Anthropic again."""
++    if not config_dir:
++        return
++    key = os.path.normcase(os.path.realpath(os.path.expanduser(config_dir)))
++    with _checks_lock:
++        _checks.pop(key, None)
++
++
++def _grant_kind(grant):
++    if grant.get("gives_back_weekly") is True:
++        return "fable"
++    raw_type = grant.get("type")
++    if raw_type in ("session", "weekly", "full"):
++        return raw_type
++    clears = grant.get("clears") if isinstance(grant.get("clears"), list) else []
++    has_session = "five_hour" in clears
++    has_other = any(isinstance(c, str) and c != "five_hour" for c in clears)
++    if has_session and not has_other:
++        return "session"
++    if has_other and not has_session:
++        return "weekly"
++    return "full"
++
++
++def _active_grants(cedar_ember, now):
++    if not isinstance(cedar_ember, dict) or cedar_ember.get("eligible") is not True:
++        return []
++    raw_grants = cedar_ember.get("grants")
++    if not isinstance(raw_grants, list):
++        return []
++    out = []
++    for grant in raw_grants:
++        if not isinstance(grant, dict):
++            continue
++        gid = grant.get("id")
++        if not isinstance(gid, str) or not _GRANT_ID_RE.match(gid):
++            continue
++        if grant.get("paused") is True:
++            continue
++        ends_at_raw = grant.get("ends_at")
++        ends_at = _parse_iso(ends_at_raw)
++        if ends_at is not None and ends_at <= now:
++            continue
++        left = grant.get("resets_left")
++        if isinstance(left, bool) or not isinstance(left, (int, float)) or int(left) <= 0:
++            continue
++        out.append({
++            "id": gid,
++            "kind": _grant_kind(grant),
++            "resets_left": int(left),
++            "usable_now": grant.get("usable_now") is True,
++            "ends_at": ends_at_raw if ends_at is not None else None,
++            "_ends_dt": ends_at,
++        })
++    return out
++
++
++def summarize_resets(cedar_ember, *, account="", now=None):
++    """Turn a `cedar_ember` block into the portal-facing `{available, usable, options, account?}` summary."""
++    now = now or datetime.now(timezone.utc)
++    grants = _active_grants(cedar_ember, now)
++    if not grants:
++        return None
++    next_id = cedar_ember.get("next_grant_id") if isinstance(cedar_ember, dict) else None
++
++    grouped: dict[str, list[dict]] = {}
++    for grant in grants:
++        grouped.setdefault(grant["kind"], []).append(grant)
++
++    options = []
++    for kind in _KIND_ORDER:
++        items = grouped.get(kind)
++        if not items:
++            continue
++        available = sum(g["resets_left"] for g in items)
++        usable_items = [g for g in items if g["usable_now"]]
++        preferred = next((g for g in usable_items if g["id"] == next_id), None)
++        target = preferred or (usable_items[0] if usable_items else items[0])
++        dated = [g for g in items if g["_ends_dt"] is not None]
++        earliest = min(dated, key=lambda g: g["_ends_dt"])["ends_at"] if dated else None
++        option = {
++            "id": target["id"],
++            "label": _KIND_LABELS[kind],
++            "available": available,
++            "usable": bool(usable_items),
++        }
++        if earliest:
++            option["expires_at"] = earliest
++        options.append(option)
++
++    if not options:
++        return None
++    summary = {
++        "available": sum(o["available"] for o in options),
++        "usable": any(o["usable"] for o in options),
++        "options": options,
++    }
++    if account:
++        summary["account"] = account
++    return summary
++
++
++def _resolve_target_dir(account, env):
++    try:
++        from .account_pool import configured_accounts
++    except ImportError:
++        from account_pool import configured_accounts
++
++    accounts = configured_accounts()
++    wanted = str(account or "").strip()
++    if accounts:
++        if not wanted:
++            if len(accounts) == 1:
++                return accounts[0].label, accounts[0].config_dir
++            raise ValueError("Pick a Claude account to reset")
++        for entry in accounts:
++            if entry.label == wanted:
++                return entry.label, entry.config_dir
++        lowered = wanted.lower()
++        for entry in accounts:
++            if entry.label.lower() == lowered:
++                return entry.label, entry.config_dir
++        raise ValueError("Account not found")
++
++    if wanted and wanted.lower() != "default":
++        raise ValueError("Account not found")
++    return "", _single_directory(env)
++
++
++def _resolve_org_uuid(config_dir, command, env):
++    _, org_uuid = _read_credentials(config_dir)
++    if org_uuid:
++        return org_uuid
++    try:
++        from . import logins
++    except ImportError:
++        import logins
++    resolved = _resolve(command, env)
++    if not resolved:
++        return None
++    status = logins._status(resolved, env, config_dir)
++    org = str(status.get("org") or "").strip()
++    return org or None
++
++
++def _invalidate_pool(config_dir):
++    try:
++        from .account_pool import invalidate_account
++    except ImportError:
++        from account_pool import invalidate_account
++    invalidate_account(config_dir)
++
++
++def _fetch_with_refresh(config_dir, command, env, timeout):
++    token, _ = _read_credentials(config_dir)
++    if not token:
++        return None, None
++    try:
++        payload = _http_json("GET", "/api/oauth/usage?cedar_ember=1&skip_spend=1",
++                             token=token, command=command, env=env, timeout=timeout)
++        return payload.get("cedar_ember"), token
++    except urllib.error.HTTPError as exc:
++        if exc.code != 401:
++            raise
++    # Let Claude Code refresh its own OAuth token, then re-read.
++    fetch_usage(command=command, env=env, timeout=8, config_dir=config_dir)
++    token, _ = _read_credentials(config_dir)
++    if not token:
++        return None, None
++    payload = _http_json("GET", "/api/oauth/usage?cedar_ember=1&skip_spend=1",
++                         token=token, command=command, env=env, timeout=timeout)
++    return payload.get("cedar_ember"), token
++
++
++def _claim_message(result, reason):
++    messages = {
++        "reset": "Limits reset.",
++        "already_used": "That reset was already used.",
++        "not_limited": "This account isn't at a usage limit right now.",
++        "cooldown": "Reset is on cooldown. Try again in a moment.",
++        "ineligible": "This account isn't eligible for that reset.",
++        "unavailable": "Reset isn't available right now.",
++    }
++    base = messages.get(result, "Could not redeem reset.")
++    if result not in ("reset", "already_used") and isinstance(reason, str) and reason and reason not in ("unknown", "unavailable"):
++        return f"{base} ({reason})"
++    return base
++
++
++def redeem_reset(account="", *, grant="", force=False, command=None, env=None, timeout=15):
++    """Redeem one banked Claude reset grant (`cedar_ember`) for the named account."""
++    del force  # Claude's API enforces per-grant usability (`usable_now` / `use_requires_limit`) server-side.
++    env = dict(env if env is not None else os.environ)
++    _, config_dir = _resolve_target_dir(account, env)
++    if _quiet(env, config_dir):
++        raise ValueError("Turn on Claude Code telemetry to check or use resets")
++
++    try:
++        cedar_ember, token = _fetch_with_refresh(config_dir, command, env, timeout=min(timeout, 8))
++    except urllib.error.HTTPError as exc:
++        if exc.code in (401, 403):
++            raise ValueError("Claude login expired. Refresh this account and try again") from exc
++        if exc.code == 429:
++            raise ValueError("Claude rate-limited the reset check. Try again in a moment") from exc
++        raise ValueError(f"Could not check Claude resets (HTTP {exc.code})") from exc
++    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
++        raise ValueError("Could not reach Claude to check resets") from exc
++
++    if not token:
++        raise ValueError("Claude login credentials not found for this account")
++
++    now = datetime.now(timezone.utc)
++    grants = _active_grants(cedar_ember, now)
++    total_available = sum(g["resets_left"] for g in grants)
++    if not grants:
++        return {"status": "no_credits_banked", "redeemed": False,
++                "message": "No banked resets available on this account.", "available": 0}
++
++    wanted_grant = str(grant or "").strip()
++    if wanted_grant:
++        if not _GRANT_ID_RE.match(wanted_grant):
++            raise ValueError("Invalid reset grant id")
++        chosen = next((g for g in grants if g["id"] == wanted_grant), None)
++        if chosen is None:
++            return {"status": "not_eligible", "redeemed": False,
++                    "message": "That reset is no longer available.", "available": total_available}
++    else:
++        next_id = cedar_ember.get("next_grant_id") if isinstance(cedar_ember, dict) else None
++        usable = [g for g in grants if g["usable_now"]]
++        chosen = next((g for g in usable if g["id"] == next_id), None) or (usable[0] if usable else None)
++        if chosen is None:
++            return {"status": "not_eligible", "redeemed": False,
++                    "message": "No reset can be used right now.", "available": total_available}
++
++    if not chosen["usable_now"]:
++        return {"status": "not_eligible", "redeemed": False,
++                "message": "That reset can't be used right now.", "available": total_available}
++
++    org_uuid = _resolve_org_uuid(config_dir, command, env)
++    if not org_uuid or not _ORG_UUID_RE.match(org_uuid):
++        raise ValueError("No Claude organization found for this account")
++
++    body = {"program": PROGRAM, "grant_id": chosen["id"], "request_id": str(uuid.uuid4())}
++    path = f"/api/organizations/{org_uuid}/reset_rate_limits"
++    try:
++        reply = _http_json("POST", path, token=token, body=body, command=command, env=env, timeout=timeout)
++    except urllib.error.HTTPError as exc:
++        if exc.code == 401:
++            fetch_usage(command=command, env=env, timeout=8, config_dir=config_dir)
++            token, _ = _read_credentials(config_dir)
++            if not token:
++                raise ValueError("Claude login expired. Refresh this account and try again") from exc
++            try:
++                reply = _http_json("POST", path, token=token, body=body, command=command, env=env, timeout=timeout)
++            except urllib.error.HTTPError as retry_exc:
++                raise ValueError(f"Could not redeem Claude reset (HTTP {retry_exc.code})") from retry_exc
++        elif exc.code == 429:
++            return {"status": "rate_limited", "redeemed": False,
++                    "message": "Claude rate-limited the reset request. Try again in a moment.", "available": total_available}
++        elif exc.code in (401, 403):
++            raise ValueError("Claude login expired. Refresh this account and try again") from exc
++        else:
++            raise ValueError(f"Could not redeem Claude reset (HTTP {exc.code})") from exc
++    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
++        raise ValueError("Could not reach Claude to redeem reset") from exc
++
++    result = str(reply.get("result") or "unavailable")
++    reason = reply.get("reason")
++    redeemed = result == "reset"
++    status = "already_redeemed" if result == "already_used" else result
++    raw_left = reply.get("resets_left")
++    if not isinstance(raw_left, bool) and isinstance(raw_left, (int, float)):
++        grant_left = max(0, int(raw_left))
++        remaining = max(0, total_available - chosen["resets_left"] + grant_left)
++    elif redeemed:
++        remaining = max(0, total_available - 1)
++    elif result == "already_used":
++        remaining = max(0, total_available - chosen["resets_left"])
++    else:
++        remaining = total_available
++
++    if redeemed or result == "already_used":
++        _invalidate_pool(config_dir)
++
++    return {
++        "status": status,
++        "redeemed": redeemed,
++        "message": _claim_message(result, reason),
++        "available": remaining,
++    }
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/tests/fixtures/lifecycle_cli.py b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/fixtures/lifecycle_cli.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..ab1b5f71966b2449d2a1885217cbccfc4b7c06dd
@@ -68242,6 +68811,332 @@ index 0000000000000000000000000000000000000000..132591eaf92a84433c844a2d47cbadb2
 +    with pytest.raises(ValueError, match="isn't linked"):
 +        claude.remove_account_login("nobody")
 +    assert [row["label"] for row in _accounts()] == ["alex@example.test"]
+diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_account_resets.py b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_account_resets.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..77cd7fa48fb0a7d85ef289acc41e442ba937bd95
+--- /dev/null
++++ b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_account_resets.py
+@@ -0,0 +1,320 @@
++"""Banked Claude usage resets (`cedar_ember`): reporting per account and redeeming grants."""
++from datetime import datetime, timezone
++import json
++import subprocess
++import sys
++from types import SimpleNamespace
++import urllib.error
++import urllib.request
++
++import pytest
++
++PROVIDER = "claude-subscription-directsdk-experimental"
++LIMITS = {"limits": [
++    {"kind": "session", "percent": 20, "resets_at": "2026-11-25T15:00:00Z"},
++    {"kind": "weekly_all", "percent": 42, "resets_at": "2026-12-01T23:00:00Z"},
++    {"kind": "weekly_model", "percent": 13, "resets_at": "2026-12-01T23:00:00Z", "scope": {"model": {"display_name": "Fable"}}},
++]}
++CEDAR_EMBER_MULTI = {
++    "eligible": True,
++    "ineligible_reason": None,
++    "at_limit": False,
++    "exhausted": [],
++    "next_grant_id": "full-reset-2611",
++    "grants": [
++        {
++            "id": "full-reset-2611",
++            "label": "One full limit reset",
++            "resets_total": 1,
++            "resets_left": 1,
++            "ends_at": "2026-12-10T22:00:00+00:00",
++            "clears": ["seven_day", "seven_day_overage_included"],
++            "paused": False,
++            "usable_now": True,
++            "type": "weekly",
++            "gives_back_weekly": False,
++        },
++        {
++            "id": "launch-2610-fable",
++            "label": "Fable reset 1",
++            "resets_total": 1,
++            "resets_left": 1,
++            "ends_at": "2027-03-09T07:59:00+00:00",
++            "clears": ["seven_day_overage_included"],
++            "paused": False,
++            "usable_now": True,
++            "type": "full",
++            "gives_back_weekly": True,
++        },
++        {
++            "id": "launch-2610-fable-6mo",
++            "label": "Fable reset 2",
++            "resets_total": 1,
++            "resets_left": 1,
++            "ends_at": "2027-03-09T07:59:00+00:00",
++            "clears": ["seven_day_overage_included"],
++            "paused": False,
++            "usable_now": True,
++            "type": "full",
++            "gives_back_weekly": True,
++        },
++        {
++            "id": "expired-grant",
++            "resets_left": 1,
++            "ends_at": "2020-01-01T00:00:00+00:00",
++            "paused": False,
++            "usable_now": True,
++            "type": "weekly",
++        },
++        {
++            "id": "paused-grant",
++            "resets_left": 1,
++            "ends_at": "2027-01-01T00:00:00+00:00",
++            "paused": True,
++            "usable_now": False,
++            "type": "session",
++        },
++    ],
++}
++
++
++def _write_login(directory, *, token="tok-1", org="org-1111"):
++    directory.mkdir(parents=True, exist_ok=True)
++    (directory / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": token}}), encoding="utf-8")
++    (directory / ".claude.json").write_text(json.dumps({"oauthAccount": {"organizationUuid": org}}), encoding="utf-8")
++
++
++def _usage_reply(rate_limits=LIMITS):
++    import host
++    return json.dumps({
++        "type": "control_response",
++        "response": {
++            "subtype": "success",
++            "request_id": f"{host.NAME}-usage",
++            "response": {"subscription_type": "max", "rate_limits_available": True, "rate_limits": rate_limits},
++        },
++    })
++
++
++def test_summarize_resets_groups_kinds_and_skips_paused_and_expired():
++    import resets
++
++    now = datetime(2026, 11, 25, 10, 0, tzinfo=timezone.utc)
++    summary = resets.summarize_resets(CEDAR_EMBER_MULTI, account="work@example.test", now=now)
++    assert summary == {
++        "available": 3,
++        "usable": True,
++        "account": "work@example.test",
++        "options": [
++            {"id": "full-reset-2611", "label": "weekly reset", "available": 1, "usable": True,
++             "expires_at": "2026-12-10T22:00:00+00:00"},
++            {"id": "launch-2610-fable", "label": "Fable reset", "available": 2, "usable": True,
++             "expires_at": "2027-03-09T07:59:00+00:00"},
++        ],
++    }
++
++    assert resets.summarize_resets({"eligible": False, "grants": CEDAR_EMBER_MULTI["grants"]}, now=now) is None
++    assert resets.summarize_resets({"eligible": True, "grants": []}, now=now) is None
++
++
++def test_linked_usage_surfaces_resets_per_account_and_redeem_invalidates_cache(profile, tmp_path, monkeypatch):
++    import providers
++    import resets
++    from hermes_cli.config import get_config_path
++
++    first, second = tmp_path / "acct-a", tmp_path / "acct-b"
++    _write_login(first, token="tok-a", org="org-aaaa")
++    _write_login(second, token="tok-b", org="org-bbbb")
++    get_config_path().write_text(json.dumps({"plugins": {"enabled": [], "entries": {PROVIDER: {"settings": {
++        "accounts": [
++            {"label": "alpha@example.test", "config_dir": str(first)},
++            {"label": "beta@example.test", "config_dir": str(second)},
++        ],
++    }}}}}), encoding="utf-8")
++
++    usage_calls = []
++
++    def fake_run(argv, **kwargs):
++        if "--version" in argv:
++            return SimpleNamespace(stdout="2.1.322 (Claude Code)\n", stderr="", returncode=0)
++        usage_calls.append(kwargs["env"].get("CLAUDE_CONFIG_DIR"))
++        return SimpleNamespace(stdout=_usage_reply() + "\n", returncode=0)
++
++    http_calls = []
++    state = {"alpha_left": 1}
++
++    class FakeResp:
++        def __init__(self, payload):
++            self._data = json.dumps(payload).encode("utf-8")
++
++        def read(self):
++            return self._data
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, *args):
++            return False
++
++    def fake_urlopen(req, timeout=None):
++        method = req.get_method()
++        url = req.full_url
++        auth = req.get_header("Authorization")
++        beta = req.get_header("Anthropic-beta")
++        ua = req.get_header("User-agent")
++        body = json.loads(req.data.decode("utf-8")) if req.data else None
++        http_calls.append((method, url, auth, beta, ua, body))
++        assert beta == "oauth-2025-04-20"
++        assert ua.startswith("claude-cli/") and "(external, cli)" in ua
++        if method == "GET":
++            assert url == "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1"
++            if auth == "Bearer tok-a":
++                grants = [dict(CEDAR_EMBER_MULTI["grants"][0], resets_left=state["alpha_left"], usable_now=state["alpha_left"] > 0)]
++                return FakeResp({"cedar_ember": {"eligible": True, "next_grant_id": "full-reset-2611", "grants": grants}})
++            return FakeResp({"cedar_ember": {"eligible": False, "ineligible_reason": "no_grant", "grants": []}})
++        assert method == "POST" and url == "https://api.anthropic.com/api/organizations/org-aaaa/reset_rate_limits"
++        assert body["program"] == "cedar_ember" and body["grant_id"] == "full-reset-2611"
++        assert body["request_id"]
++        state["alpha_left"] = 0
++        return FakeResp({"result": "reset", "resets_left": 0, "cleared": ["seven_day"]})
++
++    monkeypatch.setattr(subprocess, "run", fake_run)
++    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
++    monkeypatch.setenv("CLAUDE_SUBSCRIPTION_DIRECTSDK_COMMAND", sys.executable)
++
++    prof = providers.get_provider_profile(PROVIDER)
++    by_acct = dict(prof.fetch_account_usage_by_account())
++    assert by_acct["alpha@example.test"].raw == {"usage_resets": {
++        "available": 1,
++        "usable": True,
++        "account": "alpha@example.test",
++        "options": [{"id": "full-reset-2611", "label": "weekly reset", "available": 1, "usable": True,
++                     "expires_at": "2026-12-10T22:00:00+00:00"}],
++    }}
++    assert by_acct["beta@example.test"].raw is None
++
++    # Redeem the grant for alpha@example.test and ensure the pool cache is invalidated.
++    outcome = prof.redeem_account_reset(account="alpha@example.test", grant="full-reset-2611")
++    assert outcome == {"status": "reset", "redeemed": True, "message": "Limits reset.", "available": 0}
++
++    before_count = len(usage_calls)
++    refreshed = dict(prof.fetch_account_usage_by_account())
++    assert len(usage_calls) == before_count + 1
++    assert refreshed["alpha@example.test"].raw is None
++
++
++def test_reset_check_runs_every_five_minutes_and_waits_ten_after_a_refusal(profile, tmp_path, monkeypatch):
++    from email.message import Message
++    import time
++    import providers
++    from hermes_cli.config import get_config_path
++
++    login = tmp_path / "acct-a"
++    _write_login(login, token="tok-a", org="org-aaaa")
++    get_config_path().write_text(json.dumps({"plugins": {"enabled": [], "entries": {PROVIDER: {"settings": {
++        "accounts": [{"label": "alpha@example.test", "config_dir": str(login)}],
++    }}}}}), encoding="utf-8")
++
++    def fake_run(argv, **kwargs):
++        if "--version" in argv:
++            return SimpleNamespace(stdout="2.1.322 (Claude Code)\n", stderr="", returncode=0)
++        return SimpleNamespace(stdout=_usage_reply() + "\n", returncode=0)
++
++    checks = []
++    refuse = {"now": False, "retry_after": None}
++
++    class FakeResp:
++        def __init__(self, payload):
++            self._data = json.dumps(payload).encode("utf-8")
++
++        def read(self):
++            return self._data
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, *args):
++            return False
++
++    def fake_urlopen(req, timeout=None):
++        checks.append(req.full_url)
++        if refuse["now"]:
++            headers = Message()
++            if refuse["retry_after"] is not None:
++                headers["Retry-After"] = str(refuse["retry_after"])
++            raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", headers, None)
++        return FakeResp({"cedar_ember": {"eligible": True, "grants": [CEDAR_EMBER_MULTI["grants"][0]]}})
++
++    clock = {"now": 10_000.0}
++    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
++    monkeypatch.setattr(subprocess, "run", fake_run)
++    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
++    monkeypatch.setenv("CLAUDE_SUBSCRIPTION_DIRECTSDK_COMMAND", sys.executable)
++    prof = providers.get_provider_profile(PROVIDER)
++
++    def shown_resets(at):
++        clock["now"] = 10_000.0 + at
++        raw = dict(prof.fetch_account_usage_by_account())["alpha@example.test"].raw
++        return raw and raw["usage_resets"]["available"]
++
++    # Usage polls every 60s, but reset checks wait 5 minutes (300s) between healthy calls.
++    assert shown_resets(0) == 1 and len(checks) == 1
++    assert shown_resets(61) == 1 and shown_resets(240) == 1 and len(checks) == 1
++    # Past 300s (and past the 60s usage TTL since 240s), a 429 keeps showing the last good answer
++    # and backs off for 10 minutes (600s -> until 901s).
++    refuse["now"] = True
++    assert shown_resets(301) == 1 and len(checks) == 2
++    assert shown_resets(600) == 1 and shown_resets(840) == 1 and len(checks) == 2
++    # Past 901s, a 429 with Retry-After: 900 backs off until 1802s while keeping the last good answer.
++    refuse["retry_after"] = 900
++    assert shown_resets(902) == 1 and len(checks) == 3
++    assert shown_resets(1740) == 1 and len(checks) == 3
++    # Past 1802s, the next poll checks Anthropic again and succeeds.
++    refuse["now"] = False
++    assert shown_resets(1803) == 1 and len(checks) == 4
++
++
++def test_redeem_handles_errors_and_missing_accounts(profile, tmp_path, monkeypatch):
++    import providers
++    import resets
++    from hermes_cli.config import get_config_path
++
++    first = tmp_path / "acct-a"
++    _write_login(first, token="tok-a", org="org-aaaa")
++    get_config_path().write_text(json.dumps({"plugins": {"enabled": [], "entries": {PROVIDER: {"settings": {
++        "accounts": [{"label": "alpha@example.test", "config_dir": str(first)}],
++    }}}}}), encoding="utf-8")
++
++    monkeypatch.setenv("CLAUDE_SUBSCRIPTION_DIRECTSDK_COMMAND", sys.executable)
++    prof = providers.get_provider_profile(PROVIDER)
++
++    with pytest.raises(ValueError, match="Account not found"):
++        prof.redeem_account_reset(account="missing@example.test")
++
++    class FakeResp:
++        def __init__(self, payload):
++            self._data = json.dumps(payload).encode("utf-8")
++
++        def read(self):
++            return self._data
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, *args):
++            return False
++
++    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: FakeResp({"cedar_ember": {"eligible": True, "grants": [
++        {"id": "full-reset-2611", "resets_left": 1, "usable_now": False, "paused": False, "type": "weekly"}
++    ]}}))
++    unusable = prof.redeem_account_reset(account="alpha@example.test", grant="full-reset-2611")
++    assert unusable["redeemed"] is False and unusable["available"] == 1
++
++    def raise_429(req, timeout=None):
++        if req.get_method() == "GET":
++            return FakeResp({"cedar_ember": CEDAR_EMBER_MULTI})
++        raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {}, None)
++
++    monkeypatch.setattr(urllib.request, "urlopen", raise_429)
++    limited = prof.redeem_account_reset(account="alpha@example.test", grant="launch-2610-fable")
++    assert limited["redeemed"] is False and limited["status"] == "rate_limited"
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_admission_breakpoint.py b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_admission_breakpoint.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..d9c3c9bcb7713af8734068b5baa41265b4c7c820
@@ -70885,10 +71780,10 @@ index 0000000000000000000000000000000000000000..44e4074c0d48b77461cb4f360d99270c
 +    unittest.main()
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_account_usage.py b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_account_usage.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..27c4df3e0e633f64c61c3cd2480e1c8d3d02cdf6
+index 0000000000000000000000000000000000000000..653b811c00c8bad6d54ff47abb6838184e76faed
 --- /dev/null
 +++ b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_account_usage.py
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,157 @@
 +"""`/usage` plan limits through core's own dispatch and renderer. Claude Code answers its `get_usage`
 +control request; only that subprocess is faked. The plugin never reads or sends the CLI's token."""
 +from datetime import datetime, timezone
@@ -70913,7 +71808,8 @@ index 0000000000000000000000000000000000000000..27c4df3e0e633f64c61c3cd2480e1c8d
 +
 +
 +def _answer(rate_limits=None, available=True, subtype='success'):
-+    return {'type': 'control_response', 'response': {'subtype': subtype, 'request_id': 'hermes-usage', 'response': {
++    import host
++    return {'type': 'control_response', 'response': {'subtype': subtype, 'request_id': f'{host.NAME}-usage', 'response': {
 +        'subscription_type': 'max' if available else None, 'rate_limits_available': available,
 +        'rate_limits': rate_limits, 'session': {}, 'behaviors': None}}}
 +
@@ -72287,10 +73183,10 @@ index 0000000000000000000000000000000000000000..dd967dcd7665a4b3e0d9a3cb24b372b3
 +    assert field["label"] and field["description"]
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_discovery.py b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_discovery.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..5948e4c01a3e181435bac35d2cc0f68e1bb18deb
+index 0000000000000000000000000000000000000000..83456d572e77f3e51261223e9e95d32fac13ce45
 --- /dev/null
 +++ b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_discovery.py
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,98 @@
 +"""Installed-plugin discovery, the `claude` presence check, and offline native metadata contracts."""
 +import logging
 +import os
@@ -72299,12 +73195,15 @@ index 0000000000000000000000000000000000000000..5948e4c01a3e181435bac35d2cc0f68e
 +
 +import pytest
 +
-+from conftest import PLUGIN_NAME
++from conftest import PLUGIN_NAME, REPO_ROOT, user_provider_prefix
 +
 +
 +def test_installed_plugin_registers_and_constructs_client_without_native_process(profile, tmp_path):
 +    client = profile.create_client(command="unused-offline-native", env={})
 +    try:
++        module = sys.modules[type(client).__module__]
++        loaded_dir = Path(module.__file__).resolve().parent
++        assert loaded_dir != REPO_ROOT.resolve() and loaded_dir.name == PLUGIN_NAME
 +        assert callable(client.chat.completions.create)
 +        assert profile.auth_type == "external_process" and profile.process_command == "claude"
 +        assert profile.supports_health_check is False
@@ -72332,7 +73231,7 @@ index 0000000000000000000000000000000000000000..5948e4c01a3e181435bac35d2cc0f68e
 +    # is absent, so the provider stays selectable and `hermes model` can explain what is missing.
 +    import providers
 +    module_name = type(profile).__module__
-+    assert module_name.startswith("_hermes_user_provider_")
++    assert module_name.startswith(user_provider_prefix())
 +    del sys.modules[module_name]
 +    with caplog.at_level(logging.WARNING):
 +        providers._import_plugin_dir(Path(os.environ["HERMES_HOME"]) / "plugins" / PLUGIN_NAME, "user")
@@ -73655,10 +74554,10 @@ index 0000000000000000000000000000000000000000..e750677d1226da8d31f8aeaed5f96618
 +    assert len(ids) == 2 and ids[0] != ids[1], ids
 diff --git a/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_setup.py b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_setup.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..8aa47d7d2e2d1e96f448d994b51bebde7a62f1ad
+index 0000000000000000000000000000000000000000..d773e6b220a9899019bdb9518e93c95511efda46
 --- /dev/null
 +++ b/plugins/model-providers/claude-subscription-directsdk-experimental/tests/test_directsdk_setup.py
-@@ -0,0 +1,325 @@
+@@ -0,0 +1,323 @@
 +"""Setup for the provider is driven by the Claude CLI itself: its auth status gates the flow and its
 +own model picker (initialize handshake) supplies the list, with the pinned catalog as fallback."""
 +import json
@@ -73720,15 +74619,13 @@ index 0000000000000000000000000000000000000000..8aa47d7d2e2d1e96f448d994b51bebde
 +    for key, value in _service_env(tmp_path).items():
 +        monkeypatch.setenv(key, value)
 +    # Install and discover the plugin under the service environment, as such a backend starting up would.
++    from conftest import isolate_home
 +    home = tmp_path / "hermes-home"
 +    root = Path(__file__).resolve().parents[1]
 +    shutil.copytree(root, home / "plugins" / "claude-subscription-directsdk-experimental",
 +                    ignore=shutil.ignore_patterns(".git", "tests", "evals", "__pycache__"))
 +    (home / "config.yaml").write_text("plugins:\n  enabled: []\n", encoding="utf-8")
-+    monkeypatch.setenv("HERMES_HOME", str(home))
-+    for name in tuple(sys.modules):
-+        if name.startswith("_hermes_user_provider_"):
-+            monkeypatch.delitem(sys.modules, name)
++    isolate_home(monkeypatch, home)
 +    monkeypatch.setattr(providers, "_REGISTRY", {})
 +    monkeypatch.setattr(providers, "_ALIASES", {})
 +    monkeypatch.setattr(providers, "_PROVIDER_LIST_CACHE", None)

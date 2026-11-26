@@ -88,10 +88,10 @@ index 0000000000000000000000000000000000000000..e79ce6c7d3cc23aafc527c2a868d3fbe
 +        ctx.on_unload(unload)
 diff --git a/plugins/model-controls/api.py b/plugins/model-controls/api.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..e3891b32b82afb4d9dedca81e54dba2d548ad555
+index 0000000000000000000000000000000000000000..8c9ebd3463b212d7fef0a16c5b605748ad30e5c2
 --- /dev/null
 +++ b/plugins/model-controls/api.py
-@@ -0,0 +1,289 @@
+@@ -0,0 +1,416 @@
 +"""Model selection API for client plugins. No portal or UI dependency.
 +
 +Published as sys.modules["model_controls"] by register(). Each client supplies the
@@ -137,7 +137,7 @@ index 0000000000000000000000000000000000000000..e3891b32b82afb4d9dedca81e54dba2d
 +        if accounts is None:
 +            pooled = (row.get("usage") or {}).get("accounts")
 +            if pooled:
-+                accounts = [_pooled_account(account) for account in pooled]
++                accounts = [_pooled_account(slug, account) for account in pooled]
 +            elif has_account_usage(slug):
 +                accounts = [_account("", _provider_snapshot(slug))]
 +            else:
@@ -163,7 +163,7 @@ index 0000000000000000000000000000000000000000..e3891b32b82afb4d9dedca81e54dba2d
 +        return None
 +    if bounded.timed_out or bounded.value is None:
 +        return None
-+    return [_account(str(label), snapshot) for label, snapshot in bounded.value]
++    return [_account(str(label), snapshot, account_id=str(label)) for label, snapshot in bounded.value]
 +
 +
 +def _provider_snapshot(slug):
@@ -174,21 +174,144 @@ index 0000000000000000000000000000000000000000..e3891b32b82afb4d9dedca81e54dba2d
 +    return fetch_account_usage(slug) if snapshot is None or snapshot_is_stale(snapshot) else snapshot
 +
 +
-+def _account(label, snapshot):
++def _reset_options(raw_options):
++    if not isinstance(raw_options, list):
++        return []
++    out = []
++    for item in raw_options:
++        if not isinstance(item, dict):
++            continue
++        gid = item.get("id")
++        label = item.get("label")
++        avail = item.get("available")
++        if not isinstance(gid, str) or not gid or not isinstance(label, str) or not label:
++            continue
++        if isinstance(avail, bool) or not isinstance(avail, (int, float)):
++            continue
++        option = {
++            "id": gid,
++            "label": label,
++            "available": max(0, int(avail)),
++            "usable": bool(item.get("usable")) and int(avail) > 0,
++        }
++        expires_at = item.get("expires_at")
++        if isinstance(expires_at, str) and expires_at:
++            option["expires_at"] = expires_at
++        out.append(option)
++    return out
++
++
++def _resets(snapshot, *, account_id=""):
++    raw = getattr(snapshot, "raw", None)
++    if not isinstance(raw, dict):
++        return None
++    generic = raw.get("usage_resets")
++    if isinstance(generic, dict):
++        available = generic.get("available")
++        if not isinstance(available, bool) and isinstance(available, (int, float)):
++            count = max(0, int(available))
++            resets = {"available": count, "usable": bool(generic.get("usable")) and count > 0}
++            options = _reset_options(generic.get("options"))
++            if options:
++                resets["options"] = options
++            target = str(generic.get("account") or account_id or "")
++            if target:
++                resets["account"] = target
++            return resets
++    credits = raw.get("rate_limit_reset_credits")
++    if not isinstance(credits, dict):
++        return None
++    available = credits.get("available_count")
++    if isinstance(available, bool) or not isinstance(available, (int, float)):
++        return None
++    count = max(0, int(available))
++    applicable = credits.get("applicable_available_count")
++    if isinstance(applicable, bool) or not isinstance(applicable, (int, float)):
++        usable = count > 0
++    else:
++        usable = count > 0 and int(applicable) > 0
++    resets = {"available": count, "usable": usable}
++    if account_id:
++        resets["account"] = account_id
++    return resets
++
++
++def _account(label, snapshot, *, account_id=""):
 +    windows = [{"label": str(w.label), "used_percent": float(w.used_percent),
 +                "resets_at": w.reset_at.isoformat() if w.reset_at else None}
 +               for w in (snapshot.windows if snapshot else ())
 +               if w.used_percent is not None and getattr(w, "scope", "account") != "model"]
 +    note = None if windows else (getattr(snapshot, "unavailable_reason", None) or ("Usage unavailable" if snapshot is None else None))
-+    return {"label": label, "windows": windows, "note": note}
++    row = {"label": label, "windows": windows, "note": note}
++    resets = _resets(snapshot, account_id=account_id)
++    if resets is not None:
++        row["resets"] = resets
++    return row
 +
 +
-+def _pooled_account(account):
++def _pooled_account(slug, account):
++    from agent.account_usage_cache import cached_account_usage, snapshot_is_stale
++
 +    windows = [{"label": str(w.get("label") or ""), "used_percent": float(w["used_percent"]), "resets_at": w.get("resets_at")}
 +               for w in account.get("windows") or ()
 +               if w.get("used_percent") is not None and w.get("scope", "account") != "model"]
 +    note = None if windows else ("Signed out" if account.get("state") == "unavailable" else "Usage unavailable")
-+    return {"label": str(account.get("label") or ""), "windows": windows, "note": note}
++    row = {"label": str(account.get("label") or ""), "windows": windows, "note": note}
++    account_id = str(account.get("id") or "")
++    snapshot = cached_account_usage(slug, identity_id=account_id) if account_id else None
++    resets = _resets(snapshot, account_id=account_id) if snapshot is not None and not snapshot_is_stale(snapshot) else None
++    if resets is not None:
++        row["resets"] = resets
++    return row
++
++
++def _codex_reset_target(account):
++    if not account:
++        return None, None, None
++    from agent.account_usage_cache import _identity_id_for
++    from agent.credential_pool import load_pool
++    from hermes_cli.auth_codex import _codex_pool_route_base_url
++
++    for entry in load_pool("openai-codex").entries():
++        identity_id = _identity_id_for("openai-codex", entry)
++        if account in (identity_id, str(entry.id or ""), str(entry.label or "")):
++            return _codex_pool_route_base_url(entry.runtime_base_url), entry.runtime_api_key, identity_id
++    raise ValueError("Account not found")
++
++
++def use_reset(provider, account="", force=False, grant=""):
++    """Redeem one banked usage reset for Codex or any provider exposing `redeem_account_reset`."""
++    from agent.account_usage import fetch_account_usage, redeem_codex_reset_credit
++    from providers import get_provider_profile
++
++    slug = str(provider or "").strip().lower()
++    if slug == "openai-codex":
++        base_url, api_key, identity_id = _codex_reset_target(str(account or "").strip())
++        result = redeem_codex_reset_credit(base_url=base_url, api_key=api_key, force=bool(force))
++        if result.redeemed or result.status == "already_redeemed":
++            try:
++                fetch_account_usage(slug, base_url=base_url, api_key=api_key, identity_id=identity_id)
++            except Exception:
++                pass
++        return {
++            "status": result.status,
++            "redeemed": result.redeemed,
++            "message": result.message,
++            "available": result.available_count,
++        }
++
++    hook = getattr(get_provider_profile(slug), "redeem_account_reset", None) if slug else None
++    if not callable(hook):
++        raise ValueError("That provider doesn't support usage resets")
++    reply = hook(account=str(account or "").strip(), grant=str(grant or "").strip(), force=bool(force))
++    if not isinstance(reply, dict):
++        raise ValueError("Provider returned an invalid reset response")
++    return {
++        "status": str(reply.get("status") or ""),
++        "redeemed": bool(reply.get("redeemed")),
++        "message": str(reply.get("message") or ""),
++        "available": reply.get("available"),
++    }
 +
 +
 +class Client:
@@ -213,6 +336,10 @@ index 0000000000000000000000000000000000000000..e3891b32b82afb4d9dedca81e54dba2d
 +    def usage(self):
 +        with self._profile_scope():
 +            return usage()
++
++    def use_reset(self, provider, account="", force=False, grant=""):
++        with self._profile_scope():
++            return use_reset(provider, account=account, force=force, grant=grant)
 +
 +    def model(self):
 +        from hermes_cli.config import load_config
@@ -544,10 +671,10 @@ index 0000000000000000000000000000000000000000..b2e09d1c918cb5264a8af2d7941ce725
 +            sys.modules["model_controls"] = prior
 diff --git a/plugins/model-controls/tests/test_usage.py b/plugins/model-controls/tests/test_usage.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..42edf8c6f3ba1fdc8fbf15ef290dff797141ab92
+index 0000000000000000000000000000000000000000..9050d1cd7c1006afe2588ee7384316233e145471
 --- /dev/null
 +++ b/plugins/model-controls/tests/test_usage.py
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,217 @@
 +"""Usage by account, as a client shows it. Needs Hermes importable; only provider data sources are faked."""
 +import importlib.util
 +import sys
@@ -659,3 +786,109 @@ index 0000000000000000000000000000000000000000..42edf8c6f3ba1fdc8fbf15ef290dff79
 +    hermes.linked["claude"] = [("primary", _snapshot(AccountUsageWindow("Current week", 20), AccountUsageWindow("Fable week", 80, scope="model")))]
 +    shown = {row["provider"]: [w["label"] for a in row["accounts"] for w in a["windows"]] for row in api.usage()}
 +    assert shown == {"claude": ["Current week"], "codex": ["Weekly"]}
++
++
++def test_banked_resets_are_reported_on_single_and_pooled_accounts(api, hermes, monkeypatch):
++    import agent.account_usage_cache as cache
++
++    single_raw = {"rate_limit_reset_credits": {"available_count": 3, "applicable_available_count": 0}}
++    pooled_raw = {"rate_limit_reset_credits": {"available_count": 2, "applicable_available_count": 1}}
++    hermes.rows = [
++        {"slug": "openai-codex", "name": "ChatGPT / Codex"},
++        {"slug": "pooled-codex", "name": "Pooled", "usage": {"accounts": [
++            {"id": "codex:acct:1", "label": "work", "state": "ready", "windows": [{"label": "Weekly", "used_percent": 50.0, "resets_at": None, "scope": "account"}]},
++        ]}},
++    ]
++    hermes.single["openai-codex"] = AccountUsageSnapshot(
++        provider="openai-codex", source="usage_api", fetched_at=datetime.now(timezone.utc),
++        windows=(AccountUsageWindow("Weekly", 8),), raw=single_raw,
++    )
++    pooled_snap = AccountUsageSnapshot(
++        provider="pooled-codex", source="usage_api", fetched_at=datetime.now(timezone.utc),
++        windows=(AccountUsageWindow("Weekly", 50),), raw=pooled_raw,
++    )
++    monkeypatch.setattr(cache, "cached_account_usage", lambda slug, identity_id=None, **kw: pooled_snap if identity_id == "codex:acct:1" else None)
++    monkeypatch.setattr(cache, "snapshot_is_stale", lambda snap: False)
++
++    rows = {row["provider"]: row["accounts"] for row in api.usage()}
++    assert rows["openai-codex"][0]["resets"] == {"available": 3, "usable": False}
++    assert rows["pooled-codex"][0]["resets"] == {"available": 2, "usable": True, "account": "codex:acct:1"}
++
++
++def test_use_reset_redeems_codex_credit_and_refreshes_usage(api, hermes, monkeypatch):
++    import agent.account_usage as account_usage
++    import agent.account_usage_cache as cache
++    import agent.credential_pool as credential_pool
++    import hermes_cli.auth_codex as auth_codex
++
++    calls = []
++    refreshed = []
++
++    def fake_redeem(*, base_url=None, api_key=None, force=False):
++        calls.append((base_url, api_key, force))
++        return account_usage.CodexResetRedeemResult(status="reset", message="Reset redeemed.", available_count=2, windows_reset=1)
++
++    def fake_fetch(slug, **kw):
++        refreshed.append((slug, kw))
++        return _snapshot(AccountUsageWindow("Weekly", 0))
++
++    monkeypatch.setattr(account_usage, "redeem_codex_reset_credit", fake_redeem)
++    monkeypatch.setattr(account_usage, "fetch_account_usage", fake_fetch)
++
++    outcome = api.use_reset("openai-codex", force=True)
++    assert outcome == {"status": "reset", "redeemed": True, "message": "Reset redeemed.", "available": 2}
++    assert calls == [(None, None, True)]
++    assert refreshed == [("openai-codex", {"base_url": None, "api_key": None, "identity_id": None})]
++
++    entry = SimpleNamespace(id="e1", label="work", runtime_base_url="https://chatgpt.com/backend-api", runtime_api_key="tok-1")
++    monkeypatch.setattr(credential_pool, "load_pool", lambda slug: SimpleNamespace(entries=lambda: [entry]))
++    monkeypatch.setattr(cache, "_identity_id_for", lambda slug, e: "codex:acct:1")
++    monkeypatch.setattr(auth_codex, "_codex_pool_route_base_url", lambda url: url)
++
++    pooled = api.use_reset("openai-codex", account="codex:acct:1", force=True)
++    assert pooled["redeemed"] is True
++    assert calls[-1] == ("https://chatgpt.com/backend-api", "tok-1", True)
++    assert refreshed[-1] == ("openai-codex", {"base_url": "https://chatgpt.com/backend-api", "api_key": "tok-1", "identity_id": "codex:acct:1"})
++
++    with pytest.raises(ValueError, match="doesn't support"):
++        api.use_reset("antigravity-oauth")
++    with pytest.raises(ValueError, match="Account not found"):
++        api.use_reset("openai-codex", account="missing")
++
++
++def test_provider_plugin_resets_surface_options_and_dispatch_redeem(api, hermes, monkeypatch):
++    import providers
++
++    claude_resets = {
++        "available": 3,
++        "usable": True,
++        "options": [
++            {"id": "full-reset-2611", "label": "weekly reset", "available": 1, "usable": True, "expires_at": "2026-12-10T22:00:00+00:00"},
++            {"id": "launch-2610-fable", "label": "Fable reset", "available": 2, "usable": True},
++        ],
++    }
++    hermes.rows = [{"slug": "claude-subscription-directsdk-experimental", "name": "Claude"}]
++    hermes.linked["claude-subscription-directsdk-experimental"] = [
++        ("work@example.test", AccountUsageSnapshot(
++            provider="claude-subscription-directsdk-experimental", source="claude_code_get_usage",
++            fetched_at=datetime.now(timezone.utc),
++            windows=(AccountUsageWindow("Current week", 18),),
++            raw={"usage_resets": claude_resets},
++        )),
++    ]
++
++    shown = api.usage()
++    assert shown[0]["accounts"][0]["resets"] == {**claude_resets, "account": "work@example.test"}
++
++    redeem_calls = []
++
++    def redeem_hook(*, account="", grant="", force=False):
++        redeem_calls.append((account, grant, force))
++        return {"status": "reset", "redeemed": True, "message": "Limits reset.", "available": 2}
++
++    monkeypatch.setattr(providers, "get_provider_profile", lambda slug: SimpleNamespace(
++        name=slug, redeem_account_reset=redeem_hook if slug == "claude-subscription-directsdk-experimental" else None,
++    ))
++    outcome = api.use_reset("claude-subscription-directsdk-experimental", account="work@example.test", grant="launch-2610-fable")
++    assert outcome == {"status": "reset", "redeemed": True, "message": "Limits reset.", "available": 2}
++    assert redeem_calls == [("work@example.test", "launch-2610-fable", False)]
