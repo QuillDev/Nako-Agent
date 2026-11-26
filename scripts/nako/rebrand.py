@@ -54,14 +54,7 @@ _UPSTREAM_PAGES_RE = re.compile(
 )
 _UPSTREAM_ORG_RE = re.compile(re.escape(_UPSTREAM_ORG), re.IGNORECASE)
 
-_README_TOP_LINE = f"A fork of {_UPSTREAM_BRAND_TITLE} Agent."
-_README_HEADER = (
-    f"{_README_TOP_LINE}\n\n"
-    f"This fork was created because model providers block {_UPSTREAM_BRAND_TITLE} Agent. "
-    "Nako-Agent is a personal rebranded and patched build that tracks upstream fixes "
-    "via a clean `patches` branch and an automated rebrand script (`scripts/nako/sync.py`).\n\n"
-    "---\n\n"
-)
+_README = Path(__file__).resolve().parent / "main-readme.md"  # main's README is ours, not upstream's renamed
 
 _GUARD_ENTRY = '    "no-upstream-brand": ["scripts/nako/check_no_upstream_brand.py"],\n'
 _GUARD_ANCHOR = '    "backend-imports": ["scripts/ci/check_backend_imports.py"],\n'
@@ -207,10 +200,7 @@ def _rewrite_contents(repo: Path, files: list[str]) -> int:
             continue
 
         if rel == "README.md":
-            body = text
-            if body.startswith(_README_HEADER):
-                body = body[len(_README_HEADER):]
-            new_text = _README_HEADER + _rebrand_text(body)
+            new_text = _README.read_text(encoding="utf-8")
         else:
             new_text = _rebrand_text(text, preserve_org=_is_license_file(rel))
 
