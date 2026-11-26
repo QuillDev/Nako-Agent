@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import brand_art
+
 _UPSTREAM_BRAND_BYTES = bytes([104, 101, 114, 109, 101, 115])
 _UPSTREAM_BRAND = _UPSTREAM_BRAND_BYTES.decode("ascii")
 _UPSTREAM_BRAND_TITLE = _UPSTREAM_BRAND.capitalize()
@@ -308,11 +310,12 @@ def main(argv: list[str] | None = None) -> int:
     rewritten = _rewrite_contents(repo, new_files)
     wired_check = _wire_scripts_check(repo)
     _sync_shims(repo)
+    art = brand_art.apply(repo)
     if args.stage:
         _stage_changes(repo, mapping)
 
     print(
-        f"rebrand: renamed {len(mapping)} paths, rewrote {rewritten} files"
+        f"rebrand: renamed {len(mapping)} paths, rewrote {rewritten} files, replaced {art} logo files"
         + (", wired scripts/check" if wired_check else "")
     )
 

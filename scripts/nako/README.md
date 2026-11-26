@@ -6,6 +6,8 @@ To work on them, `apply` builds the files into a commit stack: the `patches` bra
 
 `main` is generated on top of `patches` as one rebrand commit (`scripts/nako/rebrand.py`). Never hand-edit `main`.
 
+The rebrand also swaps upstream's logo for ours (`brand_art.py`, needs Pillow): every committed icon is redrawn from `art/icon.png` and the README banner from `art/banner.png`. To change the logo, replace those two files and rebuild `main`.
+
 ## Changing patches
 
 `work/` is an ordinary checkout of the code with the patches applied as commits. Edit, run and test there; its `AGENTS.md` says how. Everything in it keeps upstream's names, and patches must too: the rename to Nako happens only when `main` is built.
