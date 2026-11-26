@@ -54,7 +54,7 @@ _UPSTREAM_PAGES_RE = re.compile(
 )
 _UPSTREAM_ORG_RE = re.compile(re.escape(_UPSTREAM_ORG), re.IGNORECASE)
 
-_README = Path(__file__).resolve().parent / "main-readme.md"  # main's README is ours, not upstream's renamed
+_README = Path(__file__).resolve().parents[2] / "README.md"  # main's README is this branch's, not upstream's renamed
 
 _GUARD_ENTRY = '    "no-upstream-brand": ["scripts/nako/check_no_upstream_brand.py"],\n'
 _GUARD_ANCHOR = '    "backend-imports": ["scripts/ci/check_backend_imports.py"],\n'

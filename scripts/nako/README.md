@@ -8,7 +8,22 @@ To work on them, `apply` builds the files into a commit stack: the `patches` bra
 
 The rebrand also swaps upstream's logo for ours (`brand_art.py`, needs Pillow): every committed icon is redrawn from `art/icon.png` and the README banner from `art/banner.png`. To change the logo, replace those two files and rebuild `main`.
 
-`main`'s README is `main-readme.md`, copied in whole. Upstream's README is not used.
+`main`'s README is this branch's root `README.md`, copied in whole. Upstream's README is not used.
+
+## First time
+
+A fresh clone needs the upstream history once:
+
+```bash
+git remote add upstream <upstream repo url>
+git fetch upstream main
+```
+
+Then build the commit stack in `work/`:
+
+```bash
+python3 scripts/nako/patches.py apply
+```
 
 ## Changing patches
 
