@@ -165,10 +165,10 @@ index 35c2534c5323d836129513fac46be3555fa4303e..79a49bbc4a5ca27c79941c0b4757612a
              raise
 diff --git a/gateway/slack_multiplayer.py b/gateway/slack_multiplayer.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..52f46b9517b858a301cf90ac87a1f2941c92c8f5
+index 0000000000000000000000000000000000000000..923c26afd6c8446172d9a3873d3888566312bbf1
 --- /dev/null
 +++ b/gateway/slack_multiplayer.py
-@@ -0,0 +1,531 @@
+@@ -0,0 +1,532 @@
 +"""Slack multiplayer routing and progress overrides used by the adapter and gateway."""
 +
 +from __future__ import annotations
@@ -494,6 +494,7 @@ index 0000000000000000000000000000000000000000..52f46b9517b858a301cf90ac87a1f294
 +            result = await original(self, st)
 +        finally:
 +            del st.visible_tasks
++        if not getattr(st, "publication_suppressed", False):
 +            published.update({task["id"]: task["status"] for task in frame})
 +        if cancelled is not None:
 +            raise cancelled
@@ -862,3 +863,65 @@ index 65c0fa7631562db5c760100f1adec606f33c10ef..88f56d69130b7019db085b672ab55a3c
      async def _thread_context_line(
          self, msg: dict, msg_text: str, is_parent: bool, team_id: str, channel_id: str, *,
          chat_type: str = "group", thread_ts: str = "") -> str:
+diff --git a/tests/gateway/test_slack_multiplayer.py b/tests/gateway/test_slack_multiplayer.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..03a2ad3160b4fcf12c70b206084015ab6bdaf756
+--- /dev/null
++++ b/tests/gateway/test_slack_multiplayer.py
+@@ -0,0 +1,56 @@
++"""Behavior tests for gateway.slack_multiplayer task-card settlement tracking."""
++from __future__ import annotations
++
++import asyncio
++from types import SimpleNamespace
++
++import pytest
++
++from gateway import slack_multiplayer
++
++
++class _FakeCardState:
++    def __init__(self, tasks: list[dict[str, str]]) -> None:
++        self.tasks = {t["id"]: t for t in tasks}
++        self.task_order = [t["id"] for t in tasks]
++
++    def visible_tasks(self) -> list[dict[str, str]]:
++        return [self.tasks[i] for i in self.task_order[-8:]]
++
++
++def test_task_card_publish_does_not_mark_settled_tasks_published_on_error(monkeypatch):
++    """If publishing raises, scrolled-out finished tasks must remain pending for the next publish."""
++    monkeypatch.setattr(slack_multiplayer, "enabled", lambda: True)
++    monkeypatch.setattr(slack_multiplayer, "_CARD_MIN_INTERVAL", 0.0)
++
++    seen_frames: list[list[str]] = []
++    attempts = 0
++
++    @slack_multiplayer._make_task_card_publish
++    async def publish(_self, st):
++        nonlocal attempts
++        attempts += 1
++        seen_frames.append([t["id"] for t in st.visible_tasks()])
++        if attempts == 1:
++            raise RuntimeError("transient slack error")
++        return "ok"
++
++    runner = SimpleNamespace(
++        _task_card_drain=lambda _st: False,
++        _ctx=SimpleNamespace(_run_still_current=lambda: True),
++        _agent_interrupted=lambda: False,
++    )
++    tasks = [{"id": f"t{i}", "status": "complete"} for i in range(10)]
++    st = _FakeCardState(tasks)
++
++    with pytest.raises(RuntimeError, match="transient slack error"):
++        asyncio.run(publish(runner, st))
++    assert seen_frames == [[f"t{i}" for i in range(10)]]
++
++    # Next publish must still include scrolled-out t0 and t1 because the first publish failed.
++    assert asyncio.run(publish(runner, st)) == "ok"
++    assert seen_frames[1] == [f"t{i}" for i in range(10)]
++
++    # Once published cleanly, scrolled-out t0 and t1 are settled and no longer resent.
++    assert asyncio.run(publish(runner, st)) == "ok"
++    assert seen_frames[2] == [f"t{i}" for i in range(2, 10)]
