@@ -95,10 +95,10 @@ index 82cd8bd30a38e546232ee46be17e591fe858243e..21d32ec36c78687b7e2284ed9d835546
          return
 diff --git a/hermes_agent/compat/upstream_names.py b/hermes_agent/compat/upstream_names.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..717d833a3bf290e9f98ca46f1a83df10d078ebc6
+index 0000000000000000000000000000000000000000..27f6d97a27d9697b7713a04721a5620fd9e059d6
 --- /dev/null
 +++ b/hermes_agent/compat/upstream_names.py
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,115 @@
 +"""Plugins written for the upstream project keep working on a renamed build.
 +
 +A build that renames the project (its packages, helpers and environment variables) would break
@@ -110,14 +110,14 @@ index 0000000000000000000000000000000000000000..717d833a3bf290e9f98ca46f1a83df10
 +"""
 +from __future__ import annotations
 +
-+import importlib
 +import os
 +
-+from .finder import Finder, current_name
++from .finder import Finder, _Alias
 +
 +_UPSTREAM = bytes((104, 101, 114, 109, 101, 115)).decode()
 +_OWN = __name__.partition("_")[0]
 +_SPELLINGS = tuple((spell(_UPSTREAM), spell(_OWN)) for spell in (str.lower, str.upper, str.capitalize))
++_MISSING = object()
 +
 +
 +def own_spelling(name: str) -> str:
@@ -136,10 +136,10 @@ index 0000000000000000000000000000000000000000..717d833a3bf290e9f98ca46f1a83df10
 +
 +def offered(obj, name: str, default=None):
 +    """An attribute core asks a plugin's object for, under this build's spelling or the upstream one."""
-+    value = getattr(obj, name, default)
-+    if value is default and _OWN != _UPSTREAM:
-+        value = getattr(obj, upstream_spelling(name), default)
-+    return value
++    value = getattr(obj, name, _MISSING)
++    if value is _MISSING and _OWN != _UPSTREAM:
++        value = getattr(obj, upstream_spelling(name), _MISSING)
++    return default if value is _MISSING else value
 +
 +
 +def own_keys(mapping):
@@ -182,11 +182,18 @@ index 0000000000000000000000000000000000000000..717d833a3bf290e9f98ca46f1a83df10
 +    module._serves_upstream_names = True
 +
 +
++class _UpstreamAlias(_Alias):
++    def create_module(self, spec):
++        module = super().create_module(spec)
++        _serve_upstream_attributes(module)
++        return module
++
++
 +class UpstreamNames(Finder):
 +    def find_spec(self, fullname, path=None, target=None):
 +        spec = super().find_spec(fullname, path, target)
-+        if spec is not None:
-+            _serve_upstream_attributes(importlib.import_module(current_name(fullname, self.moves)))
++        if spec is not None and isinstance(spec.loader, _Alias):
++            spec.loader = _UpstreamAlias(spec.loader.target)
 +        return spec
 +
 +
@@ -652,6 +659,72 @@ index 5e1d91ea0187c9f72e28a7b500d88a1abdde39c3..559d9f9af0a99b32a9d84dfe15df6dbb
    zod@4.6.7: {}
  
    zustand@3.7.2(react@19.3.0):
+diff --git a/tests/hermes_agent/test_compat_upstream_names.py b/tests/hermes_agent/test_compat_upstream_names.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a0ef048c9cdebdc3503d4b7a4c179e1c4ea8936b
+--- /dev/null
++++ b/tests/hermes_agent/test_compat_upstream_names.py
+@@ -0,0 +1,60 @@
++"""Behavior tests for hermes_agent.compat.upstream_names (rebrand compatibility)."""
++from __future__ import annotations
++
++import importlib
++import importlib.util
++import sys
++
++from hermes_agent.compat import upstream_names
++
++
++def test_offered_honors_explicit_own_attribute_even_when_it_matches_default(monkeypatch):
++    """An explicit own-spelled False/None must not fall through to an upstream-spelled attr."""
++    monkeypatch.setattr(upstream_names, "_OWN", "forkname")
++    monkeypatch.setattr(
++        upstream_names,
++        "_SPELLINGS",
++        tuple((spell(upstream_names._UPSTREAM), spell("forkname")) for spell in (str.lower, str.upper, str.capitalize)),
++    )
++    upstream_flag = f"SUPPORTS_{upstream_names._UPSTREAM.upper()}_TOOL_CALLS"
++
++    client = type("Client", (), {"SUPPORTS_FORKNAME_TOOL_CALLS": False, upstream_flag: True})()
++    none_override = type("NoneOverride", (), {"SUPPORTS_FORKNAME_TOOL_CALLS": None, upstream_flag: True})()
++    upstream_only = type("UpstreamOnly", (), {upstream_flag: True})()
++
++    assert upstream_names.offered(client, "SUPPORTS_FORKNAME_TOOL_CALLS", False) is False
++    assert upstream_names.offered(none_override, "SUPPORTS_FORKNAME_TOOL_CALLS", None) is None
++    assert upstream_names.offered(upstream_only, "SUPPORTS_FORKNAME_TOOL_CALLS", False) is True
++
++
++def test_upstream_names_find_spec_does_not_eagerly_import_target_module(tmp_path, monkeypatch):
++    """importlib.util.find_spec on an upstream module name must stay side-effect-free until loaded."""
++    pkg = tmp_path / "forkname_lazyprobe"
++    pkg.mkdir()
++    (pkg / "__init__.py").write_text(
++        "IMPORTED = True\nFORKNAME_VALUE = 42\n",
++        encoding="utf-8",
++    )
++    monkeypatch.syspath_prepend(str(tmp_path))
++    monkeypatch.setattr(upstream_names, "_OWN", "forkname")
++    monkeypatch.setattr(
++        upstream_names,
++        "_SPELLINGS",
++        tuple((spell(upstream_names._UPSTREAM), spell("forkname")) for spell in (str.lower, str.upper, str.capitalize)),
++    )
++
++    finder = upstream_names.UpstreamNames(upstream_names._TopLevelNames())
++    monkeypatch.setattr(sys, "meta_path", [finder, *sys.meta_path])
++    upstream_mod_name = f"{upstream_names._UPSTREAM}_lazyprobe"
++    try:
++        spec = importlib.util.find_spec(upstream_mod_name)
++        assert spec is not None
++        assert "forkname_lazyprobe" not in sys.modules
++        assert upstream_mod_name not in sys.modules
++
++        loaded = importlib.import_module(upstream_mod_name)
++        assert loaded is sys.modules["forkname_lazyprobe"]
++        assert getattr(loaded, f"{upstream_names._UPSTREAM.upper()}_VALUE") == 42
++    finally:
++        for mod in (upstream_mod_name, "forkname_lazyprobe"):
++            sys.modules.pop(mod, None)
 diff --git a/web/eslint.config.js b/web/eslint.config.js
 index aba2670175ec9b9a8e17310130ea3d89fe0889c0..3cabe3b26382da03d6fdafeb62ddd67a5ecd936c 100644
 --- a/web/eslint.config.js

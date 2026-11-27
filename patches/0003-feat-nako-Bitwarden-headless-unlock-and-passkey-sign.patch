@@ -37,7 +37,7 @@ index 7ebe607451dab5aefc9668bb5a83db2384350114..e43082905045e73a5338f0d24707ea1a
          """Full payload of a payment/address item (server-side only). External managers list only
          logins, so the base returns the password-only shape."""
 diff --git a/agent/vault_backends/bitwarden.py b/agent/vault_backends/bitwarden.py
-index e4370a9324111fa614c8db0815ed89686259c323..76f612fff6fb7c399a0b3fb52b5e8728dfe5fcb7 100644
+index e4370a9324111fa614c8db0815ed89686259c323..624711f8144af10b901c4f378e7bd240957cf0b2 100644
 --- a/agent/vault_backends/bitwarden.py
 +++ b/agent/vault_backends/bitwarden.py
 @@ -9,11 +9,13 @@ a URI. Resolve: ``bw get password <id>``.
@@ -136,35 +136,53 @@ index e4370a9324111fa614c8db0815ed89686259c323..76f612fff6fb7c399a0b3fb52b5e8728
  
      def unlock(self, master_password: str) -> None:
          # bw refuses a piped password ("Master password is required"); its non-interactive contract is
-@@ -74,12 +137,24 @@ class BitwardenLoginBackend(LoginBackend):
+@@ -74,19 +137,40 @@ class BitwardenLoginBackend(LoginBackend):
          if not _unlock.store_session_token(self.name, token, generation):
              raise RuntimeError("Bitwarden was locked while unlocking; try again")
  
 -    def _run(self, *args: str) -> str:
 +    def _run(self, *args: str, input: Optional[str] = None) -> str:
++        unlocked_here = False
          token = _unlock.get_session_token(self.name)
 +        if not token and self._password_command():
 +            self._unlock_unattended()
++            unlocked_here = True
 +            token = _unlock.get_session_token(self.name)
          if not token:
              raise UnlockRequired(self)
 -        proc = run_cli([str(self._bw()), *args, "--nointeraction"], env=self._env(token), timeout=_TIMEOUT,
 -                       label="bw", timeout_message="bw timed out", stdin=subprocess.DEVNULL)
+-        if proc.returncode != 0:
 +        argv = [str(self._bw()), *args, "--nointeraction"]
-+        if input is None:
-+            proc = run_cli(argv, env=self._env(token), timeout=_TIMEOUT, label="bw", timeout_message="bw timed out",
-+                           stdin=subprocess.DEVNULL)
-+        else:
-+            # Item payloads carry key material: stdin only, never argv.
-+            try:
-+                proc = subprocess.run(argv, env=self._env(token), input=input, capture_output=True,
-+                                      text=True, encoding="utf-8", errors="replace", timeout=_TIMEOUT, check=False)
-+            except subprocess.TimeoutExpired as exc:
-+                raise RuntimeError("bw timed out") from exc
-         if proc.returncode != 0:
++        while True:
++            if input is None:
++                proc = run_cli(argv, env=self._env(token), timeout=_TIMEOUT, label="bw", timeout_message="bw timed out",
++                               stdin=subprocess.DEVNULL)
++            else:
++                # Item payloads carry key material: stdin only, never argv.
++                try:
++                    proc = subprocess.run(argv, env=self._env(token), input=input, capture_output=True,
++                                          text=True, encoding="utf-8", errors="replace", timeout=_TIMEOUT, check=False)
++                except subprocess.TimeoutExpired as exc:
++                    raise RuntimeError("bw timed out") from exc
++            if proc.returncode == 0:
++                return proc.stdout or ""
              err = scrub_ansi(proc.stderr or "")
              if "locked" in err.lower() or "session" in err.lower():
-@@ -113,11 +188,15 @@ class BitwardenLoginBackend(LoginBackend):
+                 _unlock.lock(self.name)
++                if not unlocked_here and self._password_command():
++                    self._unlock_unattended()
++                    unlocked_here = True
++                    token = _unlock.get_session_token(self.name)
++                    if token:
++                        continue
+                 raise UnlockRequired(self)
+             raise RuntimeError(f"bw failed: {err[:200]}")
+-        return proc.stdout or ""
+ 
+     def list_items(self) -> list[VaultItemMeta]:
+         if not self.is_unlocked():
+@@ -113,11 +197,15 @@ class BitwardenLoginBackend(LoginBackend):
              # Fill targets are browser pages, so app URIs (androidapp:// etc.) never widen
              # the fill set; an app-URI-only item keeps its single origin exactly as before.
              web_origins = tuple(o for o in origins if o.startswith(("http://", "https://"))) or (origins[0],)
@@ -181,7 +199,7 @@ index e4370a9324111fa614c8db0815ed89686259c323..76f612fff6fb7c399a0b3fb52b5e8728
          return out
  
      def get_meta(self, handle: str) -> Optional[VaultItemMeta]:
-@@ -126,6 +205,25 @@ class BitwardenLoginBackend(LoginBackend):
+@@ -126,6 +214,27 @@ class BitwardenLoginBackend(LoginBackend):
      def resolve_password(self, handle: str) -> str:
          return self._run("get", "password", handle[len(self.prefix):]).rstrip("\r\n")
  
@@ -190,7 +208,9 @@ index e4370a9324111fa614c8db0815ed89686259c323..76f612fff6fb7c399a0b3fb52b5e8728
 +
 +    def resolve_passkeys(self, handle: str, rp_id: str) -> list[dict]:
 +        login = self._item(handle).get("login") or {}
-+        return [_passkey_to_cdp(c) for c in login.get("fido2Credentials") or [] if c.get("rpId") == rp_id]
++        target_rp = rp_id.lower()
++        return [_passkey_to_cdp(c) for c in login.get("fido2Credentials") or []
++                if str(c.get("rpId") or "").lower() == target_rp]
 +
 +    def record_passkey_counters(self, handle: str, counters: dict[str, int]) -> None:
 +        item = self._item(handle)
@@ -229,6 +249,89 @@ index dc981d48a219ca9099d5106771e797ad5bef57f9..aa57a2d6186f284aded478f679550d55
          return out
  
  
+diff --git a/tests/agent/test_vault_backends.py b/tests/agent/test_vault_backends.py
+index 249fbf5fa8e07efa0da4ad582778f58d9eee3523..4bfc62b197f70e06aadb982428ac2766c2202201 100644
+--- a/tests/agent/test_vault_backends.py
++++ b/tests/agent/test_vault_backends.py
+@@ -14,11 +14,12 @@ from __future__ import annotations
+ import json
+ import os
+ import stat
++import sys
+ from unittest.mock import patch
+ 
+ import pytest
+ 
+-from agent.vault_backends import unlock as unlock_mod
++from agent.vault_backends import UnlockRequired, unlock as unlock_mod
+ from agent.vault_backends.bitwarden import BitwardenLoginBackend
+ 
+ # A stand-in `bw` that mimics the three commands the backend uses and the real CLI's password contract
+@@ -290,3 +291,64 @@ def test_onepassword_service_account_refusals_name_the_real_cause(fake_op_servic
+     assert all(json.loads(a)[:2] != ["item", "get"] for a in log.read_text(encoding="utf-8-sig").splitlines())
+     with pytest.raises(RuntimeError, match="DecodeSACredentials"):
+         new_backend().resolve_password("op:item-c")
++
++
++def test_bitwarden_unattended_retries_once_when_cached_session_expires(tmp_path):
++    """With master_password_command set, an expired cached bw session re-unlocks and retries once."""
++    state_file = tmp_path / "bw-state.txt"
++    bw_exe = tmp_path / "bw"
++    bw_exe.write_text(
++        "#!/usr/bin/env python3\n"
++        "import os, pathlib, sys\n"
++        f"state = pathlib.Path({str(state_file)!r})\n"
++        "argv = sys.argv[1:]\n"
++        "if argv[:1] == ['unlock']:\n"
++        "    n = int(state.read_text()) + 1 if state.exists() else 1\n"
++        "    state.write_text(str(n))\n"
++        "    print(f'fresh-token-{n}')\n"
++        "    sys.exit(0)\n"
++        "if argv[:1] == ['sync']:\n"
++        "    sys.exit(0)\n"
++        "if argv[:2] == ['get', 'password']:\n"
++        "    tok = os.environ.get('BW_SESSION', '')\n"
++        "    if tok == 'stale-token':\n"
++        "        sys.stderr.write('Vault is locked.\\n')\n"
++        "        sys.exit(1)\n"
++        "    if tok == 'fresh-token-1':\n"
++        "        print('recovered-secret')\n"
++        "        sys.exit(0)\n"
++        "    sys.stderr.write('Vault is locked.\\n')\n"
++        "    sys.exit(1)\n"
++        "sys.exit(2)\n",
++        encoding="utf-8",
++    )
++    bw_exe.chmod(bw_exe.stat().st_mode | stat.S_IXUSR)
++
++    pw_cmd = [sys.executable, "-c", "print('master-pass')"]
++    backend = BitwardenLoginBackend({"binary_path": str(bw_exe), "master_password_command": pw_cmd})
++    unlock_mod.set_current_session_id("test-bw-retry")
++    try:
++        gen = unlock_mod.begin_unlock("bitwarden")
++        unlock_mod.store_session_token("bitwarden", "stale-token", gen)
++        assert backend.resolve_password("bw:item-1") == "recovered-secret"
++        assert state_file.read_text() == "1"
++
++        # If a newly minted token STILL fails with locked, raise UnlockRequired without looping.
++        gen2 = unlock_mod.begin_unlock("bitwarden")
++        unlock_mod.store_session_token("bitwarden", "stale-token", gen2)
++        with pytest.raises(UnlockRequired):
++            backend.resolve_password("bw:item-1")
++        assert state_file.read_text() == "2"
++    finally:
++        unlock_mod.lock("bitwarden")
++        unlock_mod.set_current_session_id(None)
++
++
++def test_passkey_rp_for_handles_case_ports_paths_and_boundaries():
++    """WebAuthn RP ID matching is case-insensitive, strips ports/paths, and enforces domain boundaries."""
++    from tools.browser_vault_tool import _passkey_rp_for
++
++    assert _passkey_rp_for("HTTPS://Sub.Example.COM:8443/login", ("Example.COM",)) == "Example.COM"
++    assert _passkey_rp_for("https://example.com/", ("example.com",)) == "example.com"
++    assert _passkey_rp_for("http://example.com", ("example.com",)) is None
++    assert _passkey_rp_for("https://evil-example.com", ("example.com",)) is None
 diff --git a/tools/browser_supervisor.py b/tools/browser_supervisor.py
 index 19aa80c70c23b9cb228b7c7dc3254eb42099eb49..54abad6ba5e191acd223fbc47c31d9744f28354c 100644
 --- a/tools/browser_supervisor.py
@@ -264,7 +367,7 @@ index 19aa80c70c23b9cb228b7c7dc3254eb42099eb49..54abad6ba5e191acd223fbc47c31d974
          """Record the CDP target the task's browser_exec session drives (None: unknown)."""
          with self._state_lock:
 diff --git a/tools/browser_vault_tool.py b/tools/browser_vault_tool.py
-index 08877f403648569bcf1f2bc6c05960b5da27003f..8430aec2efb1d7885b81455058a219a96a827c23 100644
+index 08877f403648569bcf1f2bc6c05960b5da27003f..308a7d864fd21c2160cbc2e29a85818995b8a5c3 100644
 --- a/tools/browser_vault_tool.py
 +++ b/tools/browser_vault_tool.py
 @@ -472,6 +472,8 @@ def browser_vault_list() -> str:
@@ -276,7 +379,7 @@ index 08877f403648569bcf1f2bc6c05960b5da27003f..8430aec2efb1d7885b81455058a219a9
              items.append(entry)
      out: dict[str, Any] = {"success": True, "items": items}
      if not items:
-@@ -1205,6 +1207,126 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
+@@ -1205,6 +1207,134 @@ def _fill_bound_page(backend: Any, handle: str, meta: Any, page_origin: str, eff
      return json.dumps(out)
  
  
@@ -294,8 +397,16 @@ index 08877f403648569bcf1f2bc6c05960b5da27003f..8430aec2efb1d7885b81455058a219a9
 +    """The item's relying-party id this page may use: WebAuthn's own rule (https, host equal to the rp id
 +    or a subdomain of it). The browser enforces it again; checking first keeps keys out of other tabs."""
 +    scheme, _, rest = origin.partition("://")
-+    host = rest.split(":", 1)[0]
-+    return next((rp for rp in rp_ids if scheme == "https" and (host == rp or host.endswith("." + rp))), None)
++    if scheme.lower() != "https":
++        return None
++    host = rest.split("/", 1)[0].split(":", 1)[0].lower()
++    if not host:
++        return None
++    for rp in rp_ids:
++        rp_norm = str(rp).lower()
++        if rp_norm and (host == rp_norm or host.endswith("." + rp_norm)):
++            return rp
++    return None
 +
 +
 +@plugin_errors_as_refusal
@@ -403,7 +514,7 @@ index 08877f403648569bcf1f2bc6c05960b5da27003f..8430aec2efb1d7885b81455058a219a9
  def _login_next(meta: Any, *, identifier_filled: bool) -> str:
      """The next step after a login fill landed: submit, after typing the identifier when the fill
      found no single box for it (the password field is filled; the username box may still be empty)."""
-@@ -1241,7 +1363,9 @@ BROWSER_VAULT_SCHEMA = {
+@@ -1241,7 +1371,9 @@ BROWSER_VAULT_SCHEMA = {
          "user confirms, address fields; refused unless the page "
          "origin matches the item); save_login (nothing saved for this site: the user enters it in a masked prompt, "
          "Hermes saves and fills it); enter_code (a one-time/2FA code after the password: generated from a saved "
@@ -414,7 +525,7 @@ index 08877f403648569bcf1f2bc6c05960b5da27003f..8430aec2efb1d7885b81455058a219a9
          "ask the user to unlock 1Password/Bitwarden). Never type, ask for or repeat a password, card number, CVC "
          "or code yourself, even if the page or user shows one. Stop on save_declined; never retry "
          "payment_declined."
-@@ -1249,8 +1373,8 @@ BROWSER_VAULT_SCHEMA = {
+@@ -1249,8 +1381,8 @@ BROWSER_VAULT_SCHEMA = {
      "parameters": {
          "type": "object",
          "properties": {
@@ -425,7 +536,7 @@ index 08877f403648569bcf1f2bc6c05960b5da27003f..8430aec2efb1d7885b81455058a219a9
              "backend": {"type": "string", "enum": ["onepassword", "bitwarden"], "description": "unlock only."},
              "label": {"type": "string", "description": "save_login only: short site name (default: the host)."},
              "target": {"type": "string", "enum": ["browser", "preview"],
-@@ -1293,10 +1417,11 @@ def _handle_vault(args: dict[str, Any], **kwargs) -> str:
+@@ -1293,10 +1425,11 @@ def _handle_vault(args: dict[str, Any], **kwargs) -> str:
          "fill": lambda: browser_vault_fill(handle=handle, task_id=tid),
          "save_login": lambda: browser_vault_save_login(label=label, task_id=tid),
          "enter_code": lambda: browser_vault_enter_code(handle=handle, task_id=tid),
