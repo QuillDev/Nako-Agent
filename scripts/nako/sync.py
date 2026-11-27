@@ -181,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     # The stack carries no tooling, so `main` gets its brand guard and workflow from here.
     tooling = Path(__file__).resolve().parent
     (repo / "scripts" / "nako").mkdir(parents=True, exist_ok=True)
+    (repo / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
     shutil.copy(tooling / "check_no_upstream_brand.py", repo / "scripts" / "nako")
     shutil.copy(tooling / "nako-brand-lint.yml", repo / ".github" / "workflows")
 
@@ -214,6 +215,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         source_branch = patch_lib.current_branch(source)
+        if source_branch == "HEAD":
+            print(
+                f"Not pushed: {source} is on a detached HEAD. Check out the source branch before pushing.",
+                file=sys.stderr,
+            )
+            return 1
         print(f"==> Pushing {source_branch} and {args.target_branch} to origin")
         _run(
             [

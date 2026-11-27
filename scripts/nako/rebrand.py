@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+from concurrent.futures import ProcessPoolExecutor
 import os
 import re
 import shutil
@@ -53,6 +54,9 @@ _UPSTREAM_PAGES_RE = re.compile(
     re.IGNORECASE,
 )
 _UPSTREAM_ORG_RE = re.compile(re.escape(_UPSTREAM_ORG), re.IGNORECASE)
+_NOUS_PREFIX_RE = re.compile(re.escape(_UPSTREAM_ORG_SLUG[:4]), re.IGNORECASE)
+_BRAND_LOWER = _UPSTREAM_BRAND_BYTES.lower()
+_ORG_PREFIX_LOWER = _UPSTREAM_ORG_SLUG_BYTES[:4].lower()
 
 _README = Path(__file__).resolve().parents[2] / "README.md"  # main's README is this branch's, not upstream's renamed
 
@@ -101,11 +105,13 @@ def _is_license_file(rel: str) -> bool:
 
 
 def _rebrand_text(text: str, *, preserve_org: bool = False) -> str:
-    updated = _UPSTREAM_REPO_RE.sub("QuillDev/Nako-Agent", text)
-    updated = _UPSTREAM_HOST_RE.sub(_PORTAL_HOST, updated)
-    updated = _UPSTREAM_PAGES_RE.sub(_PAGES_HOST, updated)
-    if not preserve_org:
-        updated = _UPSTREAM_ORG_RE.sub(_replace_org_match, updated)
+    updated = text
+    if _NOUS_PREFIX_RE.search(updated):
+        updated = _UPSTREAM_REPO_RE.sub("QuillDev/Nako-Agent", updated)
+        updated = _UPSTREAM_HOST_RE.sub(_PORTAL_HOST, updated)
+        updated = _UPSTREAM_PAGES_RE.sub(_PAGES_HOST, updated)
+        if not preserve_org:
+            updated = _UPSTREAM_ORG_RE.sub(_replace_org_match, updated)
     updated = _BRAND_RE.sub(_replace_brand_match, updated)
     return updated
 
@@ -171,9 +177,67 @@ def _rename_paths(repo: Path, files: list[str]) -> tuple[list[str], list[tuple[s
     return new_files, mapping
 
 
-def _rewrite_contents(repo: Path, files: list[str]) -> int:
+def _tracked_files_and_symlinks(repo: Path) -> tuple[list[str], set[str]]:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "-s", "-z"],
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    raw = proc.stdout.decode("utf-8", "surrogateescape")
+    files: list[str] = []
+    symlinks: set[str] = set()
+    for entry in raw.split("\0"):
+        if not entry:
+            continue
+        meta, sep, path = entry.partition("\t")
+        if not sep:
+            continue
+        files.append(path)
+        if meta.startswith("120000 "):
+            symlinks.add(path)
+    return files, symlinks
+
+
+def _grep_target_files(repo: Path) -> set[str]:
+    """Tracked working-tree files containing any upstream brand/org needle."""
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "grep",
+            "--no-recurse-submodules",
+            "-a",
+            "-i",
+            "-l",
+            "-F",
+            "-z",
+            "-e",
+            _UPSTREAM_BRAND,
+            "-e",
+            _UPSTREAM_ORG,
+            "-e",
+            _UPSTREAM_ORG_SLUG,
+        ],
+        capture_output=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        check=False,
+    )
+    if proc.returncode not in (0, 1):
+        raise RuntimeError(f"git grep failed: {proc.stderr.decode('utf-8', 'replace').strip()}")
+    raw = proc.stdout.decode("utf-8", "surrogateescape")
+    return {entry for entry in raw.split("\0") if entry}
+
+
+def _rewrite_chunk(args: tuple[str, list[str], str | None]) -> int:
+    repo_str, chunk, readme_text = args
+    repo = Path(repo_str)
     changed = 0
-    for rel in files:
+    for rel in chunk:
         full = repo / rel
         if os.path.islink(full):
             target = os.readlink(full)
@@ -188,8 +252,12 @@ def _rewrite_contents(repo: Path, files: list[str]) -> int:
             continue
 
         data = full.read_bytes()
-        if rel != "README.md" and not _ANY_TARGET_BYTES_RE.search(data):
-            continue
+        if rel != "README.md":
+            lowered = data.lower()
+            if _BRAND_LOWER not in lowered and _ORG_PREFIX_LOWER not in lowered:
+                continue
+            if not _ANY_TARGET_BYTES_RE.search(data):
+                continue
 
         if b"\x00" in data[:8192]:
             continue
@@ -200,7 +268,7 @@ def _rewrite_contents(repo: Path, files: list[str]) -> int:
             continue
 
         if rel == "README.md":
-            new_text = _README.read_text(encoding="utf-8")
+            new_text = readme_text if readme_text is not None else _README.read_text(encoding="utf-8")
         else:
             new_text = _rebrand_text(text, preserve_org=_is_license_file(rel))
 
@@ -209,6 +277,20 @@ def _rewrite_contents(repo: Path, files: list[str]) -> int:
             changed += 1
 
     return changed
+
+
+def _rewrite_contents(repo: Path, files: list[str]) -> int:
+    readme_text = _README.read_text(encoding="utf-8") if "README.md" in files and _README.is_file() else None
+    workers = min(8, os.cpu_count() or 1)
+    if workers <= 1 or len(files) < 256:
+        return _rewrite_chunk((str(repo), files, readme_text))
+    chunk_size = max(64, (len(files) + workers * 2 - 1) // (workers * 2))
+    tasks = [
+        (str(repo), files[i : i + chunk_size], readme_text if "README.md" in files[i : i + chunk_size] else None)
+        for i in range(0, len(files), chunk_size)
+    ]
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        return sum(pool.map(_rewrite_chunk, tasks))
 
 
 def _wire_scripts_check(repo: Path) -> bool:
@@ -295,9 +377,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repo = _repo_root(args.repo)
-    files = _tracked_files(repo)
+    files, symlinks = _tracked_files_and_symlinks(repo)
+    candidates = _grep_target_files(repo) if files else set()
+    candidates.update(symlinks)
+    if "README.md" in files:
+        candidates.add("README.md")
     new_files, mapping = _rename_paths(repo, files)
-    rewritten = _rewrite_contents(repo, new_files)
+    rewrite_targets = [new_rel for old_rel, new_rel in zip(files, new_files) if old_rel in candidates]
+    rewritten = _rewrite_contents(repo, rewrite_targets)
     wired_check = _wire_scripts_check(repo)
     _sync_shims(repo)
     art = brand_art.apply(repo)
