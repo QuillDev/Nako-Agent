@@ -1,5 +1,5 @@
 """Optional-skill stubs that pull live third-party content name their upstream repository wherever
-they are listed or installed, and never claim Nous Research maintenance."""
+they are listed or installed, and never claim Quill Dev maintenance."""
 
 from io import StringIO
 from types import SimpleNamespace
@@ -9,7 +9,7 @@ from rich.console import Console
 
 SAFE_SKILL_MD = "---\nname: brag\ndescription: demo\n---\n\n# Brag\n\nWrite a short brag document.\n"
 UPSTREAM_STUB_MD = (
-    "---\nname: brag\ndescription: Brag docs\nmetadata:\n  hermes:\n"
+    "---\nname: brag\ndescription: Brag docs\nmetadata:\n  nako:\n"
     "    upstream:\n      repo: example-owner/brag\n      path: skills/brag\n---\n\nStub.\n"
 )
 
@@ -31,7 +31,7 @@ def _upstream_bundle(monkeypatch, skill_md=SAFE_SKILL_MD):
 
 @pytest.mark.parametrize("upstream", [True, False])
 def test_install_panel_names_upstream_repo_and_drops_nous_wording(monkeypatch, upstream):
-    from hermes_cli import skills_hub as hub_cli
+    from nako_cli import skills_hub as hub_cli
     from tools.skills_hub_models import SkillBundle
 
     bundle = (_upstream_bundle(monkeypatch) if upstream else SkillBundle(
@@ -42,14 +42,14 @@ def test_install_panel_names_upstream_repo_and_drops_nous_wording(monkeypatch, u
     text = out.getvalue()
 
     assert ("https://github.com/example-owner/brag" in text) is upstream
-    assert ("official optional skill maintained by Nous Research" in text) is not upstream
+    assert ("official optional skill maintained by Quill Dev" in text) is not upstream
 
 
 @pytest.mark.parametrize(("force", "skip_confirm"), [(True, False), (False, True)])
 def test_unprompted_install_still_discloses_upstream_repo(monkeypatch, tmp_path, force, skip_confirm):
-    from hermes_cli import skills_hub as hub_cli
+    from nako_cli import skills_hub as hub_cli
 
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("NAKO_HOME", str(tmp_path / "home"))
     bundle = _upstream_bundle(monkeypatch, SAFE_SKILL_MD)
     monkeypatch.setattr("tools.skills_sync_bundled_ops.bundled_skill_for_install", lambda _ident: None)
     monkeypatch.setattr(hub_cli, "_pinned_sources", lambda *_a: [])
@@ -64,7 +64,7 @@ def test_unprompted_install_still_discloses_upstream_repo(monkeypatch, tmp_path,
                               skip_confirm=skip_confirm, console=Console(file=out, width=200),
                               invalidate_cache=False) is True
     text = out.getvalue()
-    assert "https://github.com/example-owner/brag" in text and "not maintained by Nous Research" in text
+    assert "https://github.com/example-owner/brag" in text and "not maintained by Quill Dev" in text
     # Last, after the file list: the dashboard's action log shows only the tail of a long install.
     assert text.index("Third-party content") > text.index("Files:")
 
@@ -88,16 +88,16 @@ def test_catalog_lists_upstream_stub_with_its_upstream_repo(monkeypatch, tmp_pat
 def test_index_fallback_bundle_keeps_upstream_identity(monkeypatch):
     from tools.skills_hub_github import GitHubAuth
     from tools.skills_hub_models import SkillBundle
-    from tools.skills_hub_official import HermesIndexSource
+    from tools.skills_hub_official import NakoIndexSource
 
     fetched = SkillBundle(name="brag", files={"SKILL.md": SAFE_SKILL_MD}, source="github",
                           identifier="example-owner/brag/skills/brag", trust_level="community")
-    src = HermesIndexSource(auth=GitHubAuth())
+    src = NakoIndexSource(auth=GitHubAuth())
     src._index, src._loaded = {"skills": [
         {"name": "brag", "source": "official", "identifier": "official/creative/brag",
          "repo": "example-owner/brag", "path": "skills/brag"},
         {"name": "arxiv", "source": "official", "identifier": "official/research/arxiv",
-         "repo": "NousResearch/hermes-agent", "path": "optional-skills/research/arxiv"},
+         "repo": "QuillDev/Nako-Agent", "path": "optional-skills/research/arxiv"},
     ]}, True
     monkeypatch.setattr(src, "_get_github", lambda: SimpleNamespace(fetch=lambda _ident: SkillBundle(
         **{**fetched.__dict__, "metadata": {}})))
@@ -112,7 +112,7 @@ def test_headless_catalog_install_reports_upstream_repo(monkeypatch, tmp_path):
     from tools.connectors.catalog import HostInstaller, _installed_row
     from tools.skills_hub import HubLockFile
 
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("NAKO_HOME", str(tmp_path / "home"))
 
     def do_install(identifier, **_):
         HubLockFile().record_install(
@@ -121,13 +121,13 @@ def test_headless_catalog_install_reports_upstream_repo(monkeypatch, tmp_path):
             metadata={"upstream_repo": "example-owner/brag", "upstream_path": "skills/brag"})
         return True
 
-    monkeypatch.setattr("hermes_cli.skills_hub.do_install", do_install)
+    monkeypatch.setattr("nako_cli.skills_hub.do_install", do_install)
     outcome = HostInstaller().install_skill("official/creative/brag", force=False, source="official")
     assert outcome == {"name": "brag", "already_installed": False, "upstream_repo": "example-owner/brag"}
 
     row, detail = _installed_row(SimpleNamespace(kind="skill", extra={}), outcome)
     assert row["upstream_repo"] == "example-owner/brag"
-    assert "https://github.com/example-owner/brag" in detail and "not maintained by Nous Research" in detail
+    assert "https://github.com/example-owner/brag" in detail and "not maintained by Quill Dev" in detail
 
     # The row rides the gateway's connection.update / operation.status payloads, which forbid unknown keys.
     from tui_gateway.contracts.connectors_operation import ConnectionOperationTarget

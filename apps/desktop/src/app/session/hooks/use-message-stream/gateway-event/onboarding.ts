@@ -1,4 +1,4 @@
-import type { GatewayEvent } from '@hermes/shared'
+import type { GatewayEvent } from '@nako/shared'
 
 import { noteOnboardingEnded } from '@/store/onboarding-run'
 

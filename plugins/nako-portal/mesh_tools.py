@@ -27,9 +27,9 @@ def _agent_name():
     """What the agent these tools are loaded into calls itself; a rebranded build renames its
     core modules with it, so the name is read off one."""
     try:
-        import hermes_constants as constants
+        import nako_constants as constants
     except ImportError:  # no agent on the path (tests)
-        return "hermes"
+        return "nako"
     return constants.__name__.partition("_")[0]
 
 
@@ -44,9 +44,9 @@ ONLY_WHEN_NEEDED = (
 
 
 def _api(missing="the portal server isn't running here, so other machines can't be reached"):
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
 
-    data = get_hermes_home() / "nako-portal"
+    data = get_nako_home() / "nako-portal"
     try:
         base = (data / "local-url").read_text(encoding="utf-8-sig").strip()
         token = (data / "local-token").read_text(encoding="utf-8-sig").strip()
@@ -79,7 +79,7 @@ def _call(method, path, body=None, timeout=60, missing=None):
 def _wrap(fn):
     def handler(args, **kwargs):
         try:
-            return json.dumps(fn(args or {}, kwargs.get("session_id") or os.environ.get("HERMES_SESSION_ID") or None))
+            return json.dumps(fn(args or {}, kwargs.get("session_id") or os.environ.get("NAKO_SESSION_ID") or None))
         except Exception as error:  # noqa: BLE001 - Tool failures are returned to the agent as JSON.
             return json.dumps({"error": str(error)})
 
@@ -165,15 +165,15 @@ def _follow(machine, wait):
             break
         time.sleep(POLL)
     job = (state or {}).get("job") or {}
-    now = (state or {}).get("hermes") or job.get("new")
+    now = (state or {}).get("nako") or job.get("new")
     out = {
         "machine": machine,
         "job": job.get("kind"),
         "status": job.get("status"),
         "step": job.get("step"),
         "gateway": bool((state or {}).get("gateway")),
-        "hermes_before": (job.get("old") or {}).get("line"),
-        "hermes_now": (now or {}).get("line"),
+        "nako_before": (job.get("old") or {}).get("line"),
+        "nako_now": (now or {}).get("line"),
         "log_tail": (job.get("log_tail") or "")[-LOG_CHARS:],
     }
     if job.get("kind") == "update":
@@ -182,9 +182,9 @@ def _follow(machine, wait):
             hub = next((row for row in _call("GET", "/mesh/machines") if row.get("hub")), None)
         except RuntimeError:
             hub = None
-        if hub and (hub.get("hermes") or {}).get("commit") and now:
-            out["hub_hermes"] = hub["hermes"].get("line")
-            out["matches_hub"] = (now.get("commit") or "")[:10] == hub["hermes"]["commit"][:10]
+        if hub and (hub.get("nako") or {}).get("commit") and now:
+            out["hub_nako"] = hub["nako"].get("line")
+            out["matches_hub"] = (now.get("commit") or "")[:10] == hub["nako"]["commit"][:10]
     if lost:
         out["note"] = f"Couldn't reach {machine} at the end ({lost}). Check again with mesh_machines in a minute."
     elif job.get("status") in ("starting", "running"):
@@ -373,7 +373,7 @@ TOOLS = [
 ]
 
 
-# Each tool's handler as Hermes calls it (JSON in, JSON out), by name.
+# Each tool's handler as Nako calls it (JSON in, JSON out), by name.
 TOOL_HANDLERS = {name: _wrap(fn) for name, fn, *_ in TOOLS}
 
 
@@ -395,7 +395,7 @@ def register(ctx):
         )
 
 
-# `hermes mesh ...`
+# `nako mesh ...`
 
 
 def _setup_cli(parser):
@@ -412,14 +412,14 @@ def _setup_cli(parser):
 
 
 def _cli(args):
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
 
-    home = get_hermes_home()
+    home = get_nako_home()
     data = home / "nako-portal"
     mesh = _mesh_module()
     if args.mesh_action == "add":
         token = mesh.add_node(data, args.name)
-        from hermes_cli.config import load_config
+        from nako_cli.config import load_config
 
         settings = load_config().get("plugins", {}).get("entries", {}).get("nako-portal", {}).get("settings", {}) or {}
         address = str(settings.get("mesh_address") or settings.get("origin") or "<this portal's address>").rstrip("/")
@@ -441,7 +441,7 @@ def _cli(args):
 
 
 def _join(home, args):
-    from hermes_cli.config import load_config, set_config_value
+    from nako_cli.config import load_config, set_config_value
 
     if args.token:
         # An UPPER_SNAKE key goes to .env, not config.yaml.

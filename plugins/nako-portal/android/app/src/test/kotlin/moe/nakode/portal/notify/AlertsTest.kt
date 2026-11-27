@@ -12,7 +12,7 @@ class AlertsTest {
             Alert("Fix the build", "done", "20261024_020202_bbbbbb"),
             parseAlert("""{"kind":"alert","title":"Fix the build","body":"done","session":"20261024_020202_bbbbbb"}"""),
         )
-        assertEquals(Alert("Hermes", "daily digest", null), parseAlert("""{"kind":"alert","title":"Hermes","body":"daily digest","session":null}"""))
+        assertEquals(Alert("Nako", "daily digest", null), parseAlert("""{"kind":"alert","title":"Nako","body":"daily digest","session":null}"""))
         assertNull(parseAlert("""{"kind":"status","session":"x","status":"done"}"""))
         assertNull(parseAlert("""{"kind":"event","type":"message.delta","payload":{"text":"secret"}}"""))
         assertNull(parseAlert("""{"kind":"alert"}"""))

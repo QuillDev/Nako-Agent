@@ -47,7 +47,7 @@ async def search(world, query):
 
 
 async def test_search_normal_archived_visibility_and_secret_redaction(world, search_home):
-    world.hermes.search_home = search_home
+    world.nako.search_home = search_home
     await world.sign_up()
     rows = await search(world, "Apricot")
     assert [row["id"] for row in rows] == ["normal", "archived"]
@@ -59,7 +59,7 @@ async def test_search_normal_archived_visibility_and_secret_redaction(world, sea
 
 
 async def test_search_auth_required_and_short_query(world, search_home):
-    world.hermes.search_home = search_home
+    world.nako.search_home = search_home
     response = await world.http.get(world.url("/api/search?q=apricot"))
     assert response.status == 401
     await world.sign_up()
@@ -107,12 +107,12 @@ def test_limit_latest_match_and_old_schema(tmp_path):
     assert all(row["archived"] is False for row in rows)
 
 
-def test_hermes_backend_uses_selected_profile(search_home):
+def test_nako_backend_uses_selected_profile(search_home):
     spec = importlib.util.spec_from_file_location("search_test_plugin", ROOT / "__init__.py")
     plugin = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(plugin)
     backend = SimpleNamespace(_home=lambda: search_home)
-    assert len(plugin.HermesBackend.search_sessions(backend, "apricot")) == 2
+    assert len(plugin.NakoBackend.search_sessions(backend, "apricot")) == 2
 
 
 def test_offline_searches_profile_homes_and_missing_database(search_home):

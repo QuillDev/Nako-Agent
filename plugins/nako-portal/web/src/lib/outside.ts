@@ -1,4 +1,4 @@
-// Names for the ways into Hermes other than the portal, as the app shows them.
+// Names for the ways into Nako other than the portal, as the app shows them.
 const NAMES: Record<string, string> = {
   cli: "CLI",
   tui: "TUI",

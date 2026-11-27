@@ -301,7 +301,7 @@ export function useMicRecorder(copy: MicRecorderErrorCopy): {
       throw new Error(unsupportedMicrophone(copy))
     }
 
-    const permitted = await window.hermesDesktop?.requestMicrophoneAccess?.()
+    const permitted = await window.nakoDesktop?.requestMicrophoneAccess?.()
     checkCurrent()
 
     if (permitted === false) {

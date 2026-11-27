@@ -51,7 +51,7 @@ def until(check, timeout=5):
 def chat(plugin, monkeypatch):
     surface = Surface()
     plugin.api.register_surface("chatapp", surface)
-    monkeypatch.setenv("HERMES_SESSION_PLATFORM", "chatapp")
+    monkeypatch.setenv("NAKO_SESSION_PLATFORM", "chatapp")
     yield surface
     plugin.api.unregister_surface("chatapp")
 
@@ -145,13 +145,13 @@ def test_a_closed_request_ends_the_wait(plugin, chat):
 
 
 def test_without_a_surface_the_agent_is_told_how_the_person_can_add_it(plugin, monkeypatch):
-    monkeypatch.setenv("HERMES_SESSION_PLATFORM", "slack")
+    monkeypatch.setenv("NAKO_SESSION_PLATFORM", "slack")
     result = call(plugin, "secret_request", {"name": "GH_TOKEN", "why": "repo"})
-    assert "hermes secret set GH_TOKEN" in result["error"]
+    assert "nako secret set GH_TOKEN" in result["error"]
     refusing = Surface(shows=False)
     plugin.api.register_surface("slack", refusing)
     result = call(plugin, "secret_request", {"name": "GH_TOKEN", "why": "repo"})
-    assert "hermes secret set GH_TOKEN" in result["error"]
+    assert "nako secret set GH_TOKEN" in result["error"]
     assert len(refusing.shown) == 1
 
 

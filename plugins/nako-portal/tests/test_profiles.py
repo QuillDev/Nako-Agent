@@ -11,8 +11,8 @@ async def ids(world):
 
 async def test_switching_profiles_shows_only_that_profiles_chats(world):
     await world.sign_up()
-    world.hermes.add_session("work", "work chat", profile="default")
-    world.hermes.add_session("home", "home chat", profile="work")
+    world.nako.add_session("work", "work chat", profile="default")
+    world.nako.add_session("home", "home chat", profile="work")
 
     shown = await (await world.http.get(world.url("/api/profile"))).json()
     assert shown == {"profile": "default", "profiles": ["default", "work", "research"]}
@@ -25,7 +25,7 @@ async def test_switching_profiles_shows_only_that_profiles_chats(world):
     assert (await world.http.get(world.url("/api/sessions/work"))).status != 200
     sent = await world.http.post(world.url("/api/sessions/work/messages"), data=aiohttp.FormData({"text": "hi"}), headers={"Origin": ORIGIN})
     assert sent.status != 200
-    assert world.hermes.received == []
+    assert world.nako.received == []
 
     await world.post("/api/profile", {"profile": "default"})
     assert await ids(world) == {"work"}
@@ -44,7 +44,7 @@ async def test_a_new_chat_belongs_to_the_profile_on_screen(world):
 
 async def test_an_unknown_profile_is_refused_and_nothing_changes(world):
     await world.sign_up()
-    world.hermes.add_session("work", "work chat", profile="default")
+    world.nako.add_session("work", "work chat", profile="default")
     refused = await world.post("/api/profile", {"profile": "nope"})
     assert refused.status == 400
     assert (await (await world.http.get(world.url("/api/profile"))).json())["profile"] == "default"
@@ -56,9 +56,9 @@ async def test_the_chosen_profile_survives_a_gateway_restart(world):
     await world.post("/api/profile", {"profile": "work"})
 
     await world.gateway.stop(world.hub)
-    world.hermes.profile = "default"  # a fresh gateway starts on the default profile
+    world.nako.profile = "default"  # a fresh gateway starts on the default profile
     await world.gateway.start(world.hub)
-    assert world.hermes.profile == "work"
+    assert world.nako.profile == "work"
 
 
 async def test_every_open_tab_hears_about_a_switch(world):
@@ -73,7 +73,7 @@ async def test_switching_needs_a_signed_in_person(world):
     async with aiohttp.ClientSession() as stranger:
         refused = await stranger.post(world.url("/api/profile"), json={"profile": "work"}, headers={"Origin": ORIGIN})
         assert refused.status == 401
-    assert world.hermes.profile == "default"
+    assert world.nako.profile == "default"
 
 
 async def test_each_profile_keeps_its_own_model(world):
@@ -104,7 +104,7 @@ async def test_preview_non_default_model_tuning_leaves_default_unchanged(world):
     assert await (await world.http.get(world.url("/api/model"))).json() == before
 
 
-async def test_a_model_hermes_refuses_changes_nothing(world):
+async def test_a_model_nako_refuses_changes_nothing(world):
     await world.sign_up()
     refused = await world.post("/api/model", {"provider": "fast", "model": "imaginary"})
     assert refused.status == 400
@@ -117,13 +117,13 @@ async def test_changing_a_model_needs_a_signed_in_person(world):
     async with aiohttp.ClientSession() as stranger:
         refused = await stranger.post(world.url("/api/model"), json={"provider": "big", "model": "large"}, headers={"Origin": ORIGIN})
         assert refused.status == 401
-    assert world.hermes.profile_models == {}
+    assert world.nako.profile_models == {}
 
 
 async def test_chat_selection_never_changes_the_default_or_another_chat(world):
     await world.sign_up()
-    world.hermes.add_session("one", "one")
-    world.hermes.add_session("two", "two")
+    world.nako.add_session("one", "one")
+    world.nako.add_session("two", "two")
     path = "/api/sessions/one/model"
     picked = await world.post(path, {"provider": "big", "model": "large", "effort": "high", "speed": "fast"})
     assert picked.status == 200
@@ -145,13 +145,13 @@ async def test_a_new_chats_first_message_uses_its_selection_without_changing_def
 
     await world.sign_up()
     first_turn_models = []
-    inbound = world.hermes.inbound
+    inbound = world.nako.inbound
 
     async def receive(chat, text, files):
-        first_turn_models.append(world.hermes.session_model(world.hermes.session_of(chat)))
+        first_turn_models.append(world.nako.session_model(world.nako.session_of(chat)))
         await inbound(chat, text, files)
 
-    world.hermes.inbound = receive
+    world.nako.inbound = receive
     chosen = {"provider": "big", "model": "large", "effort": "high", "speed": "fast"}
     created = await world.http.post(world.url("/api/sessions"), data={"text": "plan my weekend", "model": json.dumps(chosen)}, headers={"Origin": ORIGIN})
     assert created.status == 200
@@ -159,20 +159,20 @@ async def test_a_new_chats_first_message_uses_its_selection_without_changing_def
     selected = await (await world.http.get(world.url(f"/api/sessions/{sid}/model"))).json()
     assert {k: selected[k] for k in chosen} == chosen
     assert {k: first_turn_models[0][k] for k in chosen} == chosen
-    assert world.hermes.sessions[sid]["rows"][0]["text"] == "plan my weekend"
+    assert world.nako.sessions[sid]["rows"][0]["text"] == "plan my weekend"
     default = await (await world.http.get(world.url("/api/model"))).json()
     assert (default["provider"], default["model"]) == ("fast", "tiny")
 
     # Bad picks must never start a turn on a different model.
     refused = await world.http.post(world.url("/api/sessions"), data={"text": "do not send", "model": json.dumps({"provider": "big", "model": "imaginary"})}, headers={"Origin": ORIGIN})
     assert refused.status == 400
-    assert len(world.hermes.received) == 1
+    assert len(world.nako.received) == 1
 
 
 async def test_chat_settings_reject_invalid_busy_foreign_and_unsigned_writes(world):
     await world.sign_up()
-    world.hermes.add_session("one", "one")
-    world.hermes.add_session("foreign", "foreign", profile="work")
+    world.nako.add_session("one", "one")
+    world.nako.add_session("foreign", "foreign", profile="work")
     path = "/api/sessions/one/model"
     for body in ({"effort": "imaginary"}, {"speed": "warp"}, {"provider": "fast", "model": "imaginary"}):
         assert (await world.post(path, body)).status == 400
@@ -196,7 +196,7 @@ async def test_real_gateway_keeps_chat_model_and_tuning_after_reload(tmp_path, m
     import sys
     from pathlib import Path
 
-    import hermes_cli.model_switch as switching
+    import nako_cli.model_switch as switching
 
     raw_root = os.environ.get("MODEL_CONTROLS_SOURCE", "").strip()
     root = Path(raw_root) if raw_root else Path(__file__).resolve().parents[2] / "model-controls"
@@ -212,7 +212,7 @@ async def test_real_gateway_keeps_chat_model_and_tuning_after_reload(tmp_path, m
     plugin, runner, authority, adapter = await gateway(tmp_path, monkeypatch)
     try:
         (tmp_path / "config.yaml").write_text("model:\n  provider: openai\n  default: gpt-5\nagent:\n  reasoning_effort: medium\n  service_tier: fast\n", encoding="utf-8")
-        backend = plugin.HermesBackend(adapter, tmp_path)
+        backend = plugin.NakoBackend(adapter, tmp_path)
         adapter.backend = backend
         adapter.gateway_runner = runner
         # Only model-provider resolution is substituted; all session routing and persistence are real.
@@ -246,7 +246,7 @@ async def test_real_gateway_keeps_chat_model_and_tuning_after_reload(tmp_path, m
         monkeypatch.setattr(runtime, "_resolve_runtime_agent_kwargs_for_provider", lambda *a, **kw: {
             "provider": "openai", "api_key": "test-provider-key", "base_url": "https://api.openai.com/v1"})
         with backend._profile_scope():
-            from hermes_cli.config import load_config
+            from nako_cli.config import load_config
             pinned_model, _ = runner._resolve_session_agent_runtime(source=plugin._source("one"), user_config=load_config())
             following_model, _ = runner._resolve_session_agent_runtime(source=plugin._source("two"), user_config=load_config())
         assert (pinned_model, following_model) == ("gpt-5-mini", "gpt-5-nano")
@@ -260,7 +260,7 @@ async def test_real_gateway_keeps_chat_model_and_tuning_after_reload(tmp_path, m
         changed = backend.set_model_options({"effort": "low", "speed": "normal"})
         assert (changed["effort"], changed["speed"]) == ("low", "normal")
         assert backend.session_model(sid)["effort"] == "low"
-        import hermes_cli.model_selection_guards as guards
+        import nako_cli.model_selection_guards as guards
         monkeypatch.setattr(guards, "selection_warnings", lambda *a, **kw: [guards.SelectionWarning(
             "cost", "Cost", "gpt-5-mini", "openai", "This selection costs more.")])
         request = {"provider": "openai", "model": "gpt-5-mini"}
@@ -283,18 +283,18 @@ async def test_real_gateway_keeps_chat_model_and_tuning_after_reload(tmp_path, m
 
 async def test_portal_keeps_working_without_model_controls(world):
     await world.sign_up()
-    world.hermes.add_session("one", "one")
-    world.hermes.model_controls = False
+    world.nako.add_session("one", "one")
+    world.nako.model_controls = False
     assert (await world.http.get(world.url("/api/usage"))).status == 404
     for path in ("/api/model", "/api/sessions/one/model"):
         assert (await world.http.get(world.url(path))).status == 404
         assert (await world.post(path, {"provider": "big", "model": "large"})).status == 404
-    assert world.hermes.profile_models == {}
+    assert world.nako.profile_models == {}
     assert (await world.http.get(world.url("/api/sessions/one"))).status == 200
     assert (await world.http.get(world.url("/api/profile"))).status == 200
     response = await world.http.post(world.url("/api/sessions/one/messages"), data={"text": "hello"}, headers={"Origin": ORIGIN})
     assert response.status == 200
-    assert world.hermes.received[-1][1] == "hello"
+    assert world.nako.received[-1][1] == "hello"
 
 
 async def test_usage_lists_each_account_of_each_provider(world):
@@ -313,7 +313,7 @@ async def test_usage_needs_a_signed_in_person(world):
 
 async def test_usage_reset_redeems_credit_and_returns_refreshed_limits(world):
     await world.sign_up()
-    world.hermes.usage_rows = [{
+    world.nako.usage_rows = [{
         "provider": "openai-codex", "label": "ChatGPT / Codex", "accounts": [{
             "label": "",
             "windows": [{"label": "Weekly", "used_percent": 100.0, "resets_at": "2026-11-05T16:00:00+00:00"}],
@@ -336,13 +336,13 @@ async def test_usage_reset_redeems_credit_and_returns_refreshed_limits(world):
     unsupported = await world.post("/api/usage/reset", {"provider": "antigravity-oauth"})
     assert unsupported.status == 400
 
-    world.hermes.model_controls = False
+    world.nako.model_controls = False
     assert (await world.post("/api/usage/reset", {"provider": "openai-codex"})).status == 404
 
 
 async def test_usage_reset_supports_per_grant_claude_options(world):
     await world.sign_up()
-    world.hermes.usage_rows = [{
+    world.nako.usage_rows = [{
         "provider": "claude-subscription-directsdk-experimental", "label": "Claude", "accounts": [{
             "label": "work@example.test",
             "windows": [{"label": "Current week", "used_percent": 92.0, "resets_at": "2026-12-01T23:00:00+00:00"}],
@@ -371,12 +371,12 @@ async def test_usage_reset_supports_per_grant_claude_options(world):
 
 async def test_model_provider_list_is_cached_until_provider_profile_or_gateway_changes(world):
     await world.sign_up()
-    world.hermes.add_session("one", "one")
-    world.hermes.provider_list = [
+    world.nako.add_session("one", "one")
+    world.nako.provider_list = [
         {"slug": "openrouter", "label": "OpenRouter", "description": "", "kind": "key", "command": "", "env_var": "OPENROUTER_API_KEY", "env_vars": ["OPENROUTER_API_KEY"], "signup_url": ""},
         {"slug": "claude-sub", "label": "Claude", "description": "", "kind": "cli", "command": "", "env_var": "", "env_vars": [], "signup_url": ""},
     ]
-    world.hermes.account_logins["claude-sub"] = {
+    world.nako.account_logins["claude-sub"] = {
         "mode": "paste",
         "accounts": [{"id": "primary", "label": "primary", "email": "alex@example.test", "plan": "Max", "signed_in": True, "removable": True}],
     }
@@ -392,8 +392,8 @@ async def test_model_provider_list_is_cached_until_provider_profile_or_gateway_c
         calls["sign_off"] += 1
         return list(sign_off_catalog)
 
-    world.hermes.model_providers = read_models
-    world.hermes.sign_off_provider_list = read_sign_off
+    world.nako.model_providers = read_models
+    world.nako.sign_off_provider_list = read_sign_off
 
     # Repeated reads across default and chat model endpoints reuse one gateway lookup.
     first = await (await world.http.get(world.url("/api/model"))).json()
@@ -452,8 +452,8 @@ async def test_model_provider_cache_coalesces_reads_and_drops_stale_inflight_res
     import threading
 
     await world.sign_up()
-    world.hermes.add_session("one", "one")
-    world.hermes.provider_list = [
+    world.nako.add_session("one", "one")
+    world.nako.provider_list = [
         {"slug": "openrouter", "label": "OpenRouter", "description": "", "kind": "key", "command": "", "env_var": "OPENROUTER_API_KEY", "env_vars": ["OPENROUTER_API_KEY"], "signup_url": ""},
         {"slug": "openai-codex", "label": "Codex", "description": "", "kind": "signin", "command": "", "env_var": "", "env_vars": [], "signup_url": ""},
     ]
@@ -471,7 +471,7 @@ async def test_model_provider_cache_coalesces_reads_and_drops_stale_inflight_res
             release.wait(timeout=5)
         return snapshot
 
-    world.hermes.model_providers = read_models
+    world.nako.model_providers = read_models
 
     async def get_providers(path):
         async with world.http.get(world.url(path)) as response:
@@ -498,7 +498,7 @@ async def test_model_provider_cache_coalesces_reads_and_drops_stale_inflight_res
     started = await (await world.post("/api/providers/openai-codex/signin")).json()
     assert await get_providers("/api/model") == catalog
     assert calls == 3
-    world.hermes.signin_status["openai-codex"] = "approved"
+    world.nako.signin_status["openai-codex"] = "approved"
     catalog.append({"provider": "openai-codex", "label": "Codex", "models": ["gpt-5"]})
     assert (await (await world.http.get(world.url(f"/api/providers/openai-codex/signin/{started['session_id']}"))).json())["status"] == "approved"
     assert await get_providers("/api/model") == catalog

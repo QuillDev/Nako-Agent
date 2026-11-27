@@ -23,7 +23,7 @@ def test_host_history_edits_replay_canonical_visible_blocks():
     history = [{"role": "user", "content": "write"}, msg, {"role": "tool", "tool_call_id": "t1", "content": "ok"}]
     original = copy.deepcopy(history)
     assert native.prepare_history(history)[1][1]["message"]["content"] == blocks
-    # Hermes compaction keeps tool-call arguments byte-exact and only demotes tool-result bodies, so the
+    # Nako compaction keeps tool-call arguments byte-exact and only demotes tool-result bodies, so the
     # signed native blocks must survive it verbatim.
     history[2]["content"] = "[tool result demoted]"
     assert native.prepare_history(history)[1][1]["message"]["content"] == blocks
@@ -41,8 +41,8 @@ def test_host_history_edits_replay_canonical_visible_blocks():
 
 
 def test_edited_history_replays_a_call_outside_the_inventory_by_its_own_name():
-    # Hermes answered a directly-called deferred tool with its unknown-tool error (#39); after a
-    # host edit, rebuilt history must not rename it into the mcp__hermes__ namespace.
+    # Nako answered a directly-called deferred tool with its unknown-tool error (#39); after a
+    # host edit, rebuilt history must not rename it into the mcp__nako__ namespace.
     calls = [{"id": "t1", "type": "function", "function": {"name": "mcp__fastmail__draft_email", "arguments": "{}"}},
              {"id": "t2", "type": "function", "function": {"name": "write_file", "arguments": "{}"}}]
     history = [{"role": "user", "content": "draft"}, {"role": "assistant", "content": "Drafting.", "tool_calls": calls},
@@ -84,7 +84,7 @@ print(json.dumps({'type':'result','subtype':'success','usage':{'input_tokens':1,
 
 def test_replayed_carrier_drops_native_usage_so_compression_does_not_trip_the_local_size_gate():
     """#92: native gates each request locally on the newest assistant message's `usage`. A replayed
-    carrier kept the usage of the request that produced it, so right after Hermes compressed the history
+    carrier kept the usage of the request that produced it, so right after Nako compressed the history
     native still saw the pre-compression size and refused with "Prompt is too long" without sending.
     `usage` is local metadata (never part of the wire request), so the replay drops it."""
     usage = {"input_tokens": 158258, "output_tokens": 900, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}

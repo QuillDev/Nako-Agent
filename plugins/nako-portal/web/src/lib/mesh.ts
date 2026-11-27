@@ -58,7 +58,7 @@ export function ago(seconds: number) {
 
 export function machineState(m: Machine) {
   if (!m.online) return m.last_seen ? `seen ${ago(m.last_seen)}` : "never connected"
-  if (!m.gateway) return "hermes offline"
+  if (!m.gateway) return "nako offline"
   return m.working ? `working on ${m.working}` : "online"
 }
 

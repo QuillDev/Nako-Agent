@@ -555,7 +555,7 @@ function AccountSignInFlow({
   )
 }
 
-/** The picker: everything Hermes offers that this page can set up, searched by name. */
+/** The picker: everything Nako offers that this page can set up, searched by name. */
 function AddPanel({ rows, onPick }: { rows: Provider[]; onPick: (provider: Provider) => void }) {
   const [query, setQuery] = useState("")
   const typed = words(query)
@@ -606,7 +606,7 @@ const SAMPLE_PROVIDERS: Provider[] = [
   { slug: "openrouter", label: "OpenRouter", description: "", kind: "key", command: "", connected: true, source: "", env_var: "", env_vars: [], signup_url: "" },
 ]
 
-/** Settings > Providers: what Hermes can run on, what's set up, and adding the rest. */
+/** Settings > Providers: what Nako can run on, what's set up, and adding the rest. */
 export function ProvidersSettings({ onError }: { onError: (message: string) => void }) {
   const providers = useProviders()
   const [open, setOpen] = useState<Open>(null)

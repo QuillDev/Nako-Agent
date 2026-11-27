@@ -1,4 +1,4 @@
-"""Usage by account, as a client shows it. Needs Hermes importable; only provider data sources are faked."""
+"""Usage by account, as a client shows it. Needs Nako importable; only provider data sources are faked."""
 import importlib.util
 import sys
 from datetime import datetime, timezone
@@ -30,11 +30,11 @@ def api():
 
 
 @pytest.fixture
-def hermes(monkeypatch):
-    """The providers Hermes lists, what each one's usage source answers, and how often it's asked."""
+def nako(monkeypatch):
+    """The providers Nako lists, what each one's usage source answers, and how often it's asked."""
     import agent.account_usage as account_usage
     import agent.account_usage_cache as cache
-    import hermes_cli.inventory as inventory
+    import nako_cli.inventory as inventory
     import providers
 
     state = SimpleNamespace(rows=[], linked={}, single={}, fetched=[])
@@ -58,9 +58,9 @@ def hermes(monkeypatch):
     return state
 
 
-def test_each_linked_login_is_its_own_row(api, hermes):
-    hermes.rows = [{"slug": "claude", "name": "Claude"}]
-    hermes.linked["claude"] = [
+def test_each_linked_login_is_its_own_row(api, nako):
+    nako.rows = [{"slug": "claude", "name": "Claude"}]
+    nako.linked["claude"] = [
         ("primary", _snapshot(AccountUsageWindow("Current week", 100, RESET), AccountUsageWindow("Current session", None))),
         ("secondary", _snapshot(AccountUsageWindow("Current week", 12.5))),
         ("third", _snapshot(reason="Claude Code is not signed in")),
@@ -72,8 +72,8 @@ def test_each_linked_login_is_its_own_row(api, hermes):
     ]}]
 
 
-def test_a_hermes_credential_pool_lists_its_accounts(api, hermes):
-    hermes.rows = [{"slug": "codex", "name": "Codex", "usage": {"accounts": [
+def test_a_nako_credential_pool_lists_its_accounts(api, nako):
+    nako.rows = [{"slug": "codex", "name": "Codex", "usage": {"accounts": [
         {"id": "a", "label": "work", "state": "ready", "windows": [{"label": "Weekly", "used_percent": 40.0, "resets_at": None, "scope": "account"}]},
         {"id": "b", "label": "old", "state": "unavailable", "windows": []},
     ]}}]
@@ -83,46 +83,46 @@ def test_a_hermes_credential_pool_lists_its_accounts(api, hermes):
     ]
 
 
-def test_a_single_login_is_one_unlabeled_account_and_quiet_providers_are_left_out(api, hermes):
-    hermes.rows = [{"slug": "codex", "name": "Codex"}, {"slug": "plain", "name": "Plain"},
+def test_a_single_login_is_one_unlabeled_account_and_quiet_providers_are_left_out(api, nako):
+    nako.rows = [{"slug": "codex", "name": "Codex"}, {"slug": "plain", "name": "Plain"},
                    {"slug": "away", "name": "Away", "authenticated": False}, {"slug": "empty", "name": "Empty"}]
-    hermes.single = {"codex": _snapshot(AccountUsageWindow("5h", 3)), "away": _snapshot(AccountUsageWindow("5h", 1)), "empty": _snapshot()}
+    nako.single = {"codex": _snapshot(AccountUsageWindow("5h", 3)), "away": _snapshot(AccountUsageWindow("5h", 1)), "empty": _snapshot()}
     assert api.usage() == [{"provider": "codex", "label": "Codex", "accounts": [
         {"label": "", "windows": [{"label": "5h", "used_percent": 3.0, "resets_at": None}], "note": None}]}]
-    assert "away" not in hermes.fetched and "plain" not in hermes.fetched
+    assert "away" not in nako.fetched and "plain" not in nako.fetched
 
 
-def test_a_failing_per_account_hook_falls_back_to_the_provider_total(api, hermes):
+def test_a_failing_per_account_hook_falls_back_to_the_provider_total(api, nako):
     def broken():
         raise RuntimeError("boom")
-    hermes.rows = [{"slug": "claude", "name": "Claude"}]
-    hermes.linked["claude"] = broken
-    hermes.single["claude"] = _snapshot(AccountUsageWindow("Current week", 7))
+    nako.rows = [{"slug": "claude", "name": "Claude"}]
+    nako.linked["claude"] = broken
+    nako.single["claude"] = _snapshot(AccountUsageWindow("Current week", 7))
     assert api.usage()[0]["accounts"] == [{"label": "", "windows": [{"label": "Current week", "used_percent": 7.0, "resets_at": None}], "note": None}]
 
 
-def test_a_model_scoped_cap_is_left_out_of_the_account_limits(api, hermes):
-    hermes.rows = [{"slug": "claude", "name": "Claude"},
+def test_a_model_scoped_cap_is_left_out_of_the_account_limits(api, nako):
+    nako.rows = [{"slug": "claude", "name": "Claude"},
                    {"slug": "codex", "name": "Codex", "usage": {"accounts": [{"id": "a", "label": "work", "state": "ready", "windows": [
                        {"label": "Weekly", "used_percent": 40.0, "resets_at": None, "scope": "account"},
                        {"label": "Spark week", "used_percent": 90.0, "resets_at": None, "scope": "model"}]}]}}]
-    hermes.linked["claude"] = [("primary", _snapshot(AccountUsageWindow("Current week", 20), AccountUsageWindow("Fable week", 80, scope="model")))]
+    nako.linked["claude"] = [("primary", _snapshot(AccountUsageWindow("Current week", 20), AccountUsageWindow("Fable week", 80, scope="model")))]
     shown = {row["provider"]: [w["label"] for a in row["accounts"] for w in a["windows"]] for row in api.usage()}
     assert shown == {"claude": ["Current week"], "codex": ["Weekly"]}
 
 
-def test_banked_resets_are_reported_on_single_and_pooled_accounts(api, hermes, monkeypatch):
+def test_banked_resets_are_reported_on_single_and_pooled_accounts(api, nako, monkeypatch):
     import agent.account_usage_cache as cache
 
     single_raw = {"rate_limit_reset_credits": {"available_count": 3, "applicable_available_count": 0}}
     pooled_raw = {"rate_limit_reset_credits": {"available_count": 2, "applicable_available_count": 1}}
-    hermes.rows = [
+    nako.rows = [
         {"slug": "openai-codex", "name": "ChatGPT / Codex"},
         {"slug": "pooled-codex", "name": "Pooled", "usage": {"accounts": [
             {"id": "codex:acct:1", "label": "work", "state": "ready", "windows": [{"label": "Weekly", "used_percent": 50.0, "resets_at": None, "scope": "account"}]},
         ]}},
     ]
-    hermes.single["openai-codex"] = AccountUsageSnapshot(
+    nako.single["openai-codex"] = AccountUsageSnapshot(
         provider="openai-codex", source="usage_api", fetched_at=datetime.now(timezone.utc),
         windows=(AccountUsageWindow("Weekly", 8),), raw=single_raw,
     )
@@ -138,11 +138,11 @@ def test_banked_resets_are_reported_on_single_and_pooled_accounts(api, hermes, m
     assert rows["pooled-codex"][0]["resets"] == {"available": 2, "usable": True, "account": "codex:acct:1"}
 
 
-def test_use_reset_redeems_codex_credit_and_refreshes_usage(api, hermes, monkeypatch):
+def test_use_reset_redeems_codex_credit_and_refreshes_usage(api, nako, monkeypatch):
     import agent.account_usage as account_usage
     import agent.account_usage_cache as cache
     import agent.credential_pool as credential_pool
-    import hermes_cli.auth_codex as auth_codex
+    import nako_cli.auth_codex as auth_codex
 
     calls = []
     refreshed = []
@@ -179,7 +179,7 @@ def test_use_reset_redeems_codex_credit_and_refreshes_usage(api, hermes, monkeyp
         api.use_reset("openai-codex", account="missing")
 
 
-def test_provider_plugin_resets_surface_options_and_dispatch_redeem(api, hermes, monkeypatch):
+def test_provider_plugin_resets_surface_options_and_dispatch_redeem(api, nako, monkeypatch):
     import providers
 
     claude_resets = {
@@ -190,8 +190,8 @@ def test_provider_plugin_resets_surface_options_and_dispatch_redeem(api, hermes,
             {"id": "launch-2610-fable", "label": "Fable reset", "available": 2, "usable": True},
         ],
     }
-    hermes.rows = [{"slug": "claude-subscription-directsdk-experimental", "name": "Claude"}]
-    hermes.linked["claude-subscription-directsdk-experimental"] = [
+    nako.rows = [{"slug": "claude-subscription-directsdk-experimental", "name": "Claude"}]
+    nako.linked["claude-subscription-directsdk-experimental"] = [
         ("work@example.test", AccountUsageSnapshot(
             provider="claude-subscription-directsdk-experimental", source="claude_code_get_usage",
             fetched_at=datetime.now(timezone.utc),

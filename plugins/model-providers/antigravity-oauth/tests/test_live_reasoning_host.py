@@ -16,16 +16,16 @@ from unittest.mock import MagicMock, patch
 import os
 import tempfile
 
-# Hermetic HERMES_HOME holding only this checkout as an installed plugin, so
+# Hermetic NAKO_HOME holding only this checkout as an installed plugin, so
 # provider discovery finds the code under test (not a host-installed copy, and
 # not nothing at all on a clean CI runner).
-_HERMES_HOME = tempfile.mkdtemp(prefix='agy_host_test_')
-os.makedirs(os.path.join(_HERMES_HOME, 'plugins'))
-os.symlink(Path(__file__).resolve().parent.parent, os.path.join(_HERMES_HOME, 'plugins', 'antigravity-oauth'))
-os.environ['HERMES_HOME'] = _HERMES_HOME
+_NAKO_HOME = tempfile.mkdtemp(prefix='agy_host_test_')
+os.makedirs(os.path.join(_NAKO_HOME, 'plugins'))
+os.symlink(Path(__file__).resolve().parent.parent, os.path.join(_NAKO_HOME, 'plugins', 'antigravity-oauth'))
+os.environ['NAKO_HOME'] = _NAKO_HOME
 # Only the agy producer is substituted below; credential resolution still needs
 # an executable path, which a clean CI runner does not have.
-_FAKE_AGY = os.path.join(_HERMES_HOME, 'agy')
+_FAKE_AGY = os.path.join(_NAKO_HOME, 'agy')
 with open(_FAKE_AGY, 'w', encoding="utf-8") as _f:
     _f.write('#!/bin/sh\nexit 0\n')
 os.chmod(_FAKE_AGY, 0o755)
@@ -33,9 +33,9 @@ os.environ['AGY_CLI_PATH'] = _FAKE_AGY
 os.environ['ANTIGRAVITY_TRANSPORT'] = 'stream-json'
 
 # Fallback for a local run without PYTHONPATH; never shadow an explicit checkout.
-sys.path.append(str(Path.home()/'.hermes'/'hermes-agent'))
-import hermes_bootstrap
-from hermes_cli.plugins_discovery import suppress_plugin_discovery
+sys.path.append(str(Path.home()/'.nako'/'nako-agent'))
+import nako_bootstrap
+from nako_cli.plugins_discovery import suppress_plugin_discovery
 
 # Avoid unrelated default-profile plugins during isolated regression execution.
 with suppress_plugin_discovery():
@@ -43,7 +43,7 @@ with suppress_plugin_discovery():
     from agent.subagent_lifecycle import bind_subagent_parent
     from agent.turn_api_call import _should_stream, perform_api_call
     from agent.notification_presentation import notification_turn
-    from hermes_cli.plugins import get_plugin_manager
+    from nako_cli.plugins import get_plugin_manager
     from providers import get_provider_profile
     from tui_gateway import server
 

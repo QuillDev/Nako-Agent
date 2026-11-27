@@ -21,14 +21,14 @@ test('group approvals stay per profile and never offer the ambient profile mode 
   const sandbox = createCoreSandbox('approval-mode')
   const receipt = path.join(sandbox.root, 'command-receipt')
   fs.writeFileSync(receipt, 'synthetic approval probe', { mode: 0o600 })
-  writeProviderHome(sandbox.hermesHome, provider.url)
-  writeProviderHome(path.join(sandbox.hermesHome, 'profiles', 'programmer'), provider.url, '', 'off')
-  writeProviderHome(path.join(sandbox.hermesHome, 'profiles', 'reviewer'), provider.url, '', 'manual')
+  writeProviderHome(sandbox.nakoHome, provider.url)
+  writeProviderHome(path.join(sandbox.nakoHome, 'profiles', 'programmer'), provider.url, '', 'off')
+  writeProviderHome(path.join(sandbox.nakoHome, 'profiles', 'reviewer'), provider.url, '', 'manual')
 
   const { app, page } = await launchCoreApp(
     coreAppEnv(sandbox, {
-      HERMES_INSTALL_STATE_DIR: path.join(sandbox.root, 'install-state'),
-      HERMES_DISABLE_LAZY_INSTALLS: '1'
+      NAKO_INSTALL_STATE_DIR: path.join(sandbox.root, 'install-state'),
+      NAKO_DISABLE_LAZY_INSTALLS: '1'
     })
   )
 

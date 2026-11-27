@@ -1,8 +1,8 @@
 import { atom } from 'nanostores'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
-import type { ProfileInfo } from '@/types/hermes'
+import type { NakoConnection } from '@/global'
+import type { ProfileInfo } from '@/types/nako'
 
 // Keep profile.ts's side-effecting imports inert: the gateway socket layer and
 // the REST query client must not run for real in a unit test.
@@ -25,7 +25,7 @@ vi.mock('@/store/gateway', () => ({
   openGatewayForAgent,
   openGatewayForProfile
 }))
-vi.mock('@/hermes', () => ({
+vi.mock('@/nako', () => ({
   getProfiles: vi.fn(async () => ({ profiles: [] })),
   setApiRequestProfile: vi.fn()
 }))
@@ -51,25 +51,25 @@ const { $connectionsRegistry } = await import('@/store/connection-registry-state
 
 const { $connection } = await import('./session')
 const { invalidateProfileScopedQueries } = await import('@/lib/query-client')
-const { getProfiles } = await import('@/hermes')
+const { getProfiles } = await import('@/nako')
 
 const profile = (name: string, isDefault = false): ProfileInfo => ({
   has_env: false,
   is_default: isDefault,
   model: null,
   name,
-  path: `/tmp/hermes/${name}`,
+  path: `/tmp/nako/${name}`,
   provider: null,
   skill_count: 0
 })
 
-const remoteConn = (over: Partial<HermesConnection> = {}): HermesConnection =>
-  ({ baseUrl: 'https://hermes-roy.tail.ts.net', mode: 'remote', profile: 'vps-remote', ...over }) as HermesConnection
+const remoteConn = (over: Partial<NakoConnection> = {}): NakoConnection =>
+  ({ baseUrl: 'https://nako-roy.tail.ts.net', mode: 'remote', profile: 'vps-remote', ...over }) as NakoConnection
 
-const localConn = (over: Partial<HermesConnection> = {}): HermesConnection =>
-  ({ baseUrl: '', mode: 'local', profile: 'default', ...over }) as HermesConnection
+const localConn = (over: Partial<NakoConnection> = {}): NakoConnection =>
+  ({ baseUrl: '', mode: 'local', profile: 'default', ...over }) as NakoConnection
 
-const getConnection = vi.fn<(profile?: string | null) => Promise<HermesConnection>>()
+const getConnection = vi.fn<(profile?: string | null) => Promise<NakoConnection>>()
 
 beforeEach(() => {
   getConnection.mockReset()
@@ -79,7 +79,7 @@ beforeEach(() => {
   $activeGatewayProfile.set('default')
   $connection.set(localConn())
   $profiles.set([])
-  vi.stubGlobal('window', { hermesDesktop: { getConnection } })
+  vi.stubGlobal('window', { nakoDesktop: { getConnection } })
   vi.mocked(invalidateProfileScopedQueries).mockClear()
   resetStarmapGraph.mockClear()
 })

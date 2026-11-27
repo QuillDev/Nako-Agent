@@ -21,7 +21,7 @@ from any thread. The value goes straight into the vault of the profile that aske
 only learns that it was stored. `close(request_id)` ends one nobody will answer. `ask` can come
 again with an id already shown (the agent asked again); show it once.
 
-Reads and writes (`names`, `about`, `get`, `put`, `remove`) act on the current Hermes home, so
+Reads and writes (`names`, `about`, `get`, `put`, `remove`) act on the current Nako home, so
 call them inside the profile scope you mean. `on_change(fn)` hears this process's changes.
 """
 
@@ -46,9 +46,9 @@ _PENDING_LOCK = threading.Lock()
 
 
 def _home():
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
 
-    return str(get_hermes_home())
+    return str(get_nako_home())
 
 
 def vault(home=None):

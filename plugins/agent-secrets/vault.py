@@ -1,4 +1,4 @@
-"""Where secrets live: one encrypted SQLite file per Hermes home (each profile has its own).
+"""Where secrets live: one encrypted SQLite file per Nako home (each profile has its own).
 
 Values are encrypted with Fernet under a key kept beside the database, readable only by this
 account. That guards copies of the file (backups, a synced folder), not the account itself:
@@ -16,7 +16,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 
-# Env-var shaped, so `hermes secret run NAME -- cmd` can hand a value over as $NAME.
+# Env-var shaped, so `nako secret run NAME -- cmd` can hand a value over as $NAME.
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 MAX_VALUE = 64 * 1024
 MAX_NOTE = 500

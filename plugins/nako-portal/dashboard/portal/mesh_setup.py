@@ -2,7 +2,7 @@
 
 `curl -fsSL <hub>/mesh/setup/<code>/sh | bash` on macOS and Linux, and
 `iex (irm <hub>/mesh/setup/<code>/ps1)` in PowerShell on Windows. Each script checks it can
-reach the hub, installs Hermes if it's missing, has the person sign in to a model provider if
+reach the hub, installs Nako if it's missing, has the person sign in to a model provider if
 none is set up (the one step that needs them), then installs the portal plugin at the hub's own
 commit, joins the mesh, runs the gateway as a service and waits until the hub sees the machine
 and its gateway. On Windows the gateway is only ever started through its scheduled task, never
@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import re
 
-HERMES_SH = "https://hermes-agent.nousresearch.com/install.sh"
-HERMES_PS1 = "https://hermes-agent.nousresearch.com/install.ps1"
+NAKO_SH = "https://portal.nakode.moe/install.sh"
+NAKO_PS1 = "https://portal.nakode.moe/install.ps1"
 SAFE = {
     "hub": re.compile(r"^https?://[A-Za-z0-9.\-\[\]:]+$"),
     "name": re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$"),
@@ -35,7 +35,7 @@ def _checked(**values):
     return values
 
 
-def shell_script(*, hub, name, token, status, source, ref, agent="hermes"):
+def shell_script(*, hub, name, token, status, source, ref, agent="nako"):
     v = _checked(hub=hub, name=name, token=token, status=status, source=source, ref=ref or "", agent=agent)
     ref_flag = f" --ref {v['ref']}" if v["ref"] else ""
     return f"""#!/usr/bin/env bash
@@ -53,10 +53,10 @@ curl -fsS --max-time 10 "$STATUS" >/dev/null 2>&1 || fail "Can't reach $HUB from
 
 export PATH="$HOME/.local/bin:$PATH"
 if ! command -v {v['agent']} >/dev/null 2>&1; then
-  say "Installing Hermes"
-  curl -fsSL {HERMES_SH} | bash -s -- --non-interactive || fail "The Hermes installer failed (see its log above)"
+  say "Installing Nako"
+  curl -fsSL {NAKO_SH} | bash -s -- --non-interactive || fail "The Nako installer failed (see its log above)"
   hash -r
-  command -v {v['agent']} >/dev/null 2>&1 || fail "Hermes installed, but '{v['agent']}' isn't on PATH. Open a new terminal and run this line again."
+  command -v {v['agent']} >/dev/null 2>&1 || fail "Nako installed, but '{v['agent']}' isn't on PATH. Open a new terminal and run this line again."
 fi
 
 if ! {v['agent']} config get model.provider >/dev/null 2>&1; then
@@ -72,7 +72,7 @@ say "Installing the Nako Portal plugin"
 say "Joining the mesh as $NAME"
 {v['agent']} mesh join "$HUB" '{v['token']}' --name "$NAME" || fail "Joining the mesh failed"
 
-say "Running the Hermes gateway as a background service"
+say "Running the Nako gateway as a background service"
 {v['agent']} gateway install --if-missing --start-on-login --no-start-now || fail "Installing the gateway service failed"
 {v['agent']} gateway restart || {v['agent']} gateway start || fail "Starting the gateway failed"
 
@@ -88,7 +88,7 @@ fail "The hub hasn't seen $NAME after 3 minutes. Check ~/.{v['agent']}/logs/gate
 """
 
 
-def powershell_script(*, hub, name, token, status, source, ref, agent="hermes"):
+def powershell_script(*, hub, name, token, status, source, ref, agent="nako"):
     v = _checked(hub=hub, name=name, token=token, status=status, source=source, ref=ref or "", agent=agent)
     ref_args = f" --ref {v['ref']}" if v["ref"] else ""
     return f"""# Joins this machine to a Nako mesh as "{v['name']}". Served once by the hub; safe to run again.
@@ -108,10 +108,10 @@ try {{ Invoke-RestMethod -Uri $Status -TimeoutSec 10 | Out-Null }} catch {{ Fail
 
 Refresh-Path
 if (-not (Get-Command {v['agent']} -ErrorAction SilentlyContinue)) {{
-  Say 'Installing Hermes'
-  & ([scriptblock]::Create((Invoke-RestMethod '{HERMES_PS1}'))) -NonInteractive
+  Say 'Installing Nako'
+  & ([scriptblock]::Create((Invoke-RestMethod '{NAKO_PS1}'))) -NonInteractive
   Refresh-Path
-  if (-not (Get-Command {v['agent']} -ErrorAction SilentlyContinue)) {{ Fail "Hermes installed, but '{v['agent']}' isn't on PATH. Open a new PowerShell window and run this line again." }}
+  if (-not (Get-Command {v['agent']} -ErrorAction SilentlyContinue)) {{ Fail "Nako installed, but '{v['agent']}' isn't on PATH. Open a new PowerShell window and run this line again." }}
 }}
 
 $ErrorActionPreference = 'Continue'
@@ -131,7 +131,7 @@ Say "Joining the mesh as $Name"
 {v['agent']} mesh join $Hub '{v['token']}' --name $Name
 if ($LASTEXITCODE -ne 0) {{ Fail 'Joining the mesh failed' }}
 
-Say 'Running the Hermes gateway as a background service'
+Say 'Running the Nako gateway as a background service'
 {v['agent']} gateway install --if-missing --start-on-login --no-start-now
 if ($LASTEXITCODE -ne 0) {{ Fail 'Installing the gateway service failed' }}
 # Only ever through the scheduled task: `{v['agent']} gateway start` can run it in this window, where

@@ -1,9 +1,9 @@
 {
-  "name": "hermes-antigravity-oauth",
+  "name": "nako-antigravity-oauth",
   "version": "0.1.0",
-  "description": "One-command Google Antigravity sign-in for Hermes Agent: installs the antigravity-oauth provider plugin and runs the official agy OAuth flow.",
+  "description": "One-command Google Antigravity sign-in for Nako Agent: installs the antigravity-oauth provider plugin and runs the official agy OAuth flow.",
   "bin": {
-    "hermes-antigravity-oauth": "bin/cli.js"
+    "nako-antigravity-oauth": "bin/cli.js"
   },
   "files": [
     "bin/cli.js",
@@ -14,9 +14,9 @@
     "node": ">=18"
   },
   "keywords": [
-    "hermes",
-    "hermes-agent",
-    "hermes-plugin",
+    "nako",
+    "nako-agent",
+    "nako-plugin",
     "antigravity",
     "agy",
     "gemini",
@@ -26,8 +26,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/neerazz/hermes-antigravity-oauth.git"
+    "url": "git+https://github.com/neerazz/nako-antigravity-oauth.git"
   },
-  "homepage": "https://github.com/neerazz/hermes-antigravity-oauth#readme",
-  "bugs": "https://github.com/neerazz/hermes-antigravity-oauth/issues"
+  "homepage": "https://github.com/neerazz/nako-antigravity-oauth#readme",
+  "bugs": "https://github.com/neerazz/nako-antigravity-oauth/issues"
 }

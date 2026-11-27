@@ -29,8 +29,8 @@ proves pre-completion TUI event delivery, **not visible rendering in the user's
 existing desktop/TUI**, and not history restoration. It starts at request
 construction/dispatch, not a full `run_conversation` with auxiliary services.
 
-Command: `venv/bin/python3.11 scripts/verify_live_reasoning.py` (Hermes checkout
-venv path). Probe calls `hermes_bootstrap` before other host imports. It closes
+Command: `venv/bin/python3.11 scripts/verify_live_reasoning.py` (Nako checkout
+venv path). Probe calls `nako_bootstrap` before other host imports. It closes
 the agent client, deletes its temporary workspace, removes the isolated TUI
 session, and removes its profiling observer. No running gateway was restarted.
 
@@ -56,11 +56,11 @@ Agy sometimes supplies no reasoning; the adapter never fabricates it.
 retained in `verification-tests-bootstrapped.log`.
 
 ```
-<hermes-checkout>/venv/bin/python3.11 -c "import sys; sys.path.insert(0, '<hermes-checkout>'); import hermes_bootstrap; import unittest; suite=unittest.defaultTestLoader.discover('tests', pattern='test_*.py'); result=unittest.TextTestRunner(verbosity=2).run(suite); raise SystemExit(not result.wasSuccessful())"
+<nako-checkout>/venv/bin/python3.11 -c "import sys; sys.path.insert(0, '<nako-checkout>'); import nako_bootstrap; import unittest; suite=unittest.defaultTestLoader.discover('tests', pattern='test_*.py'); result=unittest.TextTestRunner(verbosity=2).run(suite); raise SystemExit(not result.wasSuccessful())"
 ```
 
 Earlier plain discovery: 248 tests, 3 auxiliary tests skipped because installed
-Hermes bootstrap had not activated dependencies before those imports; preserved
+Nako bootstrap had not activated dependencies before those imports; preserved
 in `verification-tests.log`. The bootstrapped run above resolved the test setup
 issue. Other existing warning output includes unrelated nerve plugin load error
 and temporary-directory resource warnings; no test failed.
@@ -87,14 +87,14 @@ Existing prompt tests continue to verify reasoning is not replayed to agy.
 ## Compatibility / activation boundary
 
 Provider-kind plugins do not receive ordinary `register(ctx)` loading in this
-Hermes version. The provider's main-request projection therefore bootstraps its
+Nako version. The provider's main-request projection therefore bootstraps its
 middleware with the existing `PluginContext` registration API. No host function
 or registry is monkeypatched by production plugin code. Only scalar session and
 random per-request identity travel in API kwargs. Leases are context-local,
 revoked in `finally`, and release retained agent/callback references on exit.
 
 Read-only host seams (`get_active_subagent_parent`, current request attributes,
-loaded TUI session finder) may change in future Hermes releases; optional live
+loaded TUI session finder) may change in future Nako releases; optional live
 presentation fails closed and ordinary completed responses remain intact.
 
 Already-running processes have not reloaded these files. No activation in an
@@ -112,7 +112,7 @@ Pre-existing edits in prompt/stream/client and the DB-thinking tests were retain
 - TUI wire event names live at `params.type`, not the frame root.
 - Launch-profile live session records use `profile_home=None`; normalize only
   after positively matching `_launch_home`, never perform a bare-ID fallback.
-- Import installed `hermes_bootstrap` before host dependencies in standalone
+- Import installed `nako_bootstrap` before host dependencies in standalone
   harnesses: it can re-exec into the current managed Python environment.
 - Require a timestamped real callback event before final result consumption;
   preserved final reasoning and synthetic streams alone cannot prove visibility.

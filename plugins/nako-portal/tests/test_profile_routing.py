@@ -2,8 +2,8 @@
 
 The gateway only accepts a turn in a profile from the portal adapter that profile owns, so the
 default adapter (the one linked to the server) hands such messages to the other profile's adapter,
-which sends its replies back through the link. Runs against the real gateway where Hermes is
-installed; CI has no Hermes and skips.
+which sends its replies back through the link. Runs against the real gateway where Nako is
+installed; CI has no Nako and skips.
 """
 
 import importlib.util
@@ -48,14 +48,14 @@ class Link:
 
 
 def _homes(tmp_path, monkeypatch):
-    root = tmp_path / ".hermes"
+    root = tmp_path / ".nako"
     root.mkdir(mode=0o700)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setenv("HERMES_HOME", str(root))
-    import hermes_state
+    monkeypatch.setenv("NAKO_HOME", str(root))
+    import nako_state
 
-    if hasattr(hermes_state, "_IMPORT_DEFAULT_DB_PATH"):
-        monkeypatch.setattr(hermes_state, "DEFAULT_DB_PATH", hermes_state._IMPORT_DEFAULT_DB_PATH)
+    if hasattr(nako_state, "_IMPORT_DEFAULT_DB_PATH"):
+        monkeypatch.setattr(nako_state, "DEFAULT_DB_PATH", nako_state._IMPORT_DEFAULT_DB_PATH)
     work = root / "profiles" / "work"
     work.mkdir(parents=True, mode=0o700)
     (work / "config.yaml").write_text("{}", encoding="utf-8")
@@ -104,7 +104,7 @@ async def _gateway(tmp_path, monkeypatch):
 
 
 def _event(plugin, adapter, chat, profile):
-    """The event `HermesBackend.inbound` builds for a message typed in ``profile``'s ``chat``."""
+    """The event `NakoBackend.inbound` builds for a message typed in ``profile``'s ``chat``."""
     import dataclasses
 
     from gateway.platforms.event import MessageEvent
@@ -127,7 +127,7 @@ def _provenance(runner, event, adapter, homes):
 async def test_a_message_in_another_profile_goes_through_that_profiles_adapter(tmp_path, monkeypatch):
     plugin, runner, primary, secondary, homes, close = await _gateway(tmp_path, monkeypatch)
     try:
-        backend = plugin.HermesBackend(primary, homes["default"])
+        backend = plugin.NakoBackend(primary, homes["default"])
         carrier = backend._carrier("work")
         assert carrier is secondary
 
@@ -143,7 +143,7 @@ async def test_the_linked_adapter_alone_is_refused_for_another_profile(tmp_path,
     try:
         from persistence.core.errors import AuthorityRefusal as RuntimeStoreError
     except ImportError:
-        from hermes_state_runtime import RuntimeStoreError
+        from nako_state_runtime import RuntimeStoreError
 
     plugin, runner, primary, _secondary, homes, close = await _gateway(tmp_path, monkeypatch)
     try:
@@ -157,7 +157,7 @@ async def test_the_linked_adapter_alone_is_refused_for_another_profile(tmp_path,
 async def test_the_default_profile_stays_on_the_linked_adapter(tmp_path, monkeypatch):
     plugin, runner, primary, _secondary, homes, close = await _gateway(tmp_path, monkeypatch)
     try:
-        backend = plugin.HermesBackend(primary, homes["default"])
+        backend = plugin.NakoBackend(primary, homes["default"])
         assert backend._carrier(None) is primary
         provenance = _provenance(runner, _event(plugin, primary, "chat-d", None), primary, homes)
         assert provenance["runtime_home"] == str(homes["default"])
@@ -192,7 +192,7 @@ def test_portal_reads_and_updates_sessions_through_the_active_profile_store(tmp_
     from types import SimpleNamespace
 
     persistence = pytest.importorskip("persistence_assembly")
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
     from persistence.conversation.messages import NewMessage
     from persistence.conversation.sessions import NewSession
 
@@ -205,9 +205,9 @@ def test_portal_reads_and_updates_sessions_through_the_active_profile_store(tmp_
             for home in homes.values()
         }
         adapter = SimpleNamespace(_session_store=SimpleNamespace(
-            _db=None, _scoped_persistence=lambda: stores[Path(get_hermes_home())]
+            _db=None, _scoped_persistence=lambda: stores[Path(get_nako_home())]
         ))
-        backend = plugin.HermesBackend(adapter, root)
+        backend = plugin.NakoBackend(adapter, root)
         monkeypatch.setattr(backend, "homes", lambda: homes)
         stores[root].sessions.create(NewSession("main-chat", "portal", chat_id="main-chat"))
         work = stores[homes["work"]]

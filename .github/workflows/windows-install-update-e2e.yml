@@ -2,7 +2,7 @@ name: Windows install + update E2E
 
 # PR-time native Windows install/update journey (tests/e2e/core/windows_update):
 # the real scripts/install.ps1 on a fresh fake user profile (git redirected to a local
-# bare clone, no git/python/uv on PATH), then the real `hermes update` HEAD -> NEXT,
+# bare clone, no git/python/uv on PATH), then the real `nako update` HEAD -> NEXT,
 # a running gateway across that update, and a turn against the loopback provider.
 # Each file walks one journey (one install) and asserts several user-visible cells;
 # tracked bugs are message-gated xfails (tests/e2e/core/_pending_fixes.py).
@@ -21,7 +21,7 @@ on:
         default: ''
       strict_acceptance:
         description: >-
-          Acceptance runs only: known_failure owners whose gaps FAIL this run instead of xfailing ('upd-txn', a comma list, or '1' for every gap). Sets HERMES_E2E_STRICT_ACCEPTANCE for the E2E suites (tests/e2e/core/_pending_fixes.py).
+          Acceptance runs only: known_failure owners whose gaps FAIL this run instead of xfailing ('upd-txn', a comma list, or '1' for every gap). Sets NAKO_E2E_STRICT_ACCEPTANCE for the E2E suites (tests/e2e/core/_pending_fixes.py).
         type: string
         required: false
         default: ''
@@ -31,7 +31,7 @@ on:
     inputs:
       strict_acceptance:
         description: >-
-          Acceptance runs only: known_failure owners whose gaps FAIL this run instead of xfailing ('upd-txn', a comma list, or '1' for every gap). Sets HERMES_E2E_STRICT_ACCEPTANCE for the E2E suites (tests/e2e/core/_pending_fixes.py).
+          Acceptance runs only: known_failure owners whose gaps FAIL this run instead of xfailing ('upd-txn', a comma list, or '1' for every gap). Sets NAKO_E2E_STRICT_ACCEPTANCE for the E2E suites (tests/e2e/core/_pending_fixes.py).
         type: string
         required: false
         default: ''
@@ -87,7 +87,7 @@ jobs:
         uses: ./.github/actions/check-clean-worktree
 
   install-update:
-    name: Windows install.ps1 + hermes update E2E (${{ matrix.shard }})
+    name: Windows install.ps1 + nako update E2E (${{ matrix.shard }})
     needs: plan
     # Measured over two dispatches each: the longest job (test_crash_cells.py) took 16.1-17.8 min
     # on 8 vCPU, 16.6-18.2 on 4 vCPU, and 20.4 on 2 vCPU, where its mid-git-bootstrap kill cell
@@ -104,7 +104,7 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           # serve.git is a bare clone of this checkout: the installer's treeless clone and
-          # `hermes update` need real history and release tags (version identity), as on GitHub.
+          # `nako update` need real history and release tags (version identity), as on GitHub.
           fetch-depth: 0
 
       - name: Set up locked Python and test dependencies
@@ -122,20 +122,20 @@ jobs:
             -m "platforms and integration" -v --tb=short -rA
         env:
           SHARD: ${{ matrix.shard }}
-          HERMES_E2E_WINDOWS_INSTALL: '1'
-          HERMES_E2E_STRICT_ACCEPTANCE: ${{ inputs.strict_acceptance }}
+          NAKO_E2E_WINDOWS_INSTALL: '1'
+          NAKO_E2E_STRICT_ACCEPTANCE: ${{ inputs.strict_acceptance }}
           # Machine work dirs (serve.git, transcripts) stay short under runner.temp. The fake
           # user profiles live in C:\Users itself, where a real one does: the checkout carries
           # 159-character paths, so a deeper profile hits MAX_PATH where no user would (the
           # runner is disposable, so writing C:\Users is fine).
-          HERMES_E2E_MACHINE_ROOT: ${{ runner.temp }}\wm
-          HERMES_E2E_PROFILES_ROOT: C:\Users
-          HERMES_E2E_ARTIFACTS: ${{ runner.temp }}\win-update-e2e
+          NAKO_E2E_MACHINE_ROOT: ${{ runner.temp }}\wm
+          NAKO_E2E_PROFILES_ROOT: C:\Users
+          NAKO_E2E_ARTIFACTS: ${{ runner.temp }}\win-update-e2e
           # test_crash_cells.py runs its whole journey (install, gateway phase, six crash cells)
           # inside one file: 840-1,000 s on its own runner (2,100-2,400 s back when every journey
           # shared one runner and queued for the gateway-phase lock).
-          HERMES_TEST_FILE_TIMEOUT: '2400'
-          HERMES_TEST_FILE_RETRIES: '0'
+          NAKO_TEST_FILE_TIMEOUT: '2400'
+          NAKO_TEST_FILE_RETRIES: '0'
           OPENROUTER_API_KEY: ''
           OPENAI_API_KEY: ''
           NOUS_API_KEY: ''
@@ -147,9 +147,9 @@ jobs:
         # this manifest only when it ran (tests/e2e/core/windows_update/test_crash_cells.py).
         shell: pwsh
         env:
-          HERMES_E2E_ARTIFACTS: ${{ runner.temp }}\win-update-e2e
+          NAKO_E2E_ARTIFACTS: ${{ runner.temp }}\win-update-e2e
         run: |
-          $manifest = Join-Path $env:HERMES_E2E_ARTIFACTS 'crash-cells-ran.txt'
+          $manifest = Join-Path $env:NAKO_E2E_ARTIFACTS 'crash-cells-ran.txt'
           if (-not (Test-Path -LiteralPath $manifest)) {
             throw "test_crash_cells.py ran no crash cells: $manifest is missing"
           }
@@ -163,7 +163,7 @@ jobs:
         # for a teardown that misses.
         shell: pwsh
         run: |
-          $left = @(Get-ChildItem -LiteralPath 'C:\Users' -Directory -Filter '*hermes-e2e-*' -ErrorAction SilentlyContinue)
+          $left = @(Get-ChildItem -LiteralPath 'C:\Users' -Directory -Filter '*nako-e2e-*' -ErrorAction SilentlyContinue)
           $left += @(Get-ChildItem -Path "${{ runner.temp }}\wm\*\serve.git" -Directory -ErrorAction SilentlyContinue)
           if ($left.Count -eq 0) { 'every machine install was removed'; exit 0 }
           foreach ($d in $left) { "::error::left behind by a journey teardown: $($d.FullName)" }
@@ -180,15 +180,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: No leftover Python / Hermes processes
+      - name: No leftover Python / Nako processes
         # Backstop for each journey's teardown: nothing a machine started may outlive it.
         if: always()
         shell: pwsh
         run: |
-          $names = 'python.exe', 'pythonw.exe', 'hermes.exe', 'node.exe'
-          # Work dirs live under runner.temp\wm; profiles are C:\Users\*hermes-e2e-<id>.
+          $names = 'python.exe', 'pythonw.exe', 'nako.exe', 'node.exe'
+          # Work dirs live under runner.temp\wm; profiles are C:\Users\*nako-e2e-<id>.
           $root = "${{ runner.temp }}\wm".ToLower()
-          $profileMark = 'hermes-e2e-'
+          $profileMark = 'nako-e2e-'
           $deadline = (Get-Date).AddSeconds(20)
           do {
             $left = @(Get-CimInstance Win32_Process | Where-Object {

@@ -6,7 +6,7 @@
 #   DRY_RUN=1 android/release.sh 1.2.3  build any commit, keep the files, publish nothing
 #
 # Needs: JDK 21 and an Android SDK (ANDROID_HOME). The signing key comes from
-# PORTAL_ANDROID_KEYSTORE (default ~/.config/hermes-portal/android-release.jks) and
+# PORTAL_ANDROID_KEYSTORE (default ~/.config/nako-portal/android-release.jks) and
 # PORTAL_ANDROID_KEYSTORE_PASSWORD (default: the keystore path with .password instead of .jks).
 set -euo pipefail
 
@@ -44,13 +44,13 @@ while IFS= read -r released; do
   if (( previous >= code )); then code=$((previous + 1)); fi
 done <<<"$releases"
 
-export PORTAL_ANDROID_KEYSTORE=${PORTAL_ANDROID_KEYSTORE:-$HOME/.config/hermes-portal/android-release.jks}
+export PORTAL_ANDROID_KEYSTORE=${PORTAL_ANDROID_KEYSTORE:-$HOME/.config/nako-portal/android-release.jks}
 if [ -z "${PORTAL_ANDROID_KEYSTORE_PASSWORD:-}" ]; then
   PORTAL_ANDROID_KEYSTORE_PASSWORD=$(cat "${PORTAL_ANDROID_KEYSTORE%.jks}.password")
 fi
 export PORTAL_ANDROID_KEYSTORE_PASSWORD
 export PORTAL_ANDROID_KEY_PASSWORD=${PORTAL_ANDROID_KEY_PASSWORD:-$PORTAL_ANDROID_KEYSTORE_PASSWORD}
-export PORTAL_ANDROID_KEY_ALIAS=${PORTAL_ANDROID_KEY_ALIAS:-hermes}
+export PORTAL_ANDROID_KEY_ALIAS=${PORTAL_ANDROID_KEY_ALIAS:-nako}
 export PORTAL_ANDROID_VERSION_CODE=$code PORTAL_ANDROID_VERSION_NAME=$version
 
 ./gradlew --no-daemon -q testDebugUnitTest lintDebug assembleRelease

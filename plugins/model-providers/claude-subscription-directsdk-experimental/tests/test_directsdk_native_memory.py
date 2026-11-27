@@ -4,7 +4,7 @@ Native loads its auto memory (``MEMORY.md``) and managed CLAUDE.md even with ``-
 and, on a subscription login, prepends them with the account email to the conversation's first
 user turn as ``<system-reminder>`` blocks. Claude then reads Claude Code's notes as text smuggled
 into the user's message. The child is told not to load them, and the relay sends the first turn as
-Hermes queried it, which is also how every later request replays it.
+Nako queried it, which is also how every later request replays it.
 """
 import copy
 import http.client
@@ -29,7 +29,7 @@ ENV = {'role': 'system', 'content': [{'type': 'text', 'text': 'Fixture environme
 
 
 def test_native_is_told_not_to_load_its_memory_or_claude_md(profile, tmp_path):
-    # "0" forces auto memory on in Claude Code; Hermes' own setting must still win.
+    # "0" forces auto memory on in Claude Code; Nako' own setting must still win.
     env = _turn_env(profile, tmp_path, CLAUDE_CODE_DISABLE_AUTO_MEMORY='0')
     assert env['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] == '1'
     assert env['CLAUDE_CODE_DISABLE_CLAUDE_MDS'] == '1'
@@ -77,7 +77,7 @@ def relay():
 
 
 def opening(marked):
-    """Native's opening request (Claude Code 2.1.310, Opus 5.5 layout): its context ahead of Hermes' frame."""
+    """Native's opening request (Claude Code 2.1.310, Opus 5.5 layout): its context ahead of Nako' frame."""
     turn = copy.deepcopy([MEMORY, EMAIL, FRAME])
     env = copy.deepcopy(ENV)
     if marked == 'context':

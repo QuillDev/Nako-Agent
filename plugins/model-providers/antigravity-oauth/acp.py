@@ -395,7 +395,7 @@ class AntigravityACPStream(Iterator[Any]):
     """Streaming iterator yielding OpenAI ChatCompletionChunk objects from ``agy acp``.
 
     Mirrors :class:`stream.AntigravityStream`'s sync/async/awaitable contract so
-    Hermes' main loop, auxiliary async path, and Relay all treat it identically.
+    Nako' main loop, auxiliary async path, and Relay all treat it identically.
     """
 
     response: Any = None
@@ -603,7 +603,7 @@ class AntigravityACPStream(Iterator[Any]):
                             translated = self._translate_acp_tool_call(tc_obj)
                             if translated is not None:
                                 logger.info(
-                                    "Antigravity ACP native tool '%s' re-issued as Hermes tool '%s'.",
+                                    "Antigravity ACP native tool '%s' re-issued as Nako tool '%s'.",
                                     tc_obj.get("name"),
                                     translated.function.name,
                                 )

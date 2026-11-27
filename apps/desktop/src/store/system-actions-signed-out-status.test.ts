@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type * as HermesApi from '@/hermes'
+import type * as NakoApi from '@/nako'
 
 const getStatus = vi.fn()
-const hermesApi = vi.fn()
+const nakoApi = vi.fn()
 const confirm = vi.fn()
 
-vi.mock('@/hermes', async importOriginal => ({
-  ...(await importOriginal<typeof HermesApi>()),
+vi.mock('@/nako', async importOriginal => ({
+  ...(await importOriginal<typeof NakoApi>()),
   getStatus: () => getStatus(),
-  hermesApi: (request: unknown) => hermesApi(request)
+  nakoApi: (request: unknown) => nakoApi(request)
 }))
 
 vi.mock('@/store/confirm', () => ({ confirm: (request: unknown) => confirm(request) }))
@@ -29,11 +29,11 @@ describe('confirmSharedGatewayRestart on a signed-out status read', () => {
     getStatus
       .mockResolvedValueOnce(SIGNED_OUT_STATUS)
       .mockResolvedValueOnce({ active_sessions: 0, gateway_shared_with: ['default', 'alpha'], install_id: 'i' })
-    hermesApi.mockResolvedValue({})
+    nakoApi.mockResolvedValue({})
     confirm.mockResolvedValue(true)
 
     await expect(confirmSharedGatewayRestart()).resolves.toEqual(['default', 'alpha'])
-    expect(hermesApi).toHaveBeenCalledWith({ path: '/api/auth/me' })
+    expect(nakoApi).toHaveBeenCalledWith({ path: '/api/auth/me' })
     expect(confirm).toHaveBeenCalledTimes(1)
   })
 
@@ -42,6 +42,6 @@ describe('confirmSharedGatewayRestart on a signed-out status read', () => {
 
     await expect(confirmSharedGatewayRestart()).resolves.toBeNull()
     expect(getStatus).toHaveBeenCalledTimes(1)
-    expect(hermesApi).not.toHaveBeenCalled()
+    expect(nakoApi).not.toHaveBeenCalled()
   })
 })

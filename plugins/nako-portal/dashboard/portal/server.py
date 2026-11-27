@@ -26,7 +26,7 @@ from .media import media_paths, shown_files
 from .mesh import parse as remote
 from .restart_panel import RestartPanel
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 
 MAX_FILE = 25 * 1024 * 1024
 ANDROID_APK_PATH = "/android/nako.apk"
@@ -118,11 +118,11 @@ class Portal(AuthRoutes, LocalAPI):
         self.secure = parsed.scheme == "https"
         # session -> (expires, files its transcript shows), so a chat's images don't each reread it.
         self.shown = {}
-        # Other machines' Hermes when this portal is a mesh hub (`mesh.Mesh`), else None.
+        # Other machines' Nako when this portal is a mesh hub (`mesh.Mesh`), else None.
         self.mesh = None
         # This portal's link to its hub when it's a machine in someone's mesh (`mesh.Node`), else None.
         self.node = None
-        # This machine's Hermes as the server looks after it (`machine_ops.MachineOps`), else None.
+        # This machine's Nako as the server looks after it (`machine_ops.MachineOps`), else None.
         self.ops = None
         self.restart_panel = RestartPanel(self)
 
@@ -165,7 +165,7 @@ class Portal(AuthRoutes, LocalAPI):
     def _gateway_frame(self):
         if not self.hub.connected:
             return {"kind": "hub.disconnected"}
-        return {"kind": "hub.connected", "hermes": self.hub.hermes_build}
+        return {"kind": "hub.connected", "nako": self.hub.nako_build}
 
     # Plumbing
 
@@ -414,7 +414,7 @@ class Portal(AuthRoutes, LocalAPI):
         return web.json_response(self.store.toggle_model_favorite(await request.json()))
 
     async def profile(self, request):
-        """The Hermes profile the portal shows, and the ones it could."""
+        """The Nako profile the portal shows, and the ones it could."""
         self._require(request)
         return web.json_response(await asyncio.to_thread(self.hub.backend.profiles))
 
@@ -748,10 +748,10 @@ class Portal(AuthRoutes, LocalAPI):
         hub = await self._secrets()
         return web.json_response({"removed": await hub.remove_secret(request.match_info["name"])})
 
-    # Providers: the same list `hermes model` offers, read and changed here.
+    # Providers: the same list `nako model` offers, read and changed here.
 
     async def providers(self, request):
-        """Accounts already signed in and API keys already saved, grouped as Hermes lists them."""
+        """Accounts already signed in and API keys already saved, grouped as Nako lists them."""
         self._require(request)
         hub = await self._hub()
         return web.json_response(await hub.providers())
@@ -845,13 +845,13 @@ class Portal(AuthRoutes, LocalAPI):
             return web.json_response({"error": str(error)}, status=400)
         return web.json_response({"ok": True})
 
-    # MCP servers: the list `hermes mcp` keeps for the shown profile, read and changed here.
+    # MCP servers: the list `nako mcp` keeps for the shown profile, read and changed here.
 
     async def mcp_servers(self, request):
         self._require(request)
         listed = await (await self._hub()).mcp_servers()
         if listed is None:
-            return web.json_response({"error": "This Hermes can't run MCP servers"}, status=404)
+            return web.json_response({"error": "This Nako can't run MCP servers"}, status=404)
         return web.json_response(listed)
 
     async def mcp_catalog(self, request):

@@ -67,7 +67,7 @@ def snapshot(repo: Path, ref: str, destination: Path, exclude: tuple[str, ...] =
     repo, destination = repo.resolve(), destination.resolve()
     if repo == destination or repo.is_relative_to(destination):
         raise ValueError("the snapshot destination must not contain the source checkout")
-    with tempfile.TemporaryDirectory(prefix="hermes-archive-") as temp:
+    with tempfile.TemporaryDirectory(prefix="nako-archive-") as temp:
         temp_dir = Path(temp)
         archive = temp_dir / "source.tar"
         _write_git_archive(repo, ref, archive, [f":(exclude){name}" for name in exclude])

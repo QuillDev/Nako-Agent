@@ -13,13 +13,13 @@ CERT = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:
 
 
 async def test_the_app_hears_alerts_on_its_socket_without_watching_a_chat(world):
-    sid = world.hermes.add_session("20261024_070707_abcdef", "deploy")
+    sid = world.nako.add_session("20261024_070707_abcdef", "deploy")
     await world.sign_up()
     phone = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
     await world.http.get(world.url(f"/api/sessions/{sid}"))
     await world.http.post(world.url(f"/api/sessions/{sid}/messages"), data={"text": "ship"}, headers={"Origin": ORIGIN})
     alert = await next_message(phone, lambda m: m.get("kind") == "alert")
-    assert (alert["title"], alert["body"], alert["session"]) == ("deploy", "hello from hermes", sid)
+    assert (alert["title"], alert["body"], alert["session"]) == ("deploy", "hello from nako", sid)
     await phone.close()
 
     # A socket that isn't signed in hears nothing.

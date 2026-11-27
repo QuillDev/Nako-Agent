@@ -1,5 +1,5 @@
 /**
- * Hermes Cloud owns updates for its agents: it replaces the agent's image, so
+ * Nako Cloud owns updates for its agents: it replaces the agent's image, so
  * no in-app updater may be offered there. Two shapes reach a Cloud agent:
  *
  * - the Webapp served BY a Cloud agent (the tab's own origin is the agent):
@@ -8,28 +8,28 @@
  *   the Desktop app on this machine still updates itself.
  */
 
-import { isHermesCloudUrl } from '@hermes/shared'
+import { isNakoCloudUrl } from '@nako/shared'
 import { computed } from 'nanostores'
 
-import type { HermesConnection } from '@/global'
-import { servedByHermesCloud } from '@/lib/hermes-cloud-host'
+import type { NakoConnection } from '@/global'
+import { servedByNakoCloud } from '@/lib/nako-cloud-host'
 import type { UpdateTarget } from '@/lib/update-copy'
 import { $connection } from '@/store/session'
 
-function connectedToHermesCloud(connection: HermesConnection | null): boolean {
-  return connection?.mode === 'remote' && (connection.remoteKind === 'cloud' || isHermesCloudUrl(connection.baseUrl))
+function connectedToNakoCloud(connection: NakoConnection | null): boolean {
+  return connection?.mode === 'remote' && (connection.remoteKind === 'cloud' || isNakoCloudUrl(connection.baseUrl))
 }
 
-/** Whether Hermes Cloud owns updates for `target` under `connection`. */
-export function cloudOwnsUpdates(target: UpdateTarget, connection: HermesConnection | null = $connection.get()): boolean {
-  return servedByHermesCloud() || (target === 'backend' && connectedToHermesCloud(connection))
+/** Whether Nako Cloud owns updates for `target` under `connection`. */
+export function cloudOwnsUpdates(target: UpdateTarget, connection: NakoConnection | null = $connection.get()): boolean {
+  return servedByNakoCloud() || (target === 'backend' && connectedToNakoCloud(connection))
 }
 
 /**
- * The target a generic "Update Hermes" command acts on: the connected backend
- * in remote mode, unless Hermes Cloud owns it — then this machine's own app.
+ * The target a generic "Update Nako" command acts on: the connected backend
+ * in remote mode, unless Nako Cloud owns it — then this machine's own app.
  */
-export function updateTargetFor(connection: HermesConnection | null): UpdateTarget {
+export function updateTargetFor(connection: NakoConnection | null): UpdateTarget {
   return connection?.mode === 'remote' && !cloudOwnsUpdates('backend', connection) ? 'backend' : 'client'
 }
 

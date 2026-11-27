@@ -28,20 +28,20 @@ aliases and implicit plugin model/effort defaults are not used.
 
 `ANTIGRAVITY_CONTEXT_LENGTH` accepts a positive integer token budget as an explicit
 user override. When unset, invalid or nonpositive, the documented
-`ProviderProfile.get_model_context_length` hook returns `None`, letting Hermes
+`ProviderProfile.get_model_context_length` hook returns `None`, letting Nako
 resolve the **exact selected ID** through its native metadata. The plugin imposes
 no blanket context capacity and imports no private metadata resolver.
 
 Metadata is not proof of the maximum context served by your account or the CLI.
-Unrecognized exact IDs can receive Hermes' generic unknown-model fallback: for
+Unrecognized exact IDs can receive Nako' generic unknown-model fallback: for
 example, `gpt-oss-120b-medium` is currently unresolved by the native resolver.
 That fallback is **unknown metadata, not native model capacity**. If necessary,
 set an explicit conservative budget for your route. This change does not establish
 million-token account acceptance; serving limits require separate live testing.
 
-## Live reasoning on non-streaming Hermes turns
+## Live reasoning on non-streaming Nako turns
 
-`external_process` authentication remains unchanged: Hermes selects its normal
+`external_process` authentication remains unchanged: Nako selects its normal
 non-streaming path. For foreground agents with an installed reasoning callback
 and a text-stream consumer, the plugin's collector forwards available reasoning
 while it assembles the response. It calls the existing callback, preserving the
@@ -50,7 +50,7 @@ answer/tool content and is never added to the replay prompt.
 
 The profile's main-request projection installs `llm_execution` middleware using
 `PluginContext.register_middleware`. This explicit bootstrap is necessary because
-Hermes' provider discovery imports model-provider plugins but skips their general
+Nako' provider discovery imports model-provider plugins but skips their general
 `register(ctx)` lifecycle. Registration is profile-local, idempotent, and uses an
 unloadable host registration handle. Auxiliary projections carry no session ID.
 
@@ -62,7 +62,7 @@ presentation; completed reasoning and usage remain available. Streaming callers
 continue to receive ordinary chunks, with no extra callback delivery.
 
 This uses read-only host internals for current-agent/session lookup; compatibility
-is tested against the installed Hermes checkout, not guaranteed for all releases.
+is tested against the installed Nako checkout, not guaranteed for all releases.
 Already running processes retain their previously loaded plugin code; this plugin
 does not hot-patch them. No daemon restart or configuration change is performed.
 Agy may return no thinking text even when a request otherwise succeeds. Live

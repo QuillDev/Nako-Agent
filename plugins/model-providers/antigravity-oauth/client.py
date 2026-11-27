@@ -1,4 +1,4 @@
-"""Antigravity Subscription DirectSDK client for Hermes Agent.
+"""Antigravity Subscription DirectSDK client for Nako Agent.
 
 Drives the official Antigravity CLI (`agy`) as an external process in
 stream-json mode to provide request-scoped completions using the user's
@@ -240,8 +240,8 @@ class AntigravityClient:
 
     Async compatibility boundary (issue #8)
     --------------------------------------
-    Hermes drives this client from its async auxiliary path: with
-    ``HERMES_SKIP_ASYNC_WRAP`` the client is used as-is ("already async-safe"),
+    Nako drives this client from its async auxiliary path: with
+    ``NAKO_SKIP_ASYNC_WRAP`` the client is used as-is ("already async-safe"),
     and the caller then does ``await client.chat.completions.create(...)``.
     Everything the facade returns is therefore awaitable-yielding-itself —
     ``stream._AwaitableCompletion`` for the non-streaming plan (which simply
@@ -254,14 +254,14 @@ class AntigravityClient:
     ``create()`` executes the whole subprocess round-trip synchronously before
     it returns, so awaiting it still blocks the event loop for the request's
     duration. This is identical to the pre-existing sync behavior and to
-    Hermes' own CopilotACPClient shim, and there is no plugin-side fix without
-    a Hermes hook that would let ``create()`` hand back a coroutine instead of
+    Nako' own CopilotACPClient shim, and there is no plugin-side fix without
+    a Nako hook that would let ``create()`` hand back a coroutine instead of
     a finished value.
     """
 
-    # Instruct Hermes not to wrap this client in wire transports or async adapters
-    HERMES_SKIP_TRANSPORT_WRAP = True
-    HERMES_SKIP_ASYNC_WRAP = True
+    # Instruct Nako not to wrap this client in wire transports or async adapters
+    NAKO_SKIP_TRANSPORT_WRAP = True
+    NAKO_SKIP_ASYNC_WRAP = True
 
     def __init__(
         self,
@@ -496,7 +496,7 @@ class AntigravityClient:
             self._worker_history = list(messages or [])
 
     def _sync_workspace_rules(self, messages: list[dict[str, Any]]) -> bool:
-        """Write SOUL.md + Hermes system prompt to the workspace GEMINI.md agy loads as rules.
+        """Write SOUL.md + Nako system prompt to the workspace GEMINI.md agy loads as rules.
 
         Returns True when rules are in the workspace (prompt then omits them). A changed digest
         retires the running worker, because agy reads rules at session start.

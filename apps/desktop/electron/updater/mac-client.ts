@@ -78,7 +78,7 @@ export function createMacStrategy(deps: MacClientDeps): MacStrategy {
   return new MacStrategy({
     ...deps,
     updater,
-    // .../Hermes.app/Contents/MacOS/Hermes -> .../Hermes.app
+    // .../Nako.app/Contents/MacOS/Nako -> .../Nako.app
     bundlePath: path.resolve(process.execPath, '..', '..', '..'),
     prepareInstall: () => prepareMacInstall(nativeUpdater)
   })

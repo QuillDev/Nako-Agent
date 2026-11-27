@@ -8,7 +8,7 @@ The owner points `environments_command` at any program that prints JSON like
      "links": [{"label": "sign in", "url": "https://..."}]}
 
 `status` is running, partial or stopped; `title`, `detail`, both `links` lists and `session` (the
-Hermes chat an environment belongs to; the chat's header then offers its links) are optional, and
+Nako chat an environment belongs to; the chat's header then offers its links) are optional, and
 so is `memory`, the bytes it holds (the page shows it, and the high-load warning lists the biggest).
 The page keeps the command's order for what's running, so the command decides what comes first.
 Unset, the portal shows no Environments page at all.
@@ -80,7 +80,7 @@ def parse(raw):
             entry["memory"] = memory
         if _text(item.get("detail"), 200):
             entry["detail"] = _text(item["detail"], 200)
-        # The chat it belongs to, when the command knows (a Hermes session id).
+        # The chat it belongs to, when the command knows (a Nako session id).
         session = item.get("session")
         if isinstance(session, str) and SESSION.fullmatch(session):
             entry["session"] = session

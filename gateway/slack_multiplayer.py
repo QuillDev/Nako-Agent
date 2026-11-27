@@ -14,7 +14,7 @@ _PLUGIN = "slack-multiplayer-enhancements"
 
 
 def enabled() -> bool:
-    from hermes_cli.config import load_config_readonly
+    from nako_cli.config import load_config_readonly
 
     config = load_config_readonly().get("plugins") or {}
     return _PLUGIN in (config.get("enabled") or ()) and _PLUGIN not in (config.get("disabled") or ())

@@ -1,22 +1,22 @@
 name: soloknuckle
 title: Soloknuckle
-repo: https://github.com/z99wE/soloknucklefXrhermes
+repo: https://github.com/z99wE/soloknucklefXrnako
 sha: "ef9f7565b63d2b3350095d0b953c1b6ea9c61a69"
-subdir: hermes-plugin
+subdir: nako-plugin
 version: "5.2.0"
 description: >-
-  Deterministic local guardrails for Hermes and dev workflows. Three invocable
+  Deterministic local guardrails for Nako and dev workflows. Three invocable
   tools—git-diff secret scanning, a destructive-command firewall, and a project
-  health score—plus native Hermes surfaces: additive credential-redaction
-  patterns, a soloknuckle:hygiene skill, hermes hygiene CLI, /hygiene, and a
+  health score—plus native Nako surfaces: additive credential-redaction
+  patterns, a soloknuckle:hygiene skill, nako hygiene CLI, /hygiene, and a
   weekly hygiene-report blueprint. One rule set, same verdicts across
-  CLI/hooks/MCP/Hermes. No hooks, no middleware, no prompt rewriting, no
+  CLI/hooks/MCP/Nako. No hooks, no middleware, no prompt rewriting, no
   telemetry.
 maintainer: Soloknuckle Contributors
 tier: community
 category: tools
-docs_url: https://github.com/z99wE/soloknucklefXrhermes/blob/main/HERMES-INTEGRATION.md
-requires_hermes: ">=0.22.0"
+docs_url: https://github.com/z99wE/soloknucklefXrnako/blob/main/NAKO-INTEGRATION.md
+requires_nako: ">=0.22.0"
 readme: true
 platforms: []
 capabilities:

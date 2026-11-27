@@ -1,8 +1,8 @@
 {
-  "client_id": "https://nousresearch.github.io/hermes-agent/docs/oauth/client-metadata.json",
-  "client_name": "Hermes Agent",
-  "client_uri": "https://hermes-agent.nousresearch.com",
-  "logo_uri": "https://nousresearch.github.io/hermes-agent/docs/img/logo.png",
+  "client_id": "https://quilldev.github.io/nako-agent/docs/oauth/client-metadata.json",
+  "client_name": "Nako Agent",
+  "client_uri": "https://portal.nakode.moe",
+  "logo_uri": "https://quilldev.github.io/nako-agent/docs/img/logo.png",
   "application_type": "native",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],

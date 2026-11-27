@@ -46,7 +46,7 @@ async def link(world, url, challenge):
 async def test_the_desktop_app_signs_in_through_the_browser_and_keeps_the_session(world, desktop):
     server, _clock, app = desktop
     url = lambda path: str(server.make_url(path))  # noqa: E731
-    sid = world.hermes.add_session("20261024_070707_abcdef", "deploy")
+    sid = world.nako.add_session("20261024_070707_abcdef", "deploy")
     await world.sign_up()
     verifier, challenge = pkce()
 

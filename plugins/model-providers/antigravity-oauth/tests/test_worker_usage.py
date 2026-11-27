@@ -2,8 +2,8 @@
 
 agy 1.2.10/11 persistent workers report *cumulative session* usage: the
 observed sequence input 12233, 24673, 37261 with outputs 134, 209, 284 must
-reach Hermes as per-turn deltas 12233, 12440, 12588 and 134, 75, 75, otherwise
-Hermes context compression fires on every turn. These tests pin the worker
+reach Nako as per-turn deltas 12233, 12440, 12588 and 134, 75, 75, otherwise
+Nako context compression fires on every turn. These tests pin the worker
 delta accounting, its baseline resets (respawn, termination, decreasing
 counters, omitted optional fields), and oneshot isolation.
 """
@@ -170,7 +170,7 @@ class WorkerTurnUsageTests(unittest.TestCase):
         # (fragile, non-hermetic), and an explicit cwd is never cleaned by
         # close(), so the TemporaryDirectory does it instead. LIFO cleanup
         # order guarantees the client closes before its workspace disappears.
-        temp_dir = tempfile.TemporaryDirectory(prefix="hermes_agy_test_")
+        temp_dir = tempfile.TemporaryDirectory(prefix="nako_agy_test_")
         self.addCleanup(temp_dir.cleanup)
         client = AntigravityClient(cwd=temp_dir.name)
         self.addCleanup(client.close)

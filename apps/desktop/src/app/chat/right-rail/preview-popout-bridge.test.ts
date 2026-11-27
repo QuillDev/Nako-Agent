@@ -80,13 +80,13 @@ vi.mock('./preview-vault', () => ({
   closePreviewVaultBinding: (...args: unknown[]) => closePreviewVaultBinding(...args)
 }))
 
-/** Loopback stand-in for the preload IPC relay (window.hermesDesktop.windowRelay). */
+/** Loopback stand-in for the preload IPC relay (window.nakoDesktop.windowRelay). */
 function installDesktopRelay() {
   const listeners = new Set<(payload: unknown) => void>()
 
-  const desktopWindow = window as unknown as { hermesDesktop?: Record<string, unknown> }
+  const desktopWindow = window as unknown as { nakoDesktop?: Record<string, unknown> }
 
-  desktopWindow.hermesDesktop = {
+  desktopWindow.nakoDesktop = {
     windowRelay: {
       onMessage: (callback: (payload: unknown) => void) => {
         listeners.add(callback)
@@ -102,7 +102,7 @@ function installDesktopRelay() {
   }
 
   return () => {
-    delete desktopWindow.hermesDesktop
+    delete desktopWindow.nakoDesktop
     listeners.clear()
   }
 }

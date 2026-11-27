@@ -15,9 +15,9 @@ def load_plugin():
 
 
 @pytest.fixture
-def hermes(monkeypatch):
-    """Stand-ins shaped like Hermes's config, home override and toolset resolver, so CI covers
-    the rule. `configs` maps a home to its config; `bundles` maps a home to what `hermes-portal`
+def nako(monkeypatch):
+    """Stand-ins shaped like Nako's config, home override and toolset resolver, so CI covers
+    the rule. `configs` maps a home to its config; `bundles` maps a home to what `nako-portal`
     resolves to there (empty where the plugin isn't registered)."""
     state = {"home": "/root-home", "configs": {}, "bundles": {}}
 
@@ -34,27 +34,27 @@ def hermes(monkeypatch):
     def reset_override(token):
         state["home"] = token
 
-    module("hermes_cli")
-    module("hermes_cli.config", load_config=lambda: state["configs"].get(state["home"], {}))
-    module("hermes_constants", set_hermes_home_override=set_override, reset_hermes_home_override=reset_override)
-    module("toolsets", resolve_toolset=lambda name: list(state["bundles"].get(state["home"], [])) if name == "hermes-portal" else [])
+    module("nako_cli")
+    module("nako_cli.config", load_config=lambda: state["configs"].get(state["home"], {}))
+    module("nako_constants", set_nako_home_override=set_override, reset_nako_home_override=reset_override)
+    module("toolsets", resolve_toolset=lambda name: list(state["bundles"].get(state["home"], [])) if name == "nako-portal" else [])
     return state
 
 
-def test_a_profile_without_the_plugin_gets_the_full_toolset(hermes):
-    hermes["bundles"] = {"/root-home": ["terminal", "read_file"], "/profiles/other": []}
+def test_a_profile_without_the_plugin_gets_the_full_toolset(nako):
+    nako["bundles"] = {"/root-home": ["terminal", "read_file"], "/profiles/other": []}
     plugin = load_plugin()
-    assert plugin._fallback_toolsets("/profiles/other") == ["hermes-cli"]
+    assert plugin._fallback_toolsets("/profiles/other") == ["nako-cli"]
     # The home override is put back afterwards.
-    assert hermes["home"] == "/root-home"
+    assert nako["home"] == "/root-home"
 
 
-def test_a_profile_with_the_plugin_keeps_hermes_own_toolset(hermes):
-    hermes["bundles"] = {"/root-home": ["terminal", "read_file"]}
+def test_a_profile_with_the_plugin_keeps_nako_own_toolset(nako):
+    nako["bundles"] = {"/root-home": ["terminal", "read_file"]}
     assert load_plugin()._fallback_toolsets("/root-home") is None
 
 
-def test_a_profile_that_picks_its_own_portal_tools_is_left_alone(hermes):
-    hermes["configs"] = {"/profiles/other": {"platform_toolsets": {"portal": ["web"]}}}
-    hermes["bundles"] = {"/profiles/other": []}
+def test_a_profile_that_picks_its_own_portal_tools_is_left_alone(nako):
+    nako["configs"] = {"/profiles/other": {"platform_toolsets": {"portal": ["web"]}}}
+    nako["bundles"] = {"/profiles/other": []}
     assert load_plugin()._fallback_toolsets("/profiles/other") is None

@@ -1,15 +1,15 @@
-"""The portal as a Hermes messaging platform, like Discord or Slack.
+"""The portal as a Nako messaging platform, like Discord or Slack.
 
 Every portal chat is a gateway thread (`portal:<chat id>`). Prompts go in as
 gateway messages, replies come back through the adapter's sends and edits, and
-transcripts are read from Hermes's own session store. The hub and the
+transcripts are read from Nako's own session store. The hub and the
 web server run in their own process (`dashboard/serve.py`), so the site stays up
 while the gateway restarts; the `backend` is the gateway's adapter on the other
-end of the link (`link.py`), the only part that touches Hermes, so tests use a fake.
+end of the link (`link.py`), the only part that touches Nako, so tests use a fake.
 
 backend:
   sessions() -> [{id, title, preview, started_at, message_count, pinned, chat_id}]
-  thread(session) -> {title, messages}      transcript in Hermes's display projection
+  thread(session) -> {title, messages}      transcript in Nako's display projection
   chat_of(session) / session_of(chat) -> id or None
   title_of(session) -> str or None          any session's title (the thread a message came from)
   new_thread(chat, title) -> session id     (async)
@@ -25,7 +25,7 @@ backend:
   sign_off(reply) -> str or None            a short line Nako says once a turn's reply is in
   sign_off_models() -> [{provider, label, models}]   what the sign-off can run on
   sign_off_model() -> {provider, model}     / set_sign_off_model(provider, model)
-  profiles() -> {profile, profiles}         the Hermes profile shown, and the ones served
+  profiles() -> {profile, profiles}         the Nako profile shown, and the ones served
   use_profile(name) -> profiles()           show another profile's chats (ValueError if not served)
   models() / model() / set_model(provider, model)   the shown profile's own model (ValueError if refused)
   usage() -> [{provider, label, accounts: [{label, windows: [{label, used_percent, resets_at}], note, resets?}]}] or None
@@ -49,7 +49,7 @@ import uuid
 
 from .media import MEDIA
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 
 # Kinds of row a person wrote or should read; everything else is host traffic.
 PUBLISHED_KINDS = {None, "steer", "failed_turn"}
@@ -69,25 +69,25 @@ INBOX = "inbox"
 # A second thread like it, for code-review status posts (`portal:reviews`).
 REVIEWS = "reviews"
 CHANNELS = {INBOX, REVIEWS}
-# Hermes labels every cron post it mirrors into a chat with this.
+# Nako labels every cron post it mirrors into a chat with this.
 CRON_DELIVERY = re.compile(r"^\[Cron delivery: ([^\]\n]+)\]?\n?")
 # A message sent while a turn runs is steered into it with a note for the model saying where it
-# came from; Hermes keeps that note in the saved text, but the user never typed it. Several messages
+# came from; Nako keeps that note in the saved text, but the user never typed it. Several messages
 # sent during one turn arrive joined, each with its own note at the start of a line.
 STEER_ORIGIN = re.compile(r"^Gateway message origin \([^)\n]*\):\n\{[^\n]*\}\n(?:Do not guess[^\n]*\n)?\n*", re.MULTILINE)
-# When Hermes compacts a chat mid-turn it restates the unfinished request after the summary, under
+# When Nako compacts a chat mid-turn it restates the unfinished request after the summary, under
 # this header, so the model carries on. The person sent that message once, earlier in the turn.
 RESTATED = re.compile(r"^\[STILL IN PROGRESS\b[^\]]*\]\s*")
 # A message another thread sent in (`nako-spawn --to`, or the brief of a thread one started). The
 # model reads this line, so it knows the text came from another thread and isn't the person's own
 # instruction; the app draws the message as that thread's, not the person's.
 FROM_THREAD = re.compile(r'^\[From another thread, not typed by the user: "([^"\n]*)" \(session ([\w.-]{1,120})\)\]\n+')
-# Hermes cuts a chat's preview short, often inside that line, so a cut-off line goes too.
+# Nako cuts a chat's preview short, often inside that line, so a cut-off line goes too.
 FROM_THREAD_PREVIEW = re.compile(r"^\[From another thread, not typed by the user: [^\]]*(?:\]\s*|$)")
 SESSION_ID = re.compile(r"^[\w.-]{1,120}$")
 # Prompts and replies in one page of a transcript; tool rows between them come along.
 PAGE_MESSAGES = 30
-# What the app draws from a transcript row. Hermes's rows also carry reasoning signatures, full
+# What the app draws from a transcript row. Nako's rows also carry reasoning signatures, full
 # tool arguments and display metadata, which made a page of a long chat ~170 KB instead of ~10 KB.
 SHOWN_FIELDS = ("role", "text", "row_id", "timestamp", "reasoning", "label", "post", "ended", "steered", "sender", "name", "context", "tool_call_id")
 # Nako's own one-liner for the end of a reply: the model writes it in the reply, the app shows it
@@ -127,7 +127,7 @@ class Hub:
         self.progress = {}
         # Whether a gateway is there to run turns. The standalone server's link keeps this.
         self.connected = True
-        self.hermes_build = None
+        self.nako_build = None
         # Whether a finished turn gets Nako's sign-off line (Settings; the server keeps it).
         self.sign_off_on = True
         # Callables that see every frame this hub sends its app, chat events included; a machine
@@ -356,7 +356,7 @@ class Hub:
         if (session in self.inboxes) if self.inboxes is not None else (await asyncio.to_thread(self.backend.chat_of, session)) in CHANNELS:
             messages = _mark_posts(messages)
         messages = _mark_turn_ends(_without_quiet_replies(messages))
-        # Hermes names a chat after its first exchange; a list fetched before that still says untitled.
+        # Nako names a chat after its first exchange; a list fetched before that still says untitled.
         renamed = session in self.titles and self.titles[session] != title
         self.titles[session] = title
         if renamed:
@@ -549,7 +549,7 @@ class Hub:
     async def sign_off_models(self):
         return await self._cached_models("sign_off_models", self.backend.sign_off_models)
 
-    # MCP servers: what `hermes mcp` keeps, read and changed from Settings.
+    # MCP servers: what `nako mcp` keeps, read and changed from Settings.
 
     async def mcp_servers(self):
         return await asyncio.to_thread(self.backend.mcp_servers)
@@ -865,8 +865,8 @@ def _without_steer_origin(message):
 
 
 def _without_restated(messages):
-    """Drop Hermes's mid-turn restatement of a request after a compaction: the person's own
-    message is already in the transcript above it. Without that original (an older Hermes that
+    """Drop Nako's mid-turn restatement of a request after a compaction: the person's own
+    message is already in the transcript above it. Without that original (an older Nako that
     doesn't hand back compacted rows), show the message as they sent it, without the header."""
     out = []
     for message in messages:
@@ -883,7 +883,7 @@ def _without_restated(messages):
 
 def _mark_turn_ends(messages):
     """Mark each reply that ended its turn: no tool call or other message of hers follows it before
-    the next user row. The app keeps only these in a quiet chat, but it never sees the rows Hermes
+    the next user row. The app keeps only these in a quiet chat, but it never sees the rows Nako
     adds for itself (a background job's completion notice), so without the mark a reply followed by
     such a notice and her answer to it reads as a message along the way and disappears."""
     out, clear = [], True

@@ -1,9 +1,9 @@
-"""An Anthropic API credential Hermes holds for its own ``anthropic`` provider never reaches Claude Code.
+"""An Anthropic API credential Nako holds for its own ``anthropic`` provider never reaches Claude Code.
 
-Hermes loads ``~/.hermes/.env`` into its process, so ``ANTHROPIC_API_KEY`` set for the ``anthropic``
+Nako loads ``~/.nako/.env`` into its process, so ``ANTHROPIC_API_KEY`` set for the ``anthropic``
 provider is inherited by this plugin too. Claude Code would sign in with that key and bill API usage
 instead of the subscription; the turn path refused it instead, so picking a subscription model failed
-(and Hermes fell back to another provider) whenever the same Hermes also used the API-key provider.
+(and Nako fell back to another provider) whenever the same Nako also used the API-key provider.
 
 Each test reads the environment the fake CLI actually received.
 """
@@ -22,7 +22,7 @@ CREDENTIALS = {
 
 
 def _inherited_turn_env(profile, tmp_path, monkeypatch):
-    """A turn as the gateway runs it: no explicit env, so the child inherits Hermes' own process env."""
+    """A turn as the gateway runs it: no explicit env, so the child inherits Nako' own process env."""
     for key, value in CREDENTIALS.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("ENV_CAPTURE", str(tmp_path / "env.jsonl"))

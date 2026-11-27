@@ -1,4 +1,4 @@
-"""The installed profile must opt in to Hermes's streaming dispatch."""
+"""The installed profile must opt in to Nako's streaming dispatch."""
 from types import SimpleNamespace
 
 

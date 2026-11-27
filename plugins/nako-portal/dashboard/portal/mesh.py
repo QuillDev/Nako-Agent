@@ -1,4 +1,4 @@
-"""Other machines' Hermes, reached through this portal.
+"""Other machines' Nako, reached through this portal.
 
 One portal server is the hub. Every other machine (a node) runs the portal too, with its server
 dialing the hub's mesh port over one WebSocket and a per-machine token. The hub can then list
@@ -6,11 +6,11 @@ a node's chats, open them, start one, send into one, stop one and answer its que
 node passes everything its own hub would show a browser (live replies, tool calls, status) back
 up, so the hub's app shows the node's chats like its own, under the machine's name.
 
-Node chats get ids `mesh.<machine>.<session>` on the hub. Nothing here imports Hermes: the hub
+Node chats get ids `mesh.<machine>.<session>` on the hub. Nothing here imports Nako: the hub
 side only knows the node's hub methods, the node side only its own hub.
 
 The node also mirrors the hub's skills into a folder of its own (the hub owns them; the node's
-copies are read-only and replaced on every change), which its Hermes reads as an extra skills dir.
+copies are read-only and replaced on every change), which its Nako reads as an extra skills dir.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from .link import HEARTBEAT, MAX_FRAME, Peer, decode_files, encode_files
 from .media import media_paths, shown_files
 from .mesh_setup import powershell_script, shell_script
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 
 MESH_PATH = "/mesh"
 PREFIX = "mesh."
@@ -67,8 +67,8 @@ NODE_CALLS = (
     "set_session_model",
     "command",
 )
-# What the hub may ask a machine's portal server to do to that machine's Hermes (`machine_ops`).
-MACHINE_OPS = ("restart_gateway", "update_hermes", "job")
+# What the hub may ask a machine's portal server to do to that machine's Nako (`machine_ops`).
+MACHINE_OPS = ("restart_gateway", "update_nako", "job")
 # How long a new machine's one-line setup works.
 SETUP_TTL = 24 * 3600
 SETUP_PATH = MESH_PATH + "/setup/{code}"
@@ -182,15 +182,15 @@ def _joined(data, name):
         _save_nodes(data, nodes)
 
 
-def setup_page(*, name, address, token, code, plugin, agent="hermes"):
-    """What a stock Hermes on the new machine reads and follows to join."""
+def setup_page(*, name, address, token, code, plugin, agent="nako"):
+    """What a stock Nako on the new machine reads and follows to join."""
     source = (plugin or {}).get("source")
     ref = (plugin or {}).get("ref")
     install = f"{agent} plugins install {source}" + (f" --ref {ref}" if ref else "") + " --enable --yes-deps --force"
     status = f"curl -fsSL {address}{SETUP_PATH.format(code=code)}/status"
     return f"""# Join the Nako mesh as "{name}"
 
-The user wants this machine to join their Nako mesh, so their main Hermes (the hub at {address}) can hand it tasks.
+The user wants this machine to join their Nako mesh, so their main Nako (the hub at {address}) can hand it tasks.
 Do every step yourself, in order, with your terminal. If a step fails, stop and tell the user which one and what it printed.
 Never repeat the token below to the user or write it anywhere except through these commands.
 On Windows, type curl.exe wherever these steps say curl (PowerShell's curl is something else), and ~/.{agent} is %USERPROFILE%\\.{agent}.
@@ -199,7 +199,7 @@ On Windows, type curl.exe wherever these steps say curl (PowerShell's curl is so
 
    {install}
 
-2. Join the mesh. This saves the token in this Hermes's .env, adds the hub's synced skills folder, and names the machine:
+2. Join the mesh. This saves the token in this Nako's .env, adds the hub's synced skills folder, and names the machine:
 
    {agent} mesh join {address} {token} --name {name}
 
@@ -439,9 +439,9 @@ class Mesh:
         self.skills_dir = Path(skills_dir) if skills_dir else None
         self.skills_exclude = list(skills_exclude or ())
         self.store = store
-        # The hub's own Hermes, for its version in the machine list (`machine_ops.MachineOps`).
+        # The hub's own Nako, for its version in the machine list (`machine_ops.MachineOps`).
         self.ops = ops
-        self.agent = ops.agent if ops is not None else "hermes"
+        self.agent = ops.agent if ops is not None else "nako"
         self.clock = clock
         self.peers = {}
         self.info = {}
@@ -520,7 +520,7 @@ class Mesh:
         return web.Response(text=text, content_type="text/plain", headers={"Cache-Control": "no-store"})
 
     async def setup(self, request):
-        """GET /mesh/setup/{code}: the steps a new machine's Hermes follows (plain text)."""
+        """GET /mesh/setup/{code}: the steps a new machine's Nako follows (plain text)."""
         name, setup = setup_for(self.data, request.match_info["code"], self.clock())
         if name is None:
             return web.Response(status=404, text="This setup link expired or was never made. Add the machine again in Settings.\n")
@@ -566,8 +566,8 @@ class Mesh:
                     "connected_at": info.get("connected_at") if online else None,
                     "last_seen": self.clock() if online else last,
                     "working": sum(1 for s, v in self.status.items() if (parse(s) or ("",))[0] == name and v.get("status") == "working"),
-                    # Its Hermes: {version, date, channel, commit, line} from `hermes --version` there.
-                    "hermes": info.get("hermes"),
+                    # Its Nako: {version, date, channel, commit, line} from `nako --version` there.
+                    "nako": info.get("nako"),
                 }
             )
         return rows
@@ -583,11 +583,11 @@ class Mesh:
             "hostname": socket.gethostname(),
             "last_seen": self.clock(),
             "working": sum(1 for v in self.hub.status.values() if v == "working"),
-            "hermes": self.ops.info if self.ops is not None else None,
+            "nako": self.ops.info if self.ops is not None else None,
         }
 
     async def machine_op(self, machine, op, *args):
-        """Restart a machine's gateway, update its Hermes, or read how that's going. The machine's
+        """Restart a machine's gateway, update its Nako, or read how that's going. The machine's
         portal server does it, so this works while the machine's gateway is down."""
         if op not in MACHINE_OPS:
             raise ValueError(f"no such machine op: {op}")
@@ -724,7 +724,7 @@ class Mesh:
             payload = {k: v for k, v in frame.items() if k != "session"}
             await self.hub._publish(session, payload)
         elif kind == "node.info" and machine in self.info:
-            self.info[machine]["hermes"] = frame.get("hermes") if isinstance(frame.get("hermes"), dict) else None
+            self.info[machine]["nako"] = frame.get("nako") if isinstance(frame.get("nako"), dict) else None
             await self.hub.broadcast({"kind": "machines.changed"})
         # hub.connected / hub.disconnected: the node's own gateway; kept in its info instead.
         if kind in {"hub.connected", "hub.disconnected"} and machine in self.info:
@@ -742,7 +742,7 @@ class Mesh:
                 "hostname": str(info.get("hostname") or "")[:80] or None,
                 "gateway": bool(info.get("gateway")),
                 "connected_at": self.clock(),
-                "hermes": info.get("hermes") if isinstance(info.get("hermes"), dict) else None,
+                "nako": info.get("nako") if isinstance(info.get("nako"), dict) else None,
             }
             for frame in info.get("statuses") or []:
                 await self._frame(machine, frame)
@@ -924,7 +924,7 @@ class Node:
         self.token = token
         self.hub = hub
         self.skills_into = Path(skills_into) if skills_into else None
-        # This machine's Hermes (`machine_ops.MachineOps`): its version, restarts and updates.
+        # This machine's Nako (`machine_ops.MachineOps`): its version, restarts and updates.
         self.ops = ops
         self.peer = None
         self.uploaded = {}
@@ -933,7 +933,7 @@ class Node:
         self.connected_event = asyncio.Event()
         hub.taps.add(self._tap)
         if ops is not None:
-            ops.on_info = lambda info: self._tap({"kind": "node.info", "hermes": info})
+            ops.on_info = lambda info: self._tap({"kind": "node.info", "nako": info})
 
     def _tap(self, frame):
         peer = self.peer
@@ -1051,13 +1051,13 @@ class Node:
             async def bounce():
                 return await ops.start("restart")
 
-            async def update_hermes(channel=None):
+            async def update_nako(channel=None):
                 return await ops.start("update", channel)
 
             async def job():
                 return ops.job()
 
-            methods.update({MACHINE_OPS[0]: bounce, "update_hermes": update_hermes, "job": job})
+            methods.update({MACHINE_OPS[0]: bounce, "update_nako": update_nako, "job": job})
         return methods
 
     def _hello(self):
@@ -1066,7 +1066,7 @@ class Node:
             "hostname": socket.gethostname(),
             "gateway": bool(self.hub.connected),
             "statuses": self.hub.status_frames(),
-            "hermes": self.ops.info if self.ops is not None else None,
+            "nako": self.ops.info if self.ops is not None else None,
         }
 
     async def run(self, http):

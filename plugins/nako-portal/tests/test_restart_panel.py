@@ -4,7 +4,7 @@ from types import SimpleNamespace
 async def test_owner_can_pause_one_thread_and_resume_it_only_after_gateway_replacement(world):
     a = {'title': 'Release', 'session': 'one', 'turn': 'alpha'}
     b = {'title': 'Invoices', 'session': 'two', 'turn': 'beta'}
-    live = world.hermes.restart_snapshot
+    live = world.nako.restart_snapshot
     live['work'] = [a, b]
     jobs = []
     async def start(kind):
@@ -25,20 +25,20 @@ async def test_owner_can_pause_one_thread_and_resume_it_only_after_gateway_repla
     await world.portal.restart_panel.tick()
     assert jobs == ['restart']
     await world.portal.restart_panel.tick()
-    assert ('resumed', 'one') not in world.hermes.received
+    assert ('resumed', 'one') not in world.nako.received
     live['instance'] = 'second'
     await world.portal.restart_panel.tick()
     await world.portal.restart_panel.tick()
     result = await (await world.http.get(world.url(endpoint))).json()
     assert result['phase'] == 'done'
     assert result['threads']['alpha']['status'] == 'Resumed'
-    assert [r for r in world.hermes.received if r[0] == 'resumed'] == [('resumed', 'one')]
+    assert [r for r in world.nako.received if r[0] == 'resumed'] == [('resumed', 'one')]
 
 
 async def test_restart_panel_rejects_invalid_actions_and_busy_jobs(world):
     a = {'title': 'Release', 'session': 'one', 'turn': 'alpha'}
     b = {'title': 'Invoices', 'session': 'two', 'turn': 'beta'}
-    world.hermes.restart_snapshot['work'] = [a, b]
+    world.nako.restart_snapshot['work'] = [a, b]
     busy = {'running': True}
     world.portal.ops = SimpleNamespace(start=lambda kind: None, running=lambda: busy['running'], gateway_changed=lambda _: None)
     await world.sign_up()
@@ -64,7 +64,7 @@ async def test_restart_panel_times_out_if_gateway_never_replaces(world, monkeypa
 
     now = [1000.0]
     monkeypatch.setattr(time_mod, 'time', lambda: now[0])
-    world.hermes.restart_snapshot['work'] = []
+    world.nako.restart_snapshot['work'] = []
     jobs = []
 
     async def start(kind):
@@ -92,7 +92,7 @@ async def test_restart_panel_times_out_if_gateway_never_replaces(world, monkeypa
 
 
 async def test_restart_panel_polls_queued_resumes_until_done(world):
-    world.hermes.restart_snapshot['work'] = [{'title': 'Release', 'session': 'one', 'turn': 'alpha'}]
+    world.nako.restart_snapshot['work'] = [{'title': 'Release', 'session': 'one', 'turn': 'alpha'}]
     jobs = []
     checks = []
 
@@ -101,14 +101,14 @@ async def test_restart_panel_polls_queued_resumes_until_done(world):
 
     async def restart_thread(row, resume):
         if resume is False:
-            world.hermes.restart_snapshot['work'] = []
+            world.nako.restart_snapshot['work'] = []
             return 'Pause requested'
         if resume is True:
             return 'Resume queued'
         checks.append(row['turn'])
         return 'Resume queued' if len(checks) == 1 else 'Resumed'
 
-    world.hermes.restart_thread = restart_thread
+    world.nako.restart_thread = restart_thread
     await world.gateway.stop(world.hub)
     await world.gateway.start(world.hub)
     world.portal.ops = SimpleNamespace(start=start, running=lambda: False, gateway_changed=lambda _: None)
@@ -118,7 +118,7 @@ async def test_restart_panel_polls_queued_resumes_until_done(world):
     await world.portal.restart_panel.tick()
     assert jobs == ['restart']
 
-    world.hermes.restart_snapshot['instance'] = 'second'
+    world.nako.restart_snapshot['instance'] = 'second'
     await world.portal.restart_panel.tick()
     state = await (await world.http.get(world.url('/api/gateway/restart'))).json()
     assert state['phase'] == 'resuming'
@@ -136,7 +136,7 @@ async def test_restart_panel_polls_queued_resumes_until_done(world):
 
 
 async def test_restart_panel_waits_when_gateway_is_offline(world):
-    world.hermes.restart_snapshot['work'] = [{'title': 'Release', 'session': 'one', 'turn': 'alpha'}]
+    world.nako.restart_snapshot['work'] = [{'title': 'Release', 'session': 'one', 'turn': 'alpha'}]
     jobs = []
 
     async def start(kind):

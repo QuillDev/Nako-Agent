@@ -127,7 +127,7 @@ TOOLS = [
 def _wrap(fn):
     def handler(args, **kwargs):
         try:
-            return json.dumps(fn(args or {}, kwargs.get("session_id") or os.environ.get("HERMES_SESSION_ID") or None))
+            return json.dumps(fn(args or {}, kwargs.get("session_id") or os.environ.get("NAKO_SESSION_ID") or None))
         except Exception as error:  # noqa: BLE001 - Tool failures are returned to the agent as JSON.
             return json.dumps({"error": str(error)})
 

@@ -4,7 +4,7 @@ Claude Code's `get_usage` control request omits the `cedar_ember` grant block an
 interactive-only, so this module reads the login directory's OAuth credentials to query
 `/api/oauth/usage?cedar_ember=1&skip_spend=1` and claim a grant through
 `POST /api/organizations/{org_uuid}/reset_rate_limits`. Missing or unreadable credentials degrade
-to `None` without affecting usage windows or ever touching Hermes core's credential-adoption hooks.
+to `None` without affecting usage windows or ever touching Nako core's credential-adoption hooks.
 """
 from datetime import datetime, timezone
 import json

@@ -124,7 +124,7 @@ class LocalAPI:
 
         async def update(request):
             body = await request.json() if request.can_read_body else {}
-            return await machine_op(request, "update_hermes", body.get("channel") or None)
+            return await machine_op(request, "update_nako", body.get("channel") or None)
 
         async def job(request):
             return await machine_op(request, "job")

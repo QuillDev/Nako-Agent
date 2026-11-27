@@ -1,11 +1,11 @@
 [project]
-name = "hermes-plugin-claude-subscription-directsdk"
+name = "nako-plugin-claude-subscription-directsdk"
 version = "0.5.0"
-description = "Hermes Agent model-provider plugin: Claude Pro/Max subscription through the official Claude Code CLI (experimental)"
+description = "Nako Agent model-provider plugin: Claude Pro/Max subscription through the official Claude Code CLI (experimental)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-# No Python dependencies beyond Hermes core: the transport drives the `claude` executable directly.
+# No Python dependencies beyond Nako core: the transport drives the `claude` executable directly.
 dependencies = []
 
 [tool.pytest.ini_options]

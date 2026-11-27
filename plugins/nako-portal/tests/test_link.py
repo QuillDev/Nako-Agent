@@ -11,7 +11,7 @@ from portal.link import GatewayClient
 
 
 async def test_the_site_stays_up_while_the_gateway_restarts(world):
-    sid = world.hermes.add_session("20261025_141414_aaaaaa", "plans", messages=[("user", "plan the week")])
+    sid = world.nako.add_session("20261025_141414_aaaaaa", "plans", messages=[("user", "plan the week")])
     await world.sign_up()
     ws = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
 
@@ -24,19 +24,19 @@ async def test_the_site_stays_up_while_the_gateway_restarts(world):
     assert (listed.status, (await listed.json())["error"]) == (503, "Nako is offline right now")
     sent = await world.http.post(world.url(f"/api/sessions/{sid}/messages"), data={"text": "hello?"}, headers={"Origin": ORIGIN})
     assert sent.status == 503
-    assert world.hermes.received == []
+    assert world.nako.received == []
 
     await world.gateway.start(world.hub)
     await next_message(ws, lambda m: m.get("kind") == "hub.connected")
     assert [row["id"] for row in await (await world.http.get(world.url("/api/sessions"))).json()] == [sid]
     await world.http.post(world.url(f"/api/sessions/{sid}/messages"), data={"text": "back"}, headers={"Origin": ORIGIN})
-    assert world.hermes.received[-1][:2] == (f"chat-{sid}", "back")
+    assert world.nako.received[-1][:2] == (f"chat-{sid}", "back")
     await ws.close()
 
 
 async def test_a_turn_and_its_question_end_when_the_gateway_goes_away(world):
-    sid = world.hermes.add_session("20261025_151515_bbbbbb", "cleanup", messages=[("user", "tidy the build dir")])
-    world.hermes.ask_approval = True
+    sid = world.nako.add_session("20261025_151515_bbbbbb", "cleanup", messages=[("user", "tidy the build dir")])
+    world.nako.ask_approval = True
     await world.sign_up()
     await world.http.post(world.url(f"/api/sessions/{sid}/messages"), data={"text": "go"}, headers={"Origin": ORIGIN})
     await until(lambda: world.hub.requests)
@@ -135,8 +135,8 @@ async def test_the_standalone_server_serves_and_takes_a_gateway(tmp_path):
             link = data / "setup-link"
             await wait_for(lambda m: m is not None and m["connected"] is False and link.exists() and link.read_text(encoding="utf-8-sig").startswith(f"{origin}/#setup="))
 
-            hermes = FakeGateway()
-            client = GatewayClient(f"http://127.0.0.1:{port + 1}/gateway", LOCAL_TOKEN, SERVER_CODE, Backend(hermes))
+            nako = FakeGateway()
+            client = GatewayClient(f"http://127.0.0.1:{port + 1}/gateway", LOCAL_TOKEN, SERVER_CODE, Backend(nako))
             task = asyncio.get_running_loop().create_task(client.run(http))
             await wait_for(lambda m: m is not None and m["connected"] is True)
             task.cancel()

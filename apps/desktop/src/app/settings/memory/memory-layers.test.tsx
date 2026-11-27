@@ -1,12 +1,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type * as HermesApi from '@/hermes'
-import { getMemoryProviderConfig, getMemoryStatus, saveMemoryProviderConfig } from '@/hermes'
-import type { MemoryProviderConfig, MemoryProviderStatus, MemoryStatusResponse } from '@/types/hermes'
+import type * as NakoApi from '@/nako'
+import { getMemoryProviderConfig, getMemoryStatus, saveMemoryProviderConfig } from '@/nako'
+import type { MemoryProviderConfig, MemoryProviderStatus, MemoryStatusResponse } from '@/types/nako'
 
-vi.mock('@/hermes', async importOriginal => ({
-  ...(await importOriginal<typeof HermesApi>()),
+vi.mock('@/nako', async importOriginal => ({
+  ...(await importOriginal<typeof NakoApi>()),
   getCuratorStatus: vi.fn(() => new Promise(() => {})),
   getMemoryProviderConfig: vi.fn(),
   getMemoryStatus: vi.fn(),

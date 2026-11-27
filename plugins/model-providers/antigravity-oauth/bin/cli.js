@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// npx hermes-antigravity-oauth [install|login|status|uninstall]
-// Thin wrapper over the official CLIs: `hermes plugins install`, `hermes auth`, and Google's agy.
+// npx nako-antigravity-oauth [install|login|status|uninstall]
+// Thin wrapper over the official CLIs: `nako plugins install`, `nako auth`, and Google's agy.
 // No token ever passes through this script.
 "use strict";
 
@@ -9,13 +9,13 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const REPO = "https://github.com/neerazz/hermes-antigravity-oauth";
+const REPO = "https://github.com/neerazz/nako-antigravity-oauth";
 const PLUGIN = "antigravity-oauth";
 // Google's official agy installer. Downloaded to a temp file and run from disk, never piped.
 const AGY_INSTALLER = process.platform === "win32"
   ? "https://antigravity.google/cli/install.ps1"
   : "https://antigravity.google/cli/install.sh";
-const HERMES_DOCS = "https://hermes-agent.nousresearch.com/docs";
+const NAKO_DOCS = "https://portal.nakode.moe/docs";
 
 const [, , cmd = "install", ...rest] = process.argv;
 const flags = new Set(rest);
@@ -38,9 +38,9 @@ function die(msg, code = 1) {
   process.exit(code);
 }
 
-function requireHermes() {
-  if (!which("hermes")) {
-    die(`Hermes Agent not found on PATH. Install it first: ${HERMES_DOCS}`);
+function requireNako() {
+  if (!which("nako")) {
+    die(`Nako Agent not found on PATH. Install it first: ${NAKO_DOCS}`);
   }
 }
 
@@ -64,47 +64,47 @@ async function ensureAgy() {
 }
 
 async function install() {
-  requireHermes();
+  requireNako();
   await ensureAgy();
   const ref = rest.find((a) => /^[0-9a-f]{40}$/.test(a));
   const args = ["plugins", "install", REPO, "--enable"];
   if (ref) args.push("--ref", ref);
   if (flags.has("--force")) args.push("--force");
-  if (run("hermes", args) !== 0) die("`hermes plugins install` failed (see output above).");
+  if (run("nako", args) !== 0) die("`nako plugins install` failed (see output above).");
   if (flags.has("--no-login")) {
-    console.log(`\nInstalled. Sign in later with: hermes auth add ${PLUGIN}`);
+    console.log(`\nInstalled. Sign in later with: nako auth add ${PLUGIN}`);
     return;
   }
   await login();
 }
 
 async function login() {
-  requireHermes();
+  requireNako();
   await ensureAgy();
-  const code = run("hermes", ["auth", "add", PLUGIN]);
+  const code = run("nako", ["auth", "add", PLUGIN]);
   if (code !== 0) die("Sign-in did not complete.", code);
   // No hardcoded model: agy's catalog depends on the account and changes over time.
-  console.log(`\n✓ Done. Pick an exact model ID with \`agy models\`, then run:\n  hermes --provider ${PLUGIN} -m '<exact-model-id>'`);
+  console.log(`\n✓ Done. Pick an exact model ID with \`agy models\`, then run:\n  nako --provider ${PLUGIN} -m '<exact-model-id>'`);
 }
 
 function status() {
-  requireHermes();
-  process.exit(run("hermes", ["auth", "status", PLUGIN]));
+  requireNako();
+  process.exit(run("nako", ["auth", "status", PLUGIN]));
 }
 
 function uninstall() {
-  requireHermes();
-  process.exit(run("hermes", ["plugins", "remove", PLUGIN]));
+  requireNako();
+  process.exit(run("nako", ["plugins", "remove", PLUGIN]));
 }
 
 function help() {
-  console.log(`hermes-antigravity-oauth — Google Antigravity sign-in for Hermes Agent
+  console.log(`nako-antigravity-oauth — Google Antigravity sign-in for Nako Agent
 
-Usage: npx hermes-antigravity-oauth [command] [flags]
+Usage: npx nako-antigravity-oauth [command] [flags]
 
 Commands:
-  install     Install + enable the Hermes plugin, then sign in (default)
-  login       Sign in only (runs \`hermes auth add ${PLUGIN}\`)
+  install     Install + enable the Nako plugin, then sign in (default)
+  login       Sign in only (runs \`nako auth add ${PLUGIN}\`)
   status      Show sign-in state
   uninstall   Remove the plugin (your agy session is left alone)
 

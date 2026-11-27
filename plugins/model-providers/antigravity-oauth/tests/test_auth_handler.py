@@ -1,4 +1,4 @@
-"""Auth-handler tests: `hermes auth add|status|logout antigravity-oauth` without touching the host.
+"""Auth-handler tests: `nako auth add|status|logout antigravity-oauth` without touching the host.
 
 agy is replaced by a fake executable script so the real Google session is never read or used.
 """
@@ -63,7 +63,7 @@ class AuthHandlerTests(unittest.TestCase):
         self._patch(self._fake_agy(SIGNED_OUT), keychain=True)
         status = auth.probe()
         self.assertFalse(status["logged_in"])
-        self.assertIn("hermes auth add antigravity-oauth", status["detail"])
+        self.assertIn("nako auth add antigravity-oauth", status["detail"])
         self.assertEqual(status["login_command"][1:3], ["-p", auth._LOGIN_PROMPT])
 
     def test_add_when_already_signed_in_does_not_launch_login(self):

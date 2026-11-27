@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 RECORD_SIZE = 4096
 
 

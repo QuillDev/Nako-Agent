@@ -52,6 +52,6 @@ class VoiceLevelProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('hermes-voice-level', VoiceLevelProcessor)
+registerProcessor('nako-voice-level', VoiceLevelProcessor)
 
 export {}

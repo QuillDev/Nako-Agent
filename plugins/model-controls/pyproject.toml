@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hermes-model-controls"
+name = "nako-model-controls"
 version = "0.1.0"
-description = "Shared model controls for Hermes clients"
+description = "Shared model controls for Nako clients"
 requires-python = ">=3.11"
 
 [project.optional-dependencies]

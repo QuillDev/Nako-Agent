@@ -41,7 +41,7 @@ def test_github_lookup_failure_never_becomes_a_first_release(tmp_path, failure):
 
 
 def run_version(tmp_path, local, npm_version, github_version, *, workflow_step=False):
-    (tmp_path / "package.json").write_text(json.dumps({"name": "hermes-antigravity-oauth", "version": local}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({"name": "nako-antigravity-oauth", "version": local}), encoding="utf-8")
     (tmp_path / "plugin.yaml").write_text(f"name: antigravity-oauth\nversion: {local}\n", encoding="utf-8")
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -64,7 +64,7 @@ def run_version(tmp_path, local, npm_version, github_version, *, workflow_step=F
         "NPM_VERSION": npm_version,
     }
     if github_version is not None:
-        env.update(GITHUB_PACKAGE_NAME="@neerazz/hermes-antigravity-oauth", GITHUB_VERSION=github_version)
+        env.update(GITHUB_PACKAGE_NAME="@neerazz/nako-antigravity-oauth", GITHUB_VERSION=github_version)
     node = shutil.which("node")
     assert node, "Node is required for release tests"
     command = [node, str(ROOT / "scripts/next-version.js")]
@@ -129,16 +129,16 @@ def test_release_stays_manual_main_only_and_ci_gated():
     assert steps["Publish to GitHub Packages"]["if"] == "inputs.registry == 'github'"
     assert job["permissions"]["packages"] == "write"
     assert steps["Publish to GitHub Packages"]["env"]["NODE_AUTH_TOKEN"] == "${{ github.token }}"
-    assert steps["Choose version"]["env"]["GITHUB_PACKAGE_NAME"] == "@${{ github.repository_owner }}/hermes-antigravity-oauth"
+    assert steps["Choose version"]["env"]["GITHUB_PACKAGE_NAME"] == "@${{ github.repository_owner }}/nako-antigravity-oauth"
     assert steps["Choose version"]["env"]["GITHUB_PACKAGES_TOKEN"] == "${{ github.token }}"
     assert "NODE_AUTH_TOKEN" not in steps["Choose version"]["env"], "Never send the GitHub token to npmjs.com"
     assert "//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}" in steps["Choose version"]["run"]
     assert "https://npm.pkg.github.com" in steps["Publish to GitHub Packages"]["run"]
     assert "npm exec" in steps["Verify GitHub package download"]["run"]
-    assert "hermes-antigravity-oauth --help" in steps["Verify GitHub package download"]["run"]
+    assert "nako-antigravity-oauth --help" in steps["Verify GitHub package download"]["run"]
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8-sig"))
-    assert package["name"] == "hermes-antigravity-oauth", "Do not rename the existing npm package"
-    assert package["repository"]["url"] == "git+https://github.com/neerazz/hermes-antigravity-oauth.git"
+    assert package["name"] == "nako-antigravity-oauth", "Do not rename the existing npm package"
+    assert package["repository"]["url"] == "git+https://github.com/neerazz/nako-antigravity-oauth.git"
 
 
 @pytest.mark.parametrize("bad_field", [None, "name", "repository", "gitHead", "description"])
@@ -146,10 +146,10 @@ def test_registry_verification_checks_identity_and_uses_a_clean_directory(tmp_pa
     workflow = YAML(typ="safe").load((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8-sig"))
     step = next(s for s in workflow["jobs"]["publish"]["steps"] if s.get("name") == "Verify GitHub package download")
     metadata = {
-        "name": "@neerazz/hermes-antigravity-oauth", "version": "0.1.5",
-        "repository": {"url": "git+https://github.com/neerazz/hermes-antigravity-oauth.git"},
+        "name": "@neerazz/nako-antigravity-oauth", "version": "0.1.5",
+        "repository": {"url": "git+https://github.com/neerazz/nako-antigravity-oauth.git"},
         "gitHead": "a" * 40, "description": "Registry verification fixture",
-        "dist": {"integrity": "sha512-test-fixture"}, "bin": {"hermes-antigravity-oauth": "bin/cli.js"},
+        "dist": {"integrity": "sha512-test-fixture"}, "bin": {"nako-antigravity-oauth": "bin/cli.js"},
     }
     if bad_field:
         metadata[bad_field] = {"url": "git+https://github.com/wrong/repo.git"} if bad_field == "repository" else ""
@@ -171,8 +171,8 @@ def test_registry_verification_checks_identity_and_uses_a_clean_directory(tmp_pa
     env = {
         "PATH": f"{bindir}:{Path(node).parent}:/usr/bin:/bin", "METADATA": str(fixture),
         "EXEC_CWD": str(tmp_path / "exec-cwd"), "RUNNER_TEMP": str(tmp_path),
-        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"), "GITHUB_REPOSITORY": "neerazz/hermes-antigravity-oauth",
-        "GITHUB_PACKAGE_NAME": "@neerazz/hermes-antigravity-oauth", "VERSION": "0.1.5", "GITHUB_SHA": "a" * 40,
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"), "GITHUB_REPOSITORY": "neerazz/nako-antigravity-oauth",
+        "GITHUB_PACKAGE_NAME": "@neerazz/nako-antigravity-oauth", "VERSION": "0.1.5", "GITHUB_SHA": "a" * 40,
     }
     result = subprocess.run(
         ["/bin/bash", "-e", "-c", step["run"]], cwd=tmp_path,
@@ -188,16 +188,16 @@ def test_registry_verification_checks_identity_and_uses_a_clean_directory(tmp_pa
 
 
 @pytest.mark.parametrize("command,expected", [("help", 0), ("--help", 0), ("-h", 0), ("unknown-command", 2)])
-def test_packaged_cli_help_is_safe_without_hermes_or_agy(tmp_path, command, expected):
+def test_packaged_cli_help_is_safe_without_nako_or_agy(tmp_path, command, expected):
     node = shutil.which("node")
     assert node
     result = subprocess.run(
         [node, str(ROOT / "bin/cli.js"), command],
-        env={"PATH": "", "HOME": str(tmp_path), "HERMES_HOME": str(tmp_path), "TMPDIR": str(tmp_path)},
+        env={"PATH": "", "HOME": str(tmp_path), "NAKO_HOME": str(tmp_path), "TMPDIR": str(tmp_path)},
         capture_output=True, text=True, timeout=10,
     )
     assert result.returncode == expected, result.stderr
-    assert "hermes-antigravity-oauth" in result.stdout
+    assert "nako-antigravity-oauth" in result.stdout
     assert "Usage:" in result.stdout
     assert not list(tmp_path.iterdir()), "Help must not install or authenticate anything"
 
@@ -205,7 +205,7 @@ def test_packaged_cli_help_is_safe_without_hermes_or_agy(tmp_path, command, expe
 def test_ci_preserves_isolated_module_execution_without_runtime_installation():
     workflow = YAML(typ="safe").load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8-sig"))
     step = next(s for s in workflow["jobs"]["checks"]["steps"] if s.get("name", "").startswith("Offline regression"))
-    assert step["env"]["HERMES_DISABLE_LAZY_INSTALLS"] == "1"
+    assert step["env"]["NAKO_DISABLE_LAZY_INSTALLS"] == "1"
     assert "for t in tests/test_*.py" in step["run"]
     assert 'python "$t"' in step["run"]
     assert "python -m pytest tests" not in step["run"], "Do not combine modules with process-global provider mocks"

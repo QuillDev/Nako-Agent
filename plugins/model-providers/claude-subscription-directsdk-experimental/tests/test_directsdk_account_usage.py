@@ -78,7 +78,7 @@ def test_limits_come_from_claude_code_get_usage(cli):
 
 
 def test_pool_usage_shows_each_account_without_exposing_login_directories(cli, tmp_path):
-    from hermes_cli.config import get_config_path
+    from nako_cli.config import get_config_path
     first, second = str(tmp_path / 'private-first'), str(tmp_path / 'private-second')
     get_config_path().write_text(json.dumps({'plugins': {'enabled': [], 'entries': {PROVIDER: {'settings': {
         'accounts': [{'label': 'first', 'config_dir': first}, {'label': 'second', 'config_dir': second}],
@@ -92,7 +92,7 @@ def test_pool_usage_shows_each_account_without_exposing_login_directories(cli, t
 
 def test_each_linked_login_reports_its_own_limits_for_side_by_side_clients(cli, tmp_path):
     import providers
-    from hermes_cli.config import get_config_path
+    from nako_cli.config import get_config_path
     first, second = str(tmp_path / 'private-first'), str(tmp_path / 'private-second')
     get_config_path().write_text(json.dumps({'plugins': {'enabled': [], 'entries': {PROVIDER: {'settings': {
         'accounts': [{'label': 'first', 'config_dir': first}, {'label': 'second', 'config_dir': second}]}}}}}),

@@ -23,16 +23,16 @@ function address(rendered: ReturnType<typeof render>) {
   return rendered.getByRole('textbox', { name: 'Address' }) as HTMLInputElement
 }
 
-const desktopWindow = window as unknown as { hermesDesktop?: Window['hermesDesktop'] }
+const desktopWindow = window as unknown as { nakoDesktop?: Window['nakoDesktop'] }
 
 function installBridge(writeClipboard: ReturnType<typeof vi.fn>) {
-  desktopWindow.hermesDesktop = { writeClipboard } as unknown as Window['hermesDesktop']
+  desktopWindow.nakoDesktop = { writeClipboard } as unknown as Window['nakoDesktop']
 }
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
-  delete desktopWindow.hermesDesktop
+  delete desktopWindow.nakoDesktop
 })
 
 describe('normalizePreviewAddress', () => {

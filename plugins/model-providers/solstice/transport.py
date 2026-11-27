@@ -26,7 +26,7 @@ import httpx
 
 from agent.gemini_native_adapter import GeminiAPIError, GeminiNativeClient
 from agent.reasoning_effort import bare_gemini_model_id
-from hermes_cli.version_info import hermes_user_agent
+from nako_cli.version_info import nako_user_agent
 
 from . import INFERENCE_BASE_URL, current_model_id
 
@@ -47,7 +47,7 @@ def interactions_url(base_url: Any) -> str:
 
 
 _WIRE_MISSING = ("Solstice sends its requests through the gemini provider plugin's Interactions wire, but {why}. "
-                 "Reinstall Hermes, or remove a gemini provider plugin that replaces the bundled one.")
+                 "Reinstall Nako, or remove a gemini provider plugin that replaces the bundled one.")
 
 
 # What this transport calls on the discovered wire. A gemini plugin copy from before these existed (an older
@@ -106,7 +106,7 @@ def single_request(request: dict[str, Any], cap: int) -> dict[str, Any]:
 class SolsticeClient(GeminiNativeClient):
     """One stateless Interactions request per call, on ``interactions:createPerUserQuota``."""
 
-    MISSING_KEY_ERROR = "Solstice needs a signed-in account. Run `hermes auth add solstice`."
+    MISSING_KEY_ERROR = "Solstice needs a signed-in account. Run `nako auth add solstice`."
 
     def __init__(self, *, base_url: Any = None, timeout: Any = None, **kwargs: Any) -> None:
         # No base means this endpoint, never the generic Gemini default (a different API surface).
@@ -173,7 +173,7 @@ class SolsticeClient(GeminiNativeClient):
         # Bearer, content type and User-Agent only: no API key, user-project or DPoP header, nor Google's client tag.
         extra = {k: v for k, v in self._default_headers.items() if k.lower() not in _DROPPED_DEFAULT_HEADERS}
         return {**extra, "Content-Type": "application/json", "Accept": "application/json", **self._auth_headers(),
-                "User-Agent": hermes_user_agent("hermes-agent")}
+                "User-Agent": nako_user_agent("nako-agent")}
 
     def _http_error(self, response: Any, body_text: Any = None) -> GeminiAPIError:
         # The Interactions mapper (snake_case error codes), without the API-key remedies (free tier,

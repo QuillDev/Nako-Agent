@@ -1,9 +1,9 @@
 """Secrets for the agent without the values entering the conversation.
 
 The person types a secret into whatever chat surface supports it (a plugin registers itself as
-the surface for its platform, see `api.py`), or stores one with `hermes secret set`. The agent
-only ever sees names: commands read values with `hermes secret get NAME` or
-`hermes secret run NAME -- <command>`, and any tool result that still contains a stored value
+the surface for its platform, see `api.py`), or stores one with `nako secret set`. The agent
+only ever sees names: commands read values with `nako secret get NAME` or
+`nako secret run NAME -- <command>`, and any tool result that still contains a stored value
 is masked before the model reads it. The other way, the agent stores a value it made (from a
 file or a command's output) and the surface shows it to the person.
 """
@@ -53,10 +53,10 @@ def _platform():
     try:
         from gateway.session_context import get_session_env
 
-        platform = get_session_env("HERMES_SESSION_PLATFORM", "")
+        platform = get_session_env("NAKO_SESSION_PLATFORM", "")
     except Exception:
         platform = ""
-    return platform or os.environ.get("HERMES_SESSION_PLATFORM", "")
+    return platform or os.environ.get("NAKO_SESSION_PLATFORM", "")
 
 
 def _interrupted():
@@ -161,7 +161,7 @@ TOOLS = [
 def _wrap(fn):
     def handler(args, **kwargs):
         try:
-            return json.dumps(fn(args or {}, kwargs.get("session_id") or os.environ.get("HERMES_SESSION_ID") or None))
+            return json.dumps(fn(args or {}, kwargs.get("session_id") or os.environ.get("NAKO_SESSION_ID") or None))
         except Exception as error:
             return json.dumps({"error": str(error)})
 
@@ -210,7 +210,7 @@ def _mask_terminal_output(output=None, **_):
     return masked if isinstance(output, str) and masked != output else None
 
 
-# `hermes secret ...`
+# `nako secret ...`
 
 
 def _setup_cli(parser):

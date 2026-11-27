@@ -31,8 +31,8 @@ from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-_THREAD_NAME = "hermes-periodic-scheduler"
-_CALLBACK_THREAD_PREFIX = "hermes-periodic-callback"
+_THREAD_NAME = "nako-periodic-scheduler"
+_CALLBACK_THREAD_PREFIX = "nako-periodic-callback"
 
 
 class ScheduledHandle:

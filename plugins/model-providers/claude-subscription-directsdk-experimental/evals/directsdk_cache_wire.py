@@ -123,7 +123,7 @@ def run(binary, model):
         peer.wires, peer.tools = [], True
         worker = threading.Thread(target=peer.serve_forever, daemon=True)
         worker.start()
-        env = {"PATH": os.defpath, "HOME": tmp, "HERMES_HOME": tmp,
+        env = {"PATH": os.defpath, "HOME": tmp, "NAKO_HOME": tmp,
                "CLAUDE_CONFIG_DIR": str(Path(tmp) / "config"), "XDG_CONFIG_HOME": tmp,
                "ANTHROPIC_API_KEY": "sk-ant-public-offline-fixture",
                "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{peer.server_port}",
@@ -189,7 +189,7 @@ def run(binary, model):
                 else:
                     followups.append(f"Public followup {round_number}")
                     history.append({"role": "user", "content": followups[-1]})
-            # A Hermes auxiliary one-shot (a summary: system plus one user turn, no tools) keeps native's system
+            # A Nako auxiliary one-shot (a summary: system plus one user turn, no tools) keeps native's system
             # marks but carries no message mark: nothing replays its turn, so a mark would buy a never-read write.
             peer.tools = False
             single_turn = [{"role": "system", "content": "PUBLIC SUMMARY POLICY\n" * 50},
@@ -199,7 +199,7 @@ def run(binary, model):
             assert [block for msg in peer.wires[-1]["messages"] if isinstance(msg["content"], list)
                     for block in msg["content"] if "cache_control" in block], "tool-free chat turn lost its message mark"
             start = len(peer.wires)
-            client.create(model=model, messages=single_turn, hermes_auxiliary=True)
+            client.create(model=model, messages=single_turn, nako_auxiliary=True)
             assert len(peer.wires) == start + 1, "unexpected extra inference request"
             one_shot = peer.wires[-1]
             one_shot_marks = [block for msg in one_shot["messages"] if isinstance(msg["content"], list)

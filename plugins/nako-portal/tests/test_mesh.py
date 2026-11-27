@@ -34,7 +34,7 @@ class Machine:
     """Another machine's portal: its own hub and fake gateway, dialing the hub's mesh."""
 
     def __init__(self, tmp_path, http):
-        self.hermes = FakeGateway()
+        self.nako = FakeGateway()
         self.link = GatewayLink(SERVER_CODE)
         self.hub = Hub(self.link)
         self.link.serve(self.hub)
@@ -47,7 +47,7 @@ class Machine:
     async def start(self, url, token, name=MACHINE, skills_into=None, ops=None):
         self.local = TestServer(self.portal.local_app(LOCAL_TOKEN, self.link))
         await self.local.start_server()
-        self.gateway = Gateway(self.hermes, self.local, self.http)
+        self.gateway = Gateway(self.nako, self.local, self.http)
         await self.gateway.start(self.hub)
         self.portal.ops = ops
         self.node = Node(url, name, token, self.hub, skills_into=skills_into, ops=ops)
@@ -142,17 +142,17 @@ async def test_a_revoked_machine_cant_rejoin(mesh):
 
 async def test_the_hubs_agent_runs_a_task_on_a_machine_and_reads_the_reply(mesh):
     await _join(mesh)
-    mesh.machine.hermes.reply = "the build passed on the laptop"
-    sender = mesh.hermes.add_session("20261101_090000_aaaaaa", "Main thread")
+    mesh.machine.nako.reply = "the build passed on the laptop"
+    sender = mesh.nako.add_session("20261101_090000_aaaaaa", "Main thread")
     started = await _run(mesh, "run the build", title="Laptop build", **{"from": sender})
     assert started.status == 200, await started.text()
     session = (await started.json())["session"]
     machine, _, inner = session.removeprefix("mesh.").partition(".")
     assert machine == MACHINE
-    on_machine = mesh.machine.hermes.sessions[inner]
+    on_machine = mesh.machine.nako.sessions[inner]
     assert on_machine["title"] == "Laptop build"
     # Tasks from the hub run without approval prompts, and say which thread sent them.
-    assert on_machine["chat"] in mesh.machine.hermes.yolo
+    assert on_machine["chat"] in mesh.machine.nako.yolo
     first = on_machine["rows"][0]["text"]
     # Named the way the machine reaches it, so its agent can answer back.
     assert first.startswith(f'[From another thread, not typed by the user: "Main thread on hub" (session mesh.hub.{sender})]')
@@ -162,7 +162,7 @@ async def test_the_hubs_agent_runs_a_task_on_a_machine_and_reads_the_reply(mesh)
         state = await (await mesh.http.get(_local(mesh, f"/sessions/{session}"), headers=AUTH)).json()
         return state
 
-    await until(lambda: mesh.machine.hermes.sessions[inner]["rows"][-1]["role"] == "assistant")
+    await until(lambda: mesh.machine.nako.sessions[inner]["rows"][-1]["role"] == "assistant")
     state = await done()
     assert state["running"] is False
     assert state["messages"][-1] == {"role": "assistant", "text": "the build passed on the laptop"}
@@ -174,16 +174,16 @@ async def test_a_follow_up_reaches_the_machines_chat(mesh):
     inner = session.rsplit(".", 1)[1]
     sent = await mesh.http.post(_local(mesh, f"/sessions/{session}/messages"), json={"text": "and then this"}, headers=AUTH)
     assert sent.status == 200, await sent.text()
-    texts = [r["text"] for r in mesh.machine.hermes.sessions[inner]["rows"] if r["role"] == "user"]
+    texts = [r["text"] for r in mesh.machine.nako.sessions[inner]["rows"] if r["role"] == "user"]
     assert texts == ["first", "and then this"]
 
 
 async def test_the_machines_chats_show_in_the_hubs_sidebar_under_its_name(mesh):
     await mesh.sign_up()
     await _join(mesh)
-    mesh.machine.hermes.add_session("20261101_100000_bbbbbb", "Notifications", chat="inbox")
-    mesh.machine.hermes.add_session("20261101_100001_cccccc", "Fix the printer")
-    mesh.hermes.add_session("20261101_100002_dddddd", "Here")
+    mesh.machine.nako.add_session("20261101_100000_bbbbbb", "Notifications", chat="inbox")
+    mesh.machine.nako.add_session("20261101_100001_cccccc", "Fix the printer")
+    mesh.nako.add_session("20261101_100002_dddddd", "Here")
     rows = await (await mesh.http.get(mesh.url("/api/sessions"))).json()
     shown = {r["title"]: (r["id"], r.get("machine")) for r in rows}
     assert shown["Here"] == ("20261101_100002_dddddd", None)
@@ -195,21 +195,21 @@ async def test_the_machines_chats_show_in_the_hubs_sidebar_under_its_name(mesh):
     selected = await mesh.post(path, {"provider": "big", "model": "large", "effort": "high"})
     assert selected.status == 200
     assert (await selected.json())["model"] == "large"
-    assert mesh.machine.hermes.session_model("20261101_100001_cccccc")["effort"] == "high"
-    assert mesh.machine.hermes.model()["model"] == "tiny"
-    assert mesh.hermes.model()["model"] == "tiny"
+    assert mesh.machine.nako.session_model("20261101_100001_cccccc")["effort"] == "high"
+    assert mesh.machine.nako.model()["model"] == "tiny"
+    assert mesh.nako.model()["model"] == "tiny"
     mesh.machine.hub.running.add("20261101_100001_cccccc")
     refused = await mesh.post(path, {"effort": "low"})
     assert refused.status == 400
     assert "finish" in (await refused.json())["error"]
-    assert mesh.machine.hermes.session_model("20261101_100001_cccccc")["effort"] == "high"
+    assert mesh.machine.nako.session_model("20261101_100001_cccccc")["effort"] == "high"
 
 
 async def test_a_machines_chat_streams_live_to_the_hubs_app(mesh):
     await mesh.sign_up()
     await _join(mesh)
-    sid = mesh.machine.hermes.add_session("20261101_110000_eeeeee", "Live one")
-    mesh.machine.hermes.reply = "streamed from afar"
+    sid = mesh.machine.nako.add_session("20261101_110000_eeeeee", "Live one")
+    mesh.machine.nako.reply = "streamed from afar"
     remote = f"mesh.{MACHINE}.{sid}"
     async with mesh.http.ws_connect(mesh.url("/ws"), headers={"Origin": ORIGIN}) as ws:
         await ws.send_json({"watch": remote})
@@ -226,8 +226,8 @@ async def test_a_machines_chat_streams_live_to_the_hubs_app(mesh):
 async def test_a_question_on_a_machine_is_answered_from_the_hub(mesh):
     await mesh.sign_up()
     await _join(mesh)
-    mesh.machine.hermes.ask_approval = True
-    sid = mesh.machine.hermes.add_session("20261101_120000_ffffff", "Careful")
+    mesh.machine.nako.ask_approval = True
+    sid = mesh.machine.nako.add_session("20261101_120000_ffffff", "Careful")
     remote = f"mesh.{MACHINE}.{sid}"
     await mesh.http.post(mesh.url(f"/api/sessions/{remote}/messages"), data={"text": "clean up"}, headers={"Origin": ORIGIN})
     await until(lambda: "req-1" in mesh.mesh.requests)
@@ -235,7 +235,7 @@ async def test_a_question_on_a_machine_is_answered_from_the_hub(mesh):
     assert [r["id"] for r in state["requests"]] == ["req-1"]
     answered = await mesh.post("/api/requests/req-1", {"result": {"choice": "once"}})
     assert answered.status == 200, await answered.text()
-    assert mesh.machine.hermes.answers[0]["result"] == {"choice": "once"}
+    assert mesh.machine.nako.answers[0]["result"] == {"choice": "once"}
 
 
 async def test_a_machine_that_leaves_goes_offline_and_its_chats_are_unreachable(mesh):
@@ -285,27 +285,27 @@ async def test_a_machine_sees_the_hub_and_the_others_but_not_itself(two):
 
 
 async def test_a_machine_hands_another_a_task_and_reads_the_reply(two):
-    two.desktop.hermes.reply = "desktop did it"
-    sender = two.machine.hermes.add_session("20261101_130000_aaaaaa", "Laptop thread")
+    two.desktop.nako.reply = "desktop did it"
+    sender = two.machine.nako.add_session("20261101_130000_aaaaaa", "Laptop thread")
     started = await two.http.post(_on(two.machine, "/mesh/machines/desktop/sessions"), json={"text": "render the video", "from": sender}, headers=AUTH)
     assert started.status == 200, await started.text()
     session = (await started.json())["session"]
     inner = session.removeprefix("mesh.desktop.")
-    first = two.desktop.hermes.sessions[inner]["rows"][0]["text"]
+    first = two.desktop.nako.sessions[inner]["rows"][0]["text"]
     assert first.startswith(f'[From another thread, not typed by the user: "Laptop thread on laptop" (session mesh.laptop.{sender})]')
-    await until(lambda: two.desktop.hermes.sessions[inner]["rows"][-1]["role"] == "assistant")
+    await until(lambda: two.desktop.nako.sessions[inner]["rows"][-1]["role"] == "assistant")
     state = await (await two.http.get(_on(two.machine, f"/sessions/{session}"), headers=AUTH)).json()
     assert state["messages"][-1] == {"role": "assistant", "text": "desktop did it"}
 
 
 async def test_the_other_machine_answers_back_into_the_senders_thread(two):
-    sender = two.machine.hermes.add_session("20261101_131000_bbbbbb", "Laptop thread")
-    worker = two.desktop.hermes.add_session("20261101_131001_cccccc", "Desktop thread")
+    sender = two.machine.nako.add_session("20261101_131000_bbbbbb", "Laptop thread")
+    worker = two.desktop.nako.add_session("20261101_131001_cccccc", "Desktop thread")
     sent = await two.http.post(
         _on(two.desktop, f"/sessions/mesh.laptop.{sender}/messages"), json={"text": "the render is at D:/out.mp4", "from": worker}, headers=AUTH
     )
     assert sent.status == 200, await sent.text()
-    got = [r["text"] for r in two.machine.hermes.sessions[sender]["rows"] if r["role"] == "user"]
+    got = [r["text"] for r in two.machine.nako.sessions[sender]["rows"] if r["role"] == "user"]
     assert got == [f'[From another thread, not typed by the user: "Desktop thread on desktop" (session mesh.desktop.{worker})]\n\nthe render is at D:/out.mp4']
 
 
@@ -314,7 +314,7 @@ async def test_a_machine_can_hand_the_hub_a_task(two):
     assert started.status == 200, await started.text()
     session = (await started.json())["session"]
     assert session.startswith("mesh.hub.")
-    assert two.hermes.sessions[session.removeprefix("mesh.hub.")]["rows"][0]["text"] == "check the server disk"
+    assert two.nako.sessions[session.removeprefix("mesh.hub.")]["rows"][0]["text"] == "check the server disk"
     state = await (await two.http.get(_on(two.machine, f"/sessions/{session}"), headers=AUTH)).json()
     assert state["messages"][0]["text"] == "check the server disk"
 
@@ -322,13 +322,13 @@ async def test_a_machine_can_hand_the_hub_a_task(two):
 async def test_a_machine_cant_route_to_itself_through_the_hub(two):
     refused = await two.http.post(_on(two.machine, f"/mesh/machines/{MACHINE}/sessions"), json={"text": "hi"}, headers=AUTH)
     assert refused.status == 400
-    assert two.machine.hermes.sessions == {}
+    assert two.machine.nako.sessions == {}
 
 
 async def test_a_machine_lists_another_machines_threads(two):
-    two.desktop.hermes.add_session("20261101_140000_dddddd", "Render the trailer")
-    two.desktop.hermes.add_session("20261101_140001_eeeeee", "Notifications", chat="inbox")
-    two.hermes.add_session("20261101_140002_ffffff", "Hub work")
+    two.desktop.nako.add_session("20261101_140000_dddddd", "Render the trailer")
+    two.desktop.nako.add_session("20261101_140001_eeeeee", "Notifications", chat="inbox")
+    two.nako.add_session("20261101_140002_ffffff", "Hub work")
     on_desktop = await (await two.http.get(_on(two.machine, "/mesh/machines/desktop/sessions"), headers=AUTH)).json()
     assert [(r["session"], r["title"]) for r in on_desktop] == [("mesh.desktop.20261101_140000_dddddd", "Render the trailer")]
     on_hub = await (await two.http.get(_on(two.machine, "/mesh/machines/hub/sessions"), headers=AUTH)).json()
@@ -339,7 +339,7 @@ async def test_a_machine_lists_another_machines_threads(two):
 
 
 async def test_a_machine_answers_a_question_another_machine_is_waiting_on(two):
-    two.desktop.hermes.ask_approval = True
+    two.desktop.nako.ask_approval = True
     started = await two.http.post(_on(two.machine, "/mesh/machines/desktop/sessions"), json={"text": "clean the build"}, headers=AUTH)
     session = (await started.json())["session"]
 
@@ -350,17 +350,17 @@ async def test_a_machine_answers_a_question_another_machine_is_waiting_on(two):
     assert [r["id"] for r in await waiting()] == ["req-1"]
     answered = await two.http.post(_on(two.machine, f"/sessions/{session}/answer"), json={"request": "req-1", "result": {"choice": "deny"}}, headers=AUTH)
     assert answered.status == 200, await answered.text()
-    assert two.desktop.hermes.answers[0]["result"] == {"choice": "deny"}
+    assert two.desktop.nako.answers[0]["result"] == {"choice": "deny"}
     assert await waiting() == []
 
 
 async def test_the_hubs_agent_answers_a_machines_question(two):
-    two.machine.hermes.ask_approval = True
+    two.machine.nako.ask_approval = True
     session = (await (await _run(two, "clean up")).json())["session"]
     await until(lambda: two.machine.hub.requests)
     answered = await two.http.post(_local(two, f"/sessions/{session}/answer"), json={"request": "req-1", "result": {"choice": "once"}}, headers=AUTH)
     assert answered.status == 200, await answered.text()
-    assert two.machine.hermes.answers[0]["result"] == {"choice": "once"}
+    assert two.machine.nako.answers[0]["result"] == {"choice": "once"}
 
 
 async def test_the_hub_cant_take_its_own_name_for_a_machine(mesh):
@@ -389,7 +389,7 @@ async def test_the_plugin_source_set_on_the_mesh_page_is_what_new_machines_insta
     lines = (await (await mesh.post("/api/mesh/machines", {"name": MACHINE})).json())["lines"]
     path = lines["unix"].split("hub.example.test", 1)[1].removesuffix(" | bash")
     script = await (await mesh.http.get(mesh.url(path))).text()
-    assert f"hermes plugins install https://git.example.test/me/portal.git --ref {'b' * 40}" in script
+    assert f"nako plugins install https://git.example.test/me/portal.git --ref {'b' * 40}" in script
     # Clearing it goes back to the detected source.
     mesh.mesh.plugin = {"source": "https://found.example.test/p.git", "ref": None}
     cleared = await (await mesh.post("/api/mesh/plugin-source", {"source": ""})).json()
@@ -423,7 +423,7 @@ async def test_adding_a_machine_gives_a_join_command_that_works(mesh):
     added = await mesh.post("/api/mesh/machines", {"name": MACHINE})
     assert added.status == 200, await added.text()
     command = (await added.json())["command"]
-    assert command.startswith("hermes mesh join https://hub.example.test ") and command.endswith(f"--name {MACHINE}")
+    assert command.startswith("nako mesh join https://hub.example.test ") and command.endswith(f"--name {MACHINE}")
     token = command.split()[4]
     await mesh.machine.start(mesh.mesh_url, token)
     await until(lambda: MACHINE in mesh.mesh.peers)
@@ -439,16 +439,16 @@ async def _setup(world, prompt):
     return path, await world.http.get(str(world.mesh_server.make_url(path)))
 
 
-async def test_one_line_setup_tells_a_stock_hermes_everything_and_the_machine_joins(mesh):
+async def test_one_line_setup_tells_a_stock_nako_everything_and_the_machine_joins(mesh):
     await mesh.sign_up()
     prompt = (await (await mesh.post("/api/mesh/machines", {"name": MACHINE})).json())["prompt"]
     assert "\n" not in prompt and prompt.startswith(f'Set this machine up as "{MACHINE}"')
     path, page = await _setup(mesh, prompt)
     assert page.status == 200
     steps = await page.text()
-    assert f"hermes plugins install https://example.test/portal.git --ref {'a' * 40} --enable --yes-deps --force" in steps
-    join = re.search(rf"hermes mesh join https://hub.example.test (\S+) --name {MACHINE}", steps)
-    assert join and "hermes gateway install" in steps
+    assert f"nako plugins install https://example.test/portal.git --ref {'a' * 40} --enable --yes-deps --force" in steps
+    join = re.search(rf"nako mesh join https://hub.example.test (\S+) --name {MACHINE}", steps)
+    assert join and "nako gateway install" in steps
     status = str(mesh.mesh_server.make_url(path + "/status"))
     assert (await (await mesh.http.get(status)).json())["online"] is False
     # Following the page: the machine joins with the token it gave.
@@ -471,7 +471,7 @@ async def test_the_setup_lines_fetch_a_script_for_each_os_that_joins_the_machine
     ps1 = await (await mesh.http.get(str(mesh.mesh_server.make_url(base + "/ps1")))).text()
     for script in (sh, ps1):
         assert f"install https://example.test/portal.git --ref {'a' * 40} --enable --yes-deps --force" in script
-        assert "hermes model" in script and "--if-missing --start-on-login" in script
+        assert "nako model" in script and "--if-missing --start-on-login" in script
     token = re.search(r"mesh join \S+ '([^']+)'", sh).group(1)
     assert re.search(rf"mesh join \$Hub '{token}'", ps1)
     await mesh.machine.start(mesh.mesh_url, token)
@@ -518,7 +518,7 @@ async def test_a_setup_link_stops_working_after_a_day(mesh, monkeypatch):
     monkeypatch.setattr(mesh.mesh, "clock", lambda: later)
     _, page = await _setup(mesh, prompt)
     assert page.status == 404
-    assert "hermes mesh join" not in await page.text()
+    assert "nako mesh join" not in await page.text()
 
 
 async def test_a_made_up_setup_code_gets_nothing(mesh):
@@ -604,8 +604,8 @@ async def test_the_mirror_leaves_the_machines_own_skills_alone(tmp_path):
 # A machine whose gateway is down, restarted or updated from the hub
 
 
-def _state_db(home, session, rows, *, title="Update Hermes", chat="chat-1"):
-    """A Hermes session store with one portal chat, laid out like Hermes's own tables."""
+def _state_db(home, session, rows, *, title="Update Nako", chat="chat-1"):
+    """A Nako session store with one portal chat, laid out like Nako's own tables."""
     home.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(home / "state.db")
     db.executescript(
@@ -628,10 +628,10 @@ def _state_db(home, session, rows, *, title="Update Hermes", chat="chat-1"):
 
 
 UPDATE_CHAT = [
-    {"role": "user", "content": "run hermes update please", "timestamp": 1_700_000_100},
+    {"role": "user", "content": "run nako update please", "timestamp": 1_700_000_100},
     {"role": "assistant", "content": "Updating now.", "timestamp": 1_700_000_101,
-     "tool_calls": [{"id": "call-1", "type": "function", "function": {"name": "terminal", "arguments": json.dumps({"command": "hermes update"})}}]},
-    {"role": "tool", "content": json.dumps({"output": "Updating Hermes Agent v0.22.2 -> v0.22.5\nStopping the gateway"}), "tool_call_id": "call-1", "timestamp": 1_700_000_160},
+     "tool_calls": [{"id": "call-1", "type": "function", "function": {"name": "terminal", "arguments": json.dumps({"command": "nako update"})}}]},
+    {"role": "tool", "content": json.dumps({"output": "Updating Nako Agent v0.22.2 -> v0.22.5\nStopping the gateway"}), "tool_call_id": "call-1", "timestamp": 1_700_000_160},
 ]
 
 
@@ -661,9 +661,9 @@ async def test_the_hub_reads_a_machines_chat_while_its_gateway_is_down(mesh, tmp
     assert response.status == 200, await response.text()
     state = await response.json()
     assert state["gateway"] is False
-    assert state["title"] == "Update Hermes"
-    assert state["messages"] == [{"role": "user", "text": "run hermes update please"}, {"role": "assistant", "text": "Updating now."}]
-    assert [(t["name"], t["context"]) for t in state["tools"]] == [("terminal", "hermes update")]
+    assert state["title"] == "Update Nako"
+    assert state["messages"] == [{"role": "user", "text": "run nako update please"}, {"role": "assistant", "text": "Updating now."}]
+    assert [(t["name"], t["context"]) for t in state["tools"]] == [("terminal", "nako update")]
     assert "v0.22.2 -> v0.22.5" in state["tools"][0]["result"]
     assert state["last_active"] == 1_700_000_160
 
@@ -687,7 +687,7 @@ async def test_the_app_on_the_hub_opens_a_machines_chat_while_its_gateway_is_dow
     opened = await mesh.http.get(mesh.url(f"/api/sessions/mesh.{MACHINE}.{session}"))
     assert opened.status == 200, await opened.text()
     shown = (await opened.json())["messages"]
-    assert [(m["role"], m.get("text") or m.get("name")) for m in shown] == [("user", "run hermes update please"), ("assistant", "Updating now."), ("tool", "terminal")]
+    assert [(m["role"], m.get("text") or m.get("name")) for m in shown] == [("user", "run nako update please"), ("assistant", "Updating now."), ("tool", "terminal")]
     # The app's rows stay small: tool results are only for agents that ask.
     assert "result" not in shown[-1]
 
@@ -695,7 +695,7 @@ async def test_the_app_on_the_hub_opens_a_machines_chat_while_its_gateway_is_dow
 async def test_a_machines_running_task_stops_counting_once_its_gateway_drops(mesh):
     await mesh.sign_up()
     await _join(mesh)
-    mesh.machine.hermes.hold = True
+    mesh.machine.nako.hold = True
     await _run(mesh, "a long job")
     await until(lambda: [r["working"] for r in mesh.mesh.machines()] == [1])
     async with mesh.http.ws_connect(mesh.url("/ws"), headers={"Origin": ORIGIN}) as sticker:
@@ -715,7 +715,7 @@ async def test_a_machines_running_task_stops_counting_once_its_gateway_drops(mes
 async def test_a_machine_that_leaves_mid_task_stops_counting_on_the_hubs_apps(mesh):
     await mesh.sign_up()
     await _join(mesh)
-    mesh.machine.hermes.hold = True
+    mesh.machine.nako.hold = True
     await _run(mesh, "a long job")
     async with mesh.http.ws_connect(mesh.url("/ws"), headers={"Origin": ORIGIN}) as sticker:
         working = await next_message(sticker, lambda m: m.get("kind") == "status" and m.get("status") == "working")
@@ -725,9 +725,9 @@ async def test_a_machine_that_leaves_mid_task_stops_counting_on_the_hubs_apps(me
 
 
 @pytest.fixture
-def fake_hermes(tmp_path, monkeypatch):
-    """A machine's Hermes as the portal server drives it: v0.22.2 installed, v0.22.5 available."""
-    state = tmp_path / "fake-hermes"
+def fake_nako(tmp_path, monkeypatch):
+    """A machine's Nako as the portal server drives it: v0.22.2 installed, v0.22.5 available."""
+    state = tmp_path / "fake-nako"
     state.mkdir()
     (state / "version").write_text(json.dumps({"version": "v0.22.2", "date": "2026.9.1", "channel": "stable", "commit": "1111aaaa2222"}), encoding="utf-8")
     (state / "next").write_text(json.dumps({"version": "v0.22.5", "date": "2026.9.24", "channel": "stable", "commit": "3333bbbb4444"}), encoding="utf-8")
@@ -738,10 +738,10 @@ def fake_hermes(tmp_path, monkeypatch):
     schtasks.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" schtasks "$@"\n', encoding="utf-8")
     schtasks.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-    monkeypatch.setenv("FAKE_HERMES_DIR", str(state))
-    monkeypatch.setenv("FAKE_HERMES_TOKEN", LOCAL_TOKEN)
-    monkeypatch.setenv("FAKE_HERMES_CODE", SERVER_CODE)
-    yield {"state": state, "hermes": [sys.executable, str(script), "hermes"]}
+    monkeypatch.setenv("FAKE_NAKO_DIR", str(state))
+    monkeypatch.setenv("FAKE_NAKO_TOKEN", LOCAL_TOKEN)
+    monkeypatch.setenv("FAKE_NAKO_CODE", SERVER_CODE)
+    yield {"state": state, "nako": [sys.executable, str(script), "nako"]}
     try:
         os.kill(int((state / "gateway.pid").read_text(encoding="utf-8-sig")), 15)
     except (OSError, ValueError):
@@ -749,10 +749,10 @@ def fake_hermes(tmp_path, monkeypatch):
 
 
 async def _join_with_ops(world, fake, tmp_path, monkeypatch, **options):
-    ops = MachineOps(tmp_path / "laptop-data", tmp_path / "laptop-home", fake["hermes"], world.machine.hub, python=sys.executable, **options)
+    ops = MachineOps(tmp_path / "laptop-data", tmp_path / "laptop-home", fake["nako"], world.machine.hub, python=sys.executable, **options)
     token = add_node(world.mesh_data, MACHINE)
     await world.machine.start(world.mesh_url, token, ops=ops)
-    monkeypatch.setenv("FAKE_HERMES_LINK", str(world.machine.local.make_url("/gateway")))
+    monkeypatch.setenv("FAKE_NAKO_LINK", str(world.machine.local.make_url("/gateway")))
     await until(lambda: MACHINE in world.mesh.peers and MACHINE in world.mesh.info)
     await ops.refresh()
     return ops
@@ -762,9 +762,9 @@ def _laptop(rows):
     return next(r for r in rows if r["name"] == MACHINE)
 
 
-async def test_the_hub_updates_a_machines_hermes_and_its_gateway_comes_back(mesh, fake_hermes, tmp_path, monkeypatch):
-    await _join_with_ops(mesh, fake_hermes, tmp_path, monkeypatch, platform="posix")
-    await until(lambda: (_laptop(mesh.mesh.machines())["hermes"] or {}).get("version") == "v0.22.2")
+async def test_the_hub_updates_a_machines_nako_and_its_gateway_comes_back(mesh, fake_nako, tmp_path, monkeypatch):
+    await _join_with_ops(mesh, fake_nako, tmp_path, monkeypatch, platform="posix")
+    await until(lambda: (_laptop(mesh.mesh.machines())["nako"] or {}).get("version") == "v0.22.2")
     # The update stops the gateway on its way, like the gateway the user lost.
     await mesh.machine.gateway.stop(mesh.machine.hub)
     started = await mesh.http.post(_local(mesh, f"/mesh/machines/{MACHINE}/update"), json={}, headers=AUTH)
@@ -784,29 +784,29 @@ async def test_the_hub_updates_a_machines_hermes_and_its_gateway_comes_back(mesh
     job = state["job"]
     assert job["status"] == "done"
     assert (job["old"]["version"], job["new"]["version"]) == ("v0.22.2", "v0.22.5")
-    assert "Updating Hermes Agent v0.22.2 -> v0.22.5" in job["log_tail"]
+    assert "Updating Nako Agent v0.22.2 -> v0.22.5" in job["log_tail"]
     # The hub's machine list shows the new version once the machine reads it again.
-    await until(lambda: (_laptop(mesh.mesh.machines())["hermes"] or {}).get("commit") == "3333bbbb4444")
+    await until(lambda: (_laptop(mesh.mesh.machines())["nako"] or {}).get("commit") == "3333bbbb4444")
     assert _laptop(mesh.mesh.machines())["gateway"] is True
 
 
-async def test_mesh_restart_gateway_brings_a_dead_gateway_back_through_the_windows_task(mesh, fake_hermes, tmp_path, monkeypatch):
+async def test_mesh_restart_gateway_brings_a_dead_gateway_back_through_the_windows_task(mesh, fake_nako, tmp_path, monkeypatch):
     # On Windows the gateway may only start through its scheduled task: a direct start fails here.
-    monkeypatch.setenv("FAKE_HERMES_NO_DIRECT", "1")
-    await _join_with_ops(mesh, fake_hermes, tmp_path, monkeypatch, platform="windows")
+    monkeypatch.setenv("FAKE_NAKO_NO_DIRECT", "1")
+    await _join_with_ops(mesh, fake_nako, tmp_path, monkeypatch, platform="windows")
     await mesh.machine.gateway.stop(mesh.machine.hub)
     await until(lambda: _laptop(mesh.mesh.machines())["gateway"] is False)
     tools = _tools_module(mesh)
     result = json.loads(await asyncio.to_thread(tools.TOOL_HANDLERS["mesh_restart_gateway"], {"machine": MACHINE, "wait_seconds": 20}))
     assert result["gateway"] is True, result
     assert result["status"] == "done"
-    assert result["hermes_now"].startswith("Hermes Agent v0.22.2")
+    assert result["nako_now"].startswith("Nako Agent v0.22.2")
     assert _laptop(mesh.mesh.machines())["gateway"] is True
 
 
-async def test_a_machines_server_brings_its_gateway_back_when_it_stays_away(mesh, fake_hermes, tmp_path, monkeypatch):
-    ops = await _join_with_ops(mesh, fake_hermes, tmp_path, monkeypatch, platform="posix", watchdog=True, grace=0.2)
-    # `hermes update` run inside a chat there: the gateway stops and nothing restarts it.
+async def test_a_machines_server_brings_its_gateway_back_when_it_stays_away(mesh, fake_nako, tmp_path, monkeypatch):
+    ops = await _join_with_ops(mesh, fake_nako, tmp_path, monkeypatch, platform="posix", watchdog=True, grace=0.2)
+    # `nako update` run inside a chat there: the gateway stops and nothing restarts it.
     await mesh.machine.gateway.stop(mesh.machine.hub)
     await until(lambda: _laptop(mesh.mesh.machines())["gateway"] is False)
     await until(lambda: _laptop(mesh.mesh.machines())["gateway"] is True, timeout=15)
@@ -826,14 +826,14 @@ async def test_the_hub_cant_update_itself_or_a_machine_that_isnt_there(mesh):
 
 
 async def test_attached_outputs_upload_without_opening_the_chat_and_survive_node_and_hub_restart(mesh, tmp_path):
-    sid = mesh.machine.hermes.add_session("20261101_150000_abcd01", "Remote outputs")
+    sid = mesh.machine.nako.add_session("20261101_150000_abcd01", "Remote outputs")
     picture = tmp_path / "capture.png"
     picture.write_bytes((Path(__file__).parents[1] / "web/public/icon-192.png").read_bytes())
     report = tmp_path / "report.csv"
     report.write_bytes(b"name,result\nrender,passed\n")
     private = tmp_path / "private.txt"
     private.write_text("not delivered", encoding="utf-8")
-    mesh.machine.hermes._row(sid, "assistant", f"MEDIA:{picture}\nMEDIA:{report}\nmentioned: {private}")
+    mesh.machine.nako._row(sid, "assistant", f"MEDIA:{picture}\nMEDIA:{report}\nmentioned: {private}")
     remote = f"mesh.{MACHINE}.{sid}"
     await _join(mesh)
     await until(lambda: mesh.mesh.attachments.file(remote, str(report)) is not None)
@@ -846,8 +846,8 @@ async def test_attached_outputs_upload_without_opening_the_chat_and_survive_node
         assert await response.read() == path.read_bytes()
     for session, path in ((remote, private), (f"mesh.{MACHINE}.other", picture)):
         assert (await mesh.http.get(mesh.url("/api/file"), params={"session": session, "path": str(path)})).status == 404
-    archived = mesh.machine.hermes.add_session("20261101_150009_abcd09", "Archived output")
-    mesh.machine.hermes._row(archived, "assistant", f"MEDIA:{picture}")
+    archived = mesh.machine.nako.add_session("20261101_150009_abcd09", "Archived output")
+    mesh.machine.nako._row(archived, "assistant", f"MEDIA:{picture}")
     archived_remote = f"mesh.{MACHINE}.{archived}"
     assert (await mesh.http.get(mesh.url(f"/api/sessions/{archived_remote}"))).status == 200
     assert (await mesh.post(f"/api/sessions/{archived_remote}/archive", {"archived": True})).status == 200
@@ -875,10 +875,10 @@ async def test_live_deliveries_and_user_images_cross_the_real_mesh_socket(mesh, 
     picture.write_bytes(b"live image bytes")
     user_image = tmp_path / "input.png"
     user_image.write_bytes(b"user image bytes")
-    sid = mesh.machine.hermes.add_session("20261101_150001_abcd02", "Live outputs")
+    sid = mesh.machine.nako.add_session("20261101_150001_abcd02", "Live outputs")
     await _join(mesh)
-    mesh.machine.hermes._row(sid, "user", f"look\n[Image attached at: {user_image}]\n[screenshot]")
-    mesh.machine.hermes.reply = f"done\nMEDIA:{picture}"
+    mesh.machine.nako._row(sid, "user", f"look\n[Image attached at: {user_image}]\n[screenshot]")
+    mesh.machine.nako.reply = f"done\nMEDIA:{picture}"
     remote = f"mesh.{MACHINE}.{sid}"
     await mesh.sign_up()
     async with mesh.http.ws_connect(mesh.url("/ws"), headers={"Origin": ORIGIN}) as ws:
@@ -895,13 +895,13 @@ async def test_live_deliveries_and_user_images_cross_the_real_mesh_socket(mesh, 
 async def test_a_remote_agent_delivers_files_into_its_originating_hub_chat(mesh, tmp_path):
     await _join(mesh)
     await mesh.sign_up()
-    target = mesh.hermes.add_session("20261101_150002_abcd03", "Origin")
-    source = mesh.machine.hermes.add_session("20261101_150003_abcd04", "Worker MEDIA:/not-attached.png")
+    target = mesh.nako.add_session("20261101_150002_abcd03", "Origin")
+    source = mesh.machine.nako.add_session("20261101_150003_abcd04", "Worker MEDIA:/not-attached.png")
     picture = tmp_path / "returned.png"
     picture.write_bytes(b"returned image bytes")
     report = tmp_path / "returned.csv"
     report.write_bytes(b"value\n42\n")
-    mesh.hermes.hold = True
+    mesh.nako.hold = True
     response = await mesh.http.post(_on(mesh.machine, f"/sessions/mesh.hub.{target}/messages"),
         json={"text": f"results\nMEDIA:{picture}\nMEDIA:{report}", "from": source}, headers=AUTH)
     assert response.status == 200, await response.text()
@@ -927,7 +927,7 @@ async def test_a_remote_agent_delivers_files_into_its_originating_hub_chat(mesh,
         assert await downloaded.read() == (b"value\n42\n" if raw.endswith(".csv") else b"returned image bytes")
         if raw.endswith(".csv"):
             assert downloaded.headers["Content-Disposition"].startswith("attachment;")
-    other = mesh.hermes.add_session("20261101_150004_abcd05", "Unrelated")
+    other = mesh.nako.add_session("20261101_150004_abcd05", "Unrelated")
     assert (await mesh.http.get(mesh.url("/api/file"), params={"session": other, "path": saved[0]})).status == 404
     # A person typing the attribution syntax cannot turn a path into an authorized delivery.
     from portal.hub import from_thread_line
@@ -945,7 +945,7 @@ async def test_mesh_refuses_unattached_unsafe_and_oversized_uploads_without_deli
     from portal import attachments
 
     await _join(mesh)
-    sid = mesh.machine.hermes.add_session("20261101_150005_abcd06", "Output")
+    sid = mesh.machine.nako.add_session("20261101_150005_abcd06", "Output")
     raw = r"C:\Users\example\output.png"
     opened = {"session": sid, "title": "Output", "messages": [{"role": "assistant", "text": f"MEDIA:{raw}"}]}
     await mesh.machine.node.call("attachment", sid, opened)
@@ -978,12 +978,12 @@ async def test_mesh_refuses_unattached_unsafe_and_oversized_uploads_without_deli
     file.write_bytes(b"data")
     link = tmp_path / "linked.png"
     link.symlink_to(file)
-    target = mesh.hermes.add_session("20261101_150006_abcd07", "Origin")
+    target = mesh.nako.add_session("20261101_150006_abcd07", "Origin")
     for text in (f"MEDIA:{link}", f"MEDIA:{tmp_path / 'missing.png'}", "\n".join(f"MEDIA:/missing-{i}.png" for i in range(33))):
         refused = await mesh.http.post(_on(mesh.machine, f"/sessions/mesh.hub.{target}/messages"),
             json={"text": text, "from": sid}, headers=AUTH)
         assert refused.status == 400
-        assert mesh.hermes.sessions[target]["rows"] == []
+        assert mesh.nako.sessions[target]["rows"] == []
 
 
 @pytest.mark.parametrize('revoke', ['remove', 'rotate'])
@@ -1012,7 +1012,7 @@ async def test_mesh_creation_keeps_requested_working_directory(mesh, tmp_path):
     response = await _run(mesh, 'work here', cwd=directory)
     assert response.status == 200, await response.text()
     sid = mesh_module.parse((await response.json())['session'])[1]
-    assert mesh.machine.hermes.sessions[sid]['cwd'] == directory
+    assert mesh.machine.nako.sessions[sid]['cwd'] == directory
 
 
 async def test_rebranded_enrollment_uses_detected_agent_and_service(world, tmp_path):
@@ -1035,7 +1035,7 @@ async def test_rebranded_enrollment_uses_detected_agent_and_service(world, tmp_p
                   "ref": mesh.plugin['ref'], "agent": 'aurora'}
     ps = powershell_script(**values)
     assert "$Task = 'Aurora_Gateway'" in ps and 'aurora gateway stop' in ps
-    assert 'hermes gateway' not in ps
+    assert 'nako gateway' not in ps
     # Run the shell script with a fake executable and HTTP endpoint, observing the actual argv.
     commands = tmp_path / 'commands'
     executable = tmp_path / 'aurora'

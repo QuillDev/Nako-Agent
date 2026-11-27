@@ -19,8 +19,8 @@ CAPTURE = "import json as _j, os as _o\nopen(_o.environ['ENV_CAPTURE'], 'a').wri
 
 
 def _set_telemetry(value):
-    """Write the setting where `hermes config set plugins.entries.<id>.settings.<key>` puts it."""
-    from hermes_cli.config import get_config_path
+    """Write the setting where `nako config set plugins.entries.<id>.settings.<key>` puts it."""
+    from nako_cli.config import get_config_path
     path = get_config_path()
     path.write_text("plugins:\n  enabled: []\n  entries:\n    %s:\n      settings:\n        claude_code_telemetry: %s\n"
                     % (PLUGIN_NAME, value), encoding="utf-8")
@@ -101,15 +101,15 @@ def test_native_never_sends_its_own_session_title_request(profile, tmp_path, mon
 
 
 @pytest.mark.parametrize("child", ["discovery", "turn"])
-def test_native_requests_go_out_under_hermes_own_name(profile, tmp_path, child):
+def test_native_requests_go_out_under_nako_own_name(profile, tmp_path, child):
     """anthropics/claude-code#97074: subscriptions meter the default `sdk-cli` name (and an inherited host's
-    `sdk-py`) about 2x heavier per token, so every child runs as `hermes-agent`, without the artifact
+    `sdk-py`) about 2x heavier per token, so every child runs as `nako-agent`, without the artifact
     scratchpad line a non-SDK name would add to every request."""
     inherited = {"CLAUDE_CODE_ENTRYPOINT": "sdk-py"}
     envs = (_discovery_envs(profile, tmp_path, **inherited) if child == "discovery"
             else [_turn_env(profile, tmp_path, **inherited)])
     for env in envs:
-        assert env["CLAUDE_CODE_ENTRYPOINT"] == "hermes-agent"
+        assert env["CLAUDE_CODE_ENTRYPOINT"] == "nako-agent"
         assert env["CLAUDE_CODE_DISABLE_ARTIFACT"] == "1"
 
 
@@ -133,22 +133,22 @@ def test_the_setting_is_read_per_spawn_from_the_active_profile(profile, tmp_path
 def test_a_multi_profile_gateway_reads_each_profiles_own_setting(profile, tmp_path):
     """One process, two profiles: the context-local home override decides whose config is read."""
     import directsdk_setup
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from nako_constants import reset_nako_home_override, set_nako_home_override
     quiet_home = tmp_path / "quiet-profile"
     quiet_home.mkdir()
-    token = set_hermes_home_override(quiet_home)
+    token = set_nako_home_override(quiet_home)
     try:
         _set_telemetry("false")
         assert directsdk_setup.apply_traffic_policy({})["DISABLE_TELEMETRY"] == "1"
     finally:
-        reset_hermes_home_override(token)
+        reset_nako_home_override(token)
     assert "DISABLE_TELEMETRY" not in directsdk_setup.apply_traffic_policy({})
 
 
 def test_manifest_declares_the_setting_under_the_key_the_code_reads():
-    """Hermes keys plugins.entries by the manifest name; the code must read that same entry."""
+    """Nako keys plugins.entries by the manifest name; the code must read that same entry."""
     from pathlib import Path
-    from hermes_cli.plugins_settings import plugin_settings_fields
+    from nako_cli.plugins_settings import plugin_settings_fields
     import directsdk_setup
     root = Path(directsdk_setup.__file__).resolve().parent
     assert directsdk_setup.PLUGIN_ID == PLUGIN_NAME

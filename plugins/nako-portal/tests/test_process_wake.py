@@ -1,7 +1,7 @@
 """A background process that finishes in a portal thread wakes that thread's agent, and a turn
-Hermes runs from its queue shows as working in the portal like a typed one.
+Nako runs from its queue shows as working in the portal like a typed one.
 
-Runs against the real gateway where Hermes is installed; CI has no Hermes and skips.
+Runs against the real gateway where Nako is installed; CI has no Nako and skips.
 """
 
 import importlib.util
@@ -38,7 +38,7 @@ async def gateway(tmp_path, monkeypatch):
     from gateway.session_authority import SessionAuthority, initialize_session_authority
     from gateway.session_ingress_context import register_transport_home
 
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("NAKO_HOME", str(tmp_path))
     monkeypatch.setattr(SessionAuthority, "_schedule", lambda self, ref: None)
     plugin = load_plugin()
     ctx = Ctx()
@@ -53,7 +53,7 @@ async def gateway(tmp_path, monkeypatch):
         runner.session_store._db = store
         authority = await initialize_session_authority(runner, profile_id="default", instance_id="wake-test", persistence=store)
     else:
-        from hermes_state import SessionDB
+        from nako_state import SessionDB
 
         db = SessionDB(tmp_path / "state.db")
         runner.session_store._db = db
@@ -141,14 +141,14 @@ class Heard:
 
 
 @pytest.mark.asyncio
-async def test_a_turn_hermes_runs_from_its_queue_shows_working_then_done(tmp_path, monkeypatch):
+async def test_a_turn_nako_runs_from_its_queue_shows_working_then_done(tmp_path, monkeypatch):
     import asyncio
     from types import SimpleNamespace
 
     plugin, runner, authority, adapter = await gateway(tmp_path, monkeypatch)
     store = getattr(authority, "persistence", None)
     if store is None:
-        from hermes_state_runtime import claim_session_input, settle_session_input
+        from nako_state_runtime import claim_session_input, settle_session_input
 
     def claim(session):
         if store is not None:
@@ -165,7 +165,7 @@ async def test_a_turn_hermes_runs_from_its_queue_shows_working_then_done(tmp_pat
             settle_session_input(authority.db, **args)
 
     monkeypatch.setattr(plugin, "TURN_SWEEP", 0.05)
-    adapter.backend = plugin.HermesBackend(adapter, tmp_path)
+    adapter.backend = plugin.NakoBackend(adapter, tmp_path)
     adapter.link = heard = Heard()
     sweep = asyncio.get_running_loop().create_task(adapter._sweep_turns())
     try:

@@ -222,7 +222,7 @@ function AddMachine({ close, onError, ready }: { close: () => void; onError: (m:
         </form>
       ) : (
         <>
-          <p className="text-muted-foreground">Paste this in {chosen.where} on {name}. It installs Hermes if needed, has you sign in to a model once, then joins the mesh.</p>
+          <p className="text-muted-foreground">Paste this in {chosen.where} on {name}. It installs Nako if needed, has you sign in to a model once, then joins the mesh.</p>
           <p className="rounded-lg bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed [overflow-wrap:anywhere]">{line}</p>
           <div className="flex items-center justify-end gap-2">
             <span className="mr-auto text-muted-foreground text-xs">works for a day</span>

@@ -13,7 +13,7 @@ from typing import Any
 
 from nako_portal_runtime import AGENT
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 # The agent names a sign-in flow's home field after itself.
 FLOW_HOME = f"{AGENT}_home"
 MCP_SIGNIN_TTL = 15 * 60
@@ -26,7 +26,7 @@ def _flow_home(flow):
 def _mcp_configs():
     """``(servers, plugins)``: every server the current profile has, config and plugin ones
     alike, and the plugin that brings each (None for ones in config.yaml)."""
-    from hermes_cli.mcp_config import _get_mcp_servers
+    from nako_cli.mcp_config import _get_mcp_servers
     from tui_gateway.mcp_rpc_helpers import server_configs_with_sources
 
     return server_configs_with_sources(_get_mcp_servers())
@@ -35,8 +35,8 @@ def _mcp_configs():
 def _codex_runtime():
     """Whether Codex runs the profile's turns itself, from its own copy of the server list."""
     try:
-        from hermes_cli.codex_runtime_switch import get_current_runtime
-        from hermes_cli.config import load_config
+        from nako_cli.codex_runtime_switch import get_current_runtime
+        from nako_cli.config import load_config
 
         return get_current_runtime(load_config()) == "codex_app_server"
     except Exception:  # noqa: BLE001 - Optional runtime discovery must not prevent MCP management.
@@ -44,9 +44,9 @@ def _codex_runtime():
 
 
 def _mcp_redact(error):
-    """An error's text with anything key-shaped masked, as `hermes mcp test` prints it."""
+    """An error's text with anything key-shaped masked, as `nako mcp test` prints it."""
     try:
-        from hermes_cli.mcp_config import redact_mcp_probe_text
+        from nako_cli.mcp_config import redact_mcp_probe_text
 
         return str(redact_mcp_probe_text(error) or "").strip()
     except Exception:  # noqa: BLE001 - Fail closed if redaction fails; never expose the raw error.
@@ -74,7 +74,7 @@ def _mcp_tool_on(tool, include, exclude):
 
 def _mcp_row(name, cfg, plugin, live, codex):
     """One row of Settings > MCP servers. Header and env values never leave: only their names."""
-    from hermes_cli.mcp_config import _oauth_tokens_present
+    from nako_cli.mcp_config import _oauth_tokens_present
     from tools.mcp_tool_common import mcp_server_enabled
 
     include, exclude = _mcp_tool_filters(cfg)
@@ -115,7 +115,7 @@ class MCPBackend:
     """MCP operations using the backend's scope, install state, and change hook."""
 
     def mcp_servers(self):
-        """The shown profile's servers and how each is doing; None on a Hermes without MCP."""
+        """The shown profile's servers and how each is doing; None on a Nako without MCP."""
         try:
             from tools.mcp_tool_discovery import get_mcp_status
         except ImportError:
@@ -137,9 +137,9 @@ class MCPBackend:
 
 
     def mcp_catalog(self):
-        """The servers Hermes's catalog offers, with what each needs before it can run."""
-        from hermes_cli import mcp_catalog
-        from hermes_cli.config import get_env_value
+        """The servers Nako's catalog offers, with what each needs before it can run."""
+        from nako_cli import mcp_catalog
+        from nako_cli.config import get_env_value
 
         with self._profile_scope():
             rows = []
@@ -164,8 +164,8 @@ class MCPBackend:
     def mcp_install(self, name, env=None):
         """Install a catalog server for the shown profile. Keys it declares are saved first (secrets
         to `.env`); the install itself (a clone and build for some) runs on in the background."""
-        from hermes_cli import mcp_catalog
-        from hermes_cli.config import get_env_value, save_env_value, validate_env_var_name_for_write
+        from nako_cli import mcp_catalog
+        from nako_cli.config import get_env_value, save_env_value, validate_env_var_name_for_write
 
         entry = mcp_catalog.get_entry(str(name or ""))
         if entry is None:
@@ -196,7 +196,7 @@ class MCPBackend:
 
     def _mcp_install_run(self, home, entry, values):
         from gateway.run import _profile_runtime_scope
-        from hermes_cli import mcp_catalog
+        from nako_cli import mcp_catalog
         from tools.mcp_oauth import suppress_interactive_oauth
 
         key = (str(home), entry.name)
@@ -215,10 +215,10 @@ class MCPBackend:
 
     def mcp_add(self, spec):
         """Add a server by hand: a URL (with an optional token or browser sign-in) or a command
-        with its arguments and environment, checked the way `hermes mcp add` checks it."""
-        from hermes_cli.mcp_config import _save_bearer_auth_token, _save_mcp_server
-        from hermes_cli.web_models import MCPServerCreate
-        from hermes_cli.web_server_mcp import normalize_mcp_server_create
+        with its arguments and environment, checked the way `nako mcp add` checks it."""
+        from nako_cli.mcp_config import _save_bearer_auth_token, _save_mcp_server
+        from nako_cli.web_models import MCPServerCreate
+        from nako_cli.web_server_mcp import normalize_mcp_server_create
         from pydantic import SecretStr
 
         spec = dict(spec or {})
@@ -241,7 +241,7 @@ class MCPBackend:
 
 
     def mcp_set_enabled(self, name, enabled):
-        from hermes_cli.config import load_config, save_config
+        from nako_cli.config import load_config, save_config
 
         with self._profile_scope():
             self._mcp_own(name)
@@ -252,7 +252,7 @@ class MCPBackend:
 
 
     def mcp_remove(self, name):
-        from hermes_cli.mcp_config import _remove_mcp_server
+        from nako_cli.mcp_config import _remove_mcp_server
 
         home = str(self._home())
         with self.mcp_lock:
@@ -264,7 +264,7 @@ class MCPBackend:
         with self._profile_scope():
             self._mcp_own(name)
             _remove_mcp_server(name)
-            try:  # its sign-in goes with it, as `hermes mcp remove` does
+            try:  # its sign-in goes with it, as `nako mcp remove` does
                 from tools.mcp_oauth_manager import get_manager
 
                 get_manager().remove(name)
@@ -276,7 +276,7 @@ class MCPBackend:
     def mcp_test(self, name):
         """Connect to one server, list its tools, disconnect: whether it works, and which tools the
         profile has switched on."""
-        from hermes_cli.mcp_config import _oauth_tokens_present, _probe_single_server
+        from nako_cli.mcp_config import _oauth_tokens_present, _probe_single_server
         from tools.mcp_oauth import suppress_interactive_oauth
 
         with self._profile_scope():
@@ -296,9 +296,9 @@ class MCPBackend:
 
 
     def mcp_set_tools(self, name, tools, chosen):
-        """Switch a server's tools on and off, the way `hermes mcp configure` saves the checklist."""
-        from hermes_cli.config import load_config, save_config
-        from hermes_cli.mcp_config import _rebuild_exclude_list
+        """Switch a server's tools on and off, the way `nako mcp configure` saves the checklist."""
+        from nako_cli.config import load_config, save_config
+        from nako_cli.mcp_config import _rebuild_exclude_list
         from tools.mcp_tool_schema import matches_name_filter
 
         names = [str(t) for t in tools or []]
@@ -332,7 +332,7 @@ class MCPBackend:
     def mcp_start_signin(self, name, redirect_uri):
         """Start a server's browser sign-in. The provider sends the browser back to the portal's
         own callback, which hands the code to the waiting flow (`mcp_oauth_callback`)."""
-        from hermes_cli.web_server_mcp import _run_dashboard_mcp_oauth
+        from nako_cli.web_server_mcp import _run_dashboard_mcp_oauth
         from tools.mcp_dashboard_oauth import DashboardOAuthFlow, exception_message
 
         home = str(Path(self._home()).expanduser().resolve(strict=False))
@@ -352,7 +352,7 @@ class MCPBackend:
         with self.mcp_lock:
             if any(f.server_name == name and _flow_home(f) == home and not f.worker_done for f in self.mcp_flows.values()):
                 raise ValueError(f"A sign-in for {name} is already open")
-            # Older Hermes builds still require profile even though hermes_home carries the scope.
+            # Older Nako builds still require profile even though nako_home carries the scope.
             legacy: dict[str, Any] = {}
             if any(f.name == "profile" for f in dataclasses.fields(DashboardOAuthFlow)):
                 legacy["profile"] = None
@@ -443,8 +443,8 @@ class MCPBackend:
                 if runner is not None and hasattr(runner, "_mcp_reload_refresh_cached_agents"):
                     runner._mcp_reload_refresh_cached_agents(bool(getattr(runner.config, "multiplex_profiles", False)), profile)
                 if _codex_runtime():
-                    from hermes_cli.codex_runtime_plugin_migration import migrate
-                    from hermes_cli.config import load_config
+                    from nako_cli.codex_runtime_plugin_migration import migrate
+                    from nako_cli.config import load_config
 
                     migrate(load_config())
         except Exception:

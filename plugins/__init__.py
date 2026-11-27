@@ -1,1 +1,1 @@
-# Hermes plugins package
+# Nako plugins package

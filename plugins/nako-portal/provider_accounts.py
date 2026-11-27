@@ -10,8 +10,8 @@ Two kinds of source:
 - A provider plugin whose profile has the account hooks (`account_logins`, `start_account_login`,
   `finish_account_login`, `cancel_account_login`). It signs in through a link and a pasted code.
   With `remove_account_login` too, accounts can be removed (the plugin decides which may go).
-- A Hermes OAuth provider with a credential pool and a device-code login (Codex). Hermes keeps
-  every account as its own pool row; this reuses Hermes's own device-code steps and pool.
+- A Nako OAuth provider with a credential pool and a device-code login (Codex). Nako keeps
+  every account as its own pool row; this reuses Nako's own device-code steps and pool.
 """
 import logging
 import secrets
@@ -81,7 +81,7 @@ def _result(raw):
 
 
 class CodexAccounts:
-    """ChatGPT/Codex: one pool row per account, signed in with Hermes's device code."""
+    """ChatGPT/Codex: one pool row per account, signed in with Nako's device code."""
 
     mode = "code"
     provider = "openai-codex"
@@ -101,16 +101,16 @@ class CodexAccounts:
         rows = []
         for entry in self._pool().entries():
             email, plan = _codex_who(entry.access_token)
-            # Hermes names its own login's row after where it came from ("device_code"); the email says more.
+            # Nako names its own login's row after where it came from ("device_code"); the email says more.
             label = entry.label if entry.label and entry.label != entry.source else email
             rows.append({"id": entry.id, "label": label or entry.label, "email": email, "plan": plan,
                          "signed_in": bool(entry.access_token) and entry.last_status != STATUS_DEAD, "removable": True})
         return rows
 
     def remove(self, account):
-        """Remove a pool row the way `hermes auth remove` does, so its source can't re-seed it."""
+        """Remove a pool row the way `nako auth remove` does, so its source can't re-seed it."""
         from agent.credential_sources import find_removal_step
-        from hermes_cli.auth import suppress_credential_source
+        from nako_cli.auth import suppress_credential_source
 
         pool = self._pool()
         index = next((i for i, e in enumerate(pool.entries(), 1) if e.id == str(account)), None)
@@ -194,8 +194,8 @@ class CodexAccounts:
             match = same[0]
         if match is not None:
             if match.source == "device_code":
-                # The row Hermes seeds from its own Codex login: refresh it where Hermes keeps it.
-                from hermes_cli.auth_codex import _save_codex_tokens
+                # The row Nako seeds from its own Codex login: refresh it where Nako keeps it.
+                from nako_cli.auth_codex import _save_codex_tokens
 
                 _save_codex_tokens(tokens, last_refresh=now, set_active=False)
                 pool = self._pool()
@@ -203,7 +203,7 @@ class CodexAccounts:
                 pool._adopt(match, access_token=tokens["access_token"], refresh_token=tokens.get("refresh_token"), last_refresh=now)
             pool.reset_status(match.id)
             return {"outcome": "refreshed", "label": match.label or email, "email": email, "plan": plan}
-        from hermes_cli.auth_codex import _codex_base_url
+        from nako_cli.auth_codex import _codex_base_url
 
         entry = PooledCredential(
             provider=self.provider, id=secrets.token_hex(3), label=email or f"{self.provider}-oauth-{len(entries) + 1}",
@@ -255,7 +255,7 @@ def _codex_who(token):
 
 
 def _routes():
-    from hermes_cli.web_routers import oauth
+    from nako_cli.web_routers import oauth
 
     return oauth
 

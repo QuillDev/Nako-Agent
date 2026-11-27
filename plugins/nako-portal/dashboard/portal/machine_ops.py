@@ -1,4 +1,4 @@
-"""Looking after this machine's Hermes from its portal server: its version, restarting its gateway,
+"""Looking after this machine's Nako from its portal server: its version, restarting its gateway,
 updating it, and bringing the gateway back when it goes away and stays away.
 
 The server outlives the gateway, so it's the one part of a machine that can still act when the
@@ -19,9 +19,9 @@ import time
 import uuid
 from pathlib import Path
 
-from .machine_job import hermes_version
+from .machine_job import nako_version
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 
 JOB_FILE = "mesh-job.json"
 JOB_SCRIPT = Path(__file__).resolve().parent / "machine_job.py"
@@ -34,7 +34,7 @@ COOLDOWN = 10 * 60
 # The agent's own marker while its update runs (the update stops and restarts gateways itself).
 # It is named after the agent, as is the Windows scheduled task below.
 UPDATE_MARKER = ".{agent}-update-in-progress"
-UPSTREAM = "hermes"
+UPSTREAM = "nako"
 UPDATE_MARKER_TTL = 40 * 60
 
 
@@ -53,13 +53,13 @@ def _platform():
 
 class MachineOps:
     """`hub` is this server's own hub (its `connected` says whether a gateway is dialed in).
-    `hermes` is the command that runs the agent here (argv), or None when it wasn't found.
+    `nako` is the command that runs the agent here (argv), or None when it wasn't found.
     `agent` is what that agent calls itself."""
 
-    def __init__(self, data, home, hermes, hub, *, agent=UPSTREAM, python=None, platform=None, watchdog=False, grace=GRACE, cooldown=COOLDOWN, clock=time.time):
+    def __init__(self, data, home, nako, hub, *, agent=UPSTREAM, python=None, platform=None, watchdog=False, grace=GRACE, cooldown=COOLDOWN, clock=time.time):
         self.data = Path(data)
         self.home = Path(home)
-        self.hermes = list(hermes) if hermes else None
+        self.nako = list(nako) if nako else None
         self.agent = agent or UPSTREAM
         self.hub = hub
         self.python = python or sys.executable
@@ -70,7 +70,7 @@ class MachineOps:
         self.clock = clock
         self.info = None
         self.revived_at = None
-        # Called with this machine's Hermes info whenever it's read again (the node tells the hub).
+        # Called with this machine's Nako info whenever it's read again (the node tells the hub).
         self.on_info = None
         self._waiting = None
         self._watching = None
@@ -78,9 +78,9 @@ class MachineOps:
     # Version
 
     async def refresh(self):
-        if self.hermes is None:
+        if self.nako is None:
             return None
-        info = await asyncio.to_thread(hermes_version, self.hermes)
+        info = await asyncio.to_thread(nako_version, self.nako)
         if info is not None:
             self.info = info
             if self.on_info is not None:
@@ -107,7 +107,7 @@ class MachineOps:
         """The last restart or update and how it went, with whether the gateway is up now."""
         job = self._read_job()
         if job is None:
-            return {"job": None, "gateway": bool(self.hub.connected), "hermes": self.info}
+            return {"job": None, "gateway": bool(self.hub.connected), "nako": self.info}
         status = job.get("status")
         if status in ("starting", "running") and self.clock() - (job.get("started_at") or 0) >= JOB_STALE:
             status = "lost"
@@ -117,12 +117,12 @@ class MachineOps:
                 view["log_tail"] = Path(job["log"]).read_text(encoding="utf-8-sig", errors="replace")[-2000:]
             except (OSError, KeyError):
                 pass
-        return {"job": {**view, "status": status}, "gateway": bool(self.hub.connected), "hermes": self.info}
+        return {"job": {**view, "status": status}, "gateway": bool(self.hub.connected), "nako": self.info}
 
     async def start(self, kind, channel=None):
         if kind not in KINDS:
             raise ValueError(f"unknown job {kind!r}")
-        if self.hermes is None:
+        if self.nako is None:
             raise ValueError(f"Can't find the {self.agent} command on this machine")
         if channel is not None and not (isinstance(channel, str) and channel.replace("-", "").replace(".", "").isalnum() and len(channel) < 40):
             raise ValueError("bad channel name")
@@ -140,7 +140,7 @@ class MachineOps:
             "status": "starting",
             "step": "starting",
             "started_at": self.clock(),
-            "hermes": self.hermes,
+            "nako": self.nako,
             "platform": self.platform,
             "task": _task_name(self.home, self.agent),
             "log": str(log_path),
@@ -186,7 +186,7 @@ class MachineOps:
             self._watching = loop.create_task(self._watch())
 
     def _updating(self):
-        """Hermes's own `hermes update` is running (it restarts the gateway itself when done)."""
+        """Nako's own `nako update` is running (it restarts the gateway itself when done)."""
         for root in (self.home, self.home.parent.parent):
             marker = root / UPDATE_MARKER.format(agent=self.agent)
             try:

@@ -1,4 +1,4 @@
-"""The link between the portal's server and the Hermes gateway.
+"""The link between the portal's server and the Nako gateway.
 
 The server runs on its own and stays up; the gateway dials in over one WebSocket on the
 loopback port, the way a bot connects to Discord. Either side can call the other's methods:
@@ -20,7 +20,7 @@ import secrets
 
 from aiohttp import ClientError, WSMsgType, web
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 
 GATEWAY_PATH = "/gateway"
 # A message can carry 25 MiB of files, base64-encoded.
@@ -241,8 +241,8 @@ class GatewayLink:
         await ws.prepare(request)
         peer = Peer(ws, self._methods())
         old, self.peer = self.peer, peer
-        version, build = request.query.get("hermes_version"), request.query.get("hermes_build")
-        self.hub.hermes_build = {"version": version, "build": build} if version and build else None
+        version, build = request.query.get("nako_version"), request.query.get("nako_build")
+        self.hub.nako_build = {"version": version, "build": build} if version and build else None
         if old is not None:
             await old.ws.close()
         log.info("portal: gateway connected")
@@ -253,7 +253,7 @@ class GatewayLink:
             changed.cancel()
             if self.peer is peer:
                 self.peer = None
-                self.hub.hermes_build = None
+                self.hub.nako_build = None
                 log.info("portal: gateway went away")
                 # The HTTP handler may be cancelled as its socket closes. Finish notifying
                 # subscribers even when a concurrent broadcast has to yield to senders.
@@ -315,13 +315,13 @@ class GatewayClient:
 
     RETRY = 1.0
 
-    def __init__(self, url, token, code, backend, *, hermes_build=None, on_missing=None, on_stale=None):
+    def __init__(self, url, token, code, backend, *, nako_build=None, on_missing=None, on_stale=None):
         self.url = url
         self.token = token
         self.backend = backend
         self.params = {"code": code}
-        if hermes_build:
-            self.params.update(hermes_version=hermes_build["version"], hermes_build=hermes_build["build"])
+        if nako_build:
+            self.params.update(nako_version=nako_build["version"], nako_build=nako_build["build"])
         self.on_missing = on_missing
         self.on_stale = on_stale
         self.peer = None

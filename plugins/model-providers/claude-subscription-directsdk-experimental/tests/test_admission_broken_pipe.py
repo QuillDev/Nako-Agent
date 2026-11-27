@@ -5,7 +5,7 @@ Before the real `/v1/messages` POST, native (Bun's HTTP client) fires a warm-up 
 dispatch answers any other method with a 501 via send_error(); native never reads that body and
 disconnects immediately, so the write raises BrokenPipeError/ConnectionResetError while
 send_error() is still writing it. The 501 itself is expected and harmless to the real request
-(hermes-plugin-claude-subscription-directsdk#17, archived); the bug is socketserver's default
+(nako-plugin-claude-subscription-directsdk#17, archived); the bug is socketserver's default
 handle_error() printing a scary "Exception occurred during processing of request..." traceback to
 stderr for this exact, harmless, every-turn race.
 """

@@ -83,7 +83,7 @@ _EXIT_TWO = SimpleNamespace(stdout=b"", stderr=b"", returncode=2)
 _EXIT_BROKEN_INTERPRETER = SimpleNamespace(stdout=b"", stderr=b"", returncode=1)
 
 # Deterministic stand-in for the cascade's bare "python3" entry.
-_VENV_PYTHON = "/opt/hermes-venv/bin/python3"
+_VENV_PYTHON = "/opt/nako-venv/bin/python3"
 
 
 def _secret_tool_result(stderr=b"", returncode=0, stdout=b""):

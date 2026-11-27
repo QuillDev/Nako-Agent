@@ -12,7 +12,7 @@ from . import settings
 
 
 def providers():
-    from hermes_cli.inventory import build_models_payload, load_picker_context
+    from nako_cli.inventory import build_models_payload, load_picker_context
     payload = build_models_payload(load_picker_context(), non_blocking_catalogs=True)
     return [{"provider": str(row["slug"]), "label": str(row.get("name") or row["slug"]),
              "models": [str(m) for m in row.get("models") or []]}
@@ -27,11 +27,11 @@ def usage():
     """Plan limits of every signed-in provider that reports them, one row per account:
     [{provider, label, accounts: [{label, windows: [{label, used_percent, resets_at}], note}]}].
     A provider plugin that links several logins itself answers `fetch_account_usage_by_account()`;
-    Hermes credential pools come from the picker inventory; anything else is one unlabeled account.
+    Nako credential pools come from the picker inventory; anything else is one unlabeled account.
     Model-scoped windows (one model family's own cap, e.g. Fable's weekly limit) are left out: they
     never say whether the account itself is out, and the shown limits are the account's."""
     from agent.account_usage_cache import has_account_usage
-    from hermes_cli.inventory import build_models_payload, load_picker_context
+    from nako_cli.inventory import build_models_payload, load_picker_context
 
     payload = build_models_payload(load_picker_context(), non_blocking_catalogs=True)
     shown = []
@@ -176,7 +176,7 @@ def _codex_reset_target(account):
         return None, None, None
     from agent.account_usage_cache import _identity_id_for
     from agent.credential_pool import load_pool
-    from hermes_cli.auth_codex import _codex_pool_route_base_url
+    from nako_cli.auth_codex import _codex_pool_route_base_url
 
     for entry in load_pool("openai-codex").entries():
         identity_id = _identity_id_for("openai-codex", entry)
@@ -248,14 +248,14 @@ class Client:
             return use_reset(provider, account=account, force=force, grant=grant)
 
     def model(self):
-        from hermes_cli.config import load_config
+        from nako_cli.config import load_config
 
         with self._profile_scope():
             config = load_config()
             chosen = config.get("model") or {}
             agent = config.get("agent") or {}
             from agent.fast_mode import service_tier_word, parse_service_tier
-            from hermes_constants import resolve_reasoning_config
+            from nako_constants import resolve_reasoning_config
             if not isinstance(chosen, dict):
                 chosen = {"default": str(chosen)}
             provider, model = str(chosen.get("provider") or ""), str(chosen.get("default") or chosen.get("model") or "")
@@ -267,9 +267,9 @@ class Client:
 
     def set_model(self, provider, model, tuning=None):
         """Switch the shown profile's model the way `/model <model> --provider <p> --global` does:
-        Hermes validates the pick and rewrites the endpoint keys that go with it."""
-        from hermes_cli.config import get_compatible_custom_providers, load_config
-        from hermes_cli.model_switch import persist_model_selection, switch_model
+        Nako validates the pick and rewrites the endpoint keys that go with it."""
+        from nako_cli.config import get_compatible_custom_providers, load_config
+        from nako_cli.model_switch import persist_model_selection, switch_model
 
         with self._profile_scope():
             config = load_config()
@@ -292,7 +292,7 @@ class Client:
             persist_model_selection(result)
 
     def set_model_options(self, body):
-        from hermes_cli.config import set_config_value
+        from nako_cli.config import set_config_value
 
         settings.validate(body)
         if body.get("reset") or "confirm" in body:
@@ -327,7 +327,7 @@ class Client:
         source = self.source(chat)
         key = runner._session_key_for_source(source)
         with self._profile_scope():
-            from hermes_cli.config import load_config
+            from nako_cli.config import load_config
             config = load_config()
             runner._rehydrate_session_model_override(key)
             override = runner._session_model_override(key) or {}
@@ -352,8 +352,8 @@ class Client:
 
     async def set_session_model(self, session, body):
         from gateway.slash_commands_model import _ModelSwitchContext
-        from hermes_cli.model_switch import switch_model
-        from hermes_cli.config import get_compatible_custom_providers, load_config
+        from nako_cli.model_switch import switch_model
+        from nako_cli.config import get_compatible_custom_providers, load_config
 
         settings.validate(body)
         chat = self.session_chat(session)
@@ -384,7 +384,7 @@ class Client:
                                 user_providers=config.get("providers"), custom_providers=get_compatible_custom_providers(config))
                             if not result.success:
                                 raise ValueError(result.error_message or "That model can't be used")
-                            from hermes_cli.model_selection_guards import selection_warnings, selection_context_for_agent, combined_message
+                            from nako_cli.model_selection_guards import selection_warnings, selection_context_for_agent, combined_message
                             warnings = await asyncio.to_thread(selection_warnings, result.new_model, provider=result.target_provider,
                                 base_url=result.base_url, api_key=result.api_key, model_info=getattr(result, "model_info", None),
                                 selection_context=selection_context_for_agent(runner._cached_agent_for(key)))

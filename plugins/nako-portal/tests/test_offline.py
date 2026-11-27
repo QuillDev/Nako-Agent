@@ -158,7 +158,7 @@ def test_offline_reads_across_profiles_and_falls_back_on_projection_failure(tmp_
     work_db.commit()
     work_db.close()
 
-    # Projection child fails when Hermes isn't importable -> cleanly falls back to raw_thread.
+    # Projection child fails when Nako isn't importable -> cleanly falls back to raw_thread.
     offline = Offline(tmp_path, python=sys.executable, projection=True)
 
     assert offline.chat_of("work-chat") == "c-work"
@@ -168,7 +168,7 @@ def test_offline_reads_across_profiles_and_falls_back_on_projection_failure(tmp_
     assert offline.title_of("missing") is None
     assert offline.thread("slack-chat") is None
 
-    # Projection child fails (no Hermes installed) -> cleanly falls back to raw_thread.
+    # Projection child fails (no Nako installed) -> cleanly falls back to raw_thread.
     thread = offline.thread("work-chat")
     assert thread["title"] == "Work"
     assert [m["text"] for m in thread["messages"]] == ["shared needle newer"]

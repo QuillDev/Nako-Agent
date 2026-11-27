@@ -1,4 +1,4 @@
-# Offline CI imports Hermes source; the plugin itself remains dependency-light.
+# Offline CI imports Nako source; the plugin itself remains dependency-light.
 openai>=1,<3
 ruamel.yaml>=0.18,<0.19
 psutil>=6,<8

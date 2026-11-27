@@ -32,9 +32,9 @@ def load_plugin():
 @pytest.mark.parametrize("missing", [True, False])
 def test_removing_a_provider_key_only_ignores_missing_files(tmp_path, monkeypatch, missing):
     plugin = load_plugin()
-    config = types.ModuleType("hermes_cli.config")
+    config = types.ModuleType("nako_cli.config")
     config.remove_env_value = lambda name: None
-    monkeypatch.setitem(sys.modules, "hermes_cli.config", config)
+    monkeypatch.setitem(sys.modules, "nako_cli.config", config)
 
     def remove(*args, **kwargs):
         if missing:
@@ -47,7 +47,7 @@ def test_removing_a_provider_key_only_ignores_missing_files(tmp_path, monkeypatc
         _scoped=remove,
     )
     with contextlib.nullcontext() if missing else pytest.raises(PermissionError, match="read-only"):
-        plugin.HermesBackend.remove_provider_key(backend, "example")
+        plugin.NakoBackend.remove_provider_key(backend, "example")
 
 
 async def test_unsupported_account_removal_remains_a_validation_error(world, monkeypatch):
@@ -56,7 +56,7 @@ async def test_unsupported_account_removal_remains_a_validation_error(world, mon
     spec.loader.exec_module(module)
     accounts = module.PluginAccounts(types.SimpleNamespace())
     await world.gateway.stop(world.hub)
-    monkeypatch.setattr(world.hermes, "remove_account", lambda slug, account: accounts.remove(account))
+    monkeypatch.setattr(world.nako, "remove_account", lambda slug, account: accounts.remove(account))
     await world.gateway.start(world.hub)
 
     await world.sign_up()
@@ -320,11 +320,11 @@ async def test_credential_write_keeps_request_profile_during_switch(tmp_path, mo
         path.mkdir()
         (path / '.env').write_text('API_KEY=old\nALT_KEY=old\n', encoding="utf-8")
     scope = contextvars.ContextVar('test_home')
-    constants = types.ModuleType('hermes_constants')
-    constants.set_hermes_home_override = scope.set
-    constants.reset_hermes_home_override = scope.reset
-    monkeypatch.setitem(sys.modules, 'hermes_constants', constants)
-    config = types.ModuleType('hermes_cli.config')
+    constants = types.ModuleType('nako_constants')
+    constants.set_nako_home_override = scope.set
+    constants.reset_nako_home_override = scope.reset
+    monkeypatch.setitem(sys.modules, 'nako_constants', constants)
+    config = types.ModuleType('nako_cli.config')
 
     def save(name, value):
         path = Path(scope.get()) / '.env'
@@ -337,10 +337,10 @@ async def test_credential_write_keeps_request_profile_during_switch(tmp_path, mo
         path.write_text(''.join(line for line in existing.splitlines(True) if not line.startswith(name + '=')), encoding="utf-8")
 
     config.save_env_value, config.remove_env_value = save, remove
-    monkeypatch.setitem(sys.modules, 'hermes_cli.config', config)
+    monkeypatch.setitem(sys.modules, 'nako_cli.config', config)
     validating, resume = threading.Event(), threading.Event()
 
-    class Backend(plugin.HermesBackend):
+    class Backend(plugin.NakoBackend):
         def homes(self):
             return {'default': home, 'other': other}
 
@@ -408,7 +408,7 @@ async def test_restart_sqlite_reads_leave_event_loop_responsive(tmp_path, monkey
         db.execute("INSERT INTO session_admissions VALUES ('one', 'turn-one', 'started')")
     reading, release = threading.Event(), threading.Event()
 
-    class Backend(plugin.HermesBackend):
+    class Backend(plugin.NakoBackend):
         def homes(self):
             return {'default': tmp_path}
 
@@ -465,7 +465,7 @@ async def test_new_thread_persists_cwd_before_first_prompt(tmp_path, monkeypatch
         def set_session_metadata(self, key, name, value):
             saved.write_text(json.dumps({key: {name: value}}), encoding="utf-8")
 
-    backend = plugin.HermesBackend(types.SimpleNamespace(_session_store=SessionStore()), tmp_path)
+    backend = plugin.NakoBackend(types.SimpleNamespace(_session_store=SessionStore()), tmp_path)
     backend.profile = 'work'
     assert await backend.new_thread('chat', None, str(directory)) == 'session'
     assert json.loads(saved.read_text(encoding="utf-8-sig")) == {'work:portal:dm:chat': {'terminal_cwd': str(directory)}}
@@ -507,7 +507,7 @@ async def test_logout_during_handshake_cannot_register_a_revoked_socket(world, m
 def test_profile_selection_is_captured_before_resolving_homes(tmp_path):
     plugin = load_plugin()
 
-    class Backend(plugin.HermesBackend):
+    class Backend(plugin.NakoBackend):
         def homes(self):
             self.profile = 'other'
             return {'default': tmp_path / 'main', 'other': tmp_path / 'other'}

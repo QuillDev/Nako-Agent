@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import live_reasoning as bridge
 from stream import collect_stream_completion
 from agent.subagent_lifecycle import bind_subagent_parent
-from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+from nako_constants import set_nako_home_override, reset_nako_home_override
 
 
 class AdapterTests(unittest.TestCase):
@@ -167,7 +167,7 @@ class AdapterTests(unittest.TestCase):
         barrier = threading.Barrier(2)
         with tempfile.TemporaryDirectory() as root:
             def run(index):
-                token = set_hermes_home_override(Path(root)/str(index))
+                token = set_nako_home_override(Path(root)/str(index))
                 events = []
                 a = NS(**vars(self.a)); a.session_id = 'same-id'; a.reasoning_callback = events.append
                 def next_call(req):
@@ -176,9 +176,9 @@ class AdapterTests(unittest.TestCase):
                         barrier.wait(timeout=3)
                         emit = bridge.collector_emitter('same-id',req['_agy_request_token'],client=self.client)
                         emit(str(index))
-                        foreign = set_hermes_home_override(Path(root)/str(1-index))
+                        foreign = set_nako_home_override(Path(root)/str(1-index))
                         try: emit('foreign')
-                        finally: reset_hermes_home_override(foreign)
+                        finally: reset_nako_home_override(foreign)
                     thread = threading.Thread(target=context.run,args=(worker,)); thread.start();thread.join(5)
                     self.assertFalse(thread.is_alive())
                 try:
@@ -186,7 +186,7 @@ class AdapterTests(unittest.TestCase):
                         bridge.execution_middleware(request={'_agy_session_id':'same-id'},next_call=next_call,
                             provider=bridge.PROVIDER,session_id='same-id',turn_id='turn',api_request_id='req',model='model')
                     return events
-                finally: reset_hermes_home_override(token)
+                finally: reset_nako_home_override(token)
             with ThreadPoolExecutor(2) as pool:
                 results = list(pool.map(run,range(2)))
             self.assertEqual(results,[['0'],['1']])

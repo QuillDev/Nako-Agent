@@ -8,10 +8,10 @@ the person to run is one that exists on their machine.
 
 def _command() -> str:
     try:
-        import hermes_constants
+        import nako_constants
     except ImportError:  # no core on sys.path (the plugin's own tests)
-        return "hermes"
-    return hermes_constants.__name__.partition("_")[0]
+        return "nako"
+    return nako_constants.__name__.partition("_")[0]
 
 
 CLI = _command()

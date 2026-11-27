@@ -7,10 +7,10 @@ rather than written here: every name this plugin shows Anthropic or the user fol
 
 def _name() -> str:
     try:
-        import hermes_constants
+        import nako_constants
     except ImportError:  # the flat test path, with no core on sys.path
-        return 'hermes'
-    return hermes_constants.__name__.partition('_')[0]
+        return 'nako'
+    return nako_constants.__name__.partition('_')[0]
 
 
 NAME = _name()

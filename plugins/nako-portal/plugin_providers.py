@@ -9,7 +9,7 @@ from pathlib import Path
 
 from nako_portal_runtime import _load_sibling
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 LOOPBACK = re.compile(r"^https?://(localhost|127\.|0\.0\.0\.0|\[::1\])", re.IGNORECASE)
 
 
@@ -19,18 +19,18 @@ def _provider_accounts():
 
 
 def _provider_catalog():
-    """Every provider this Hermes offers, in `hermes model` order."""
-    from hermes_cli.provider_catalog import provider_catalog
+    """Every provider this Nako offers, in `nako model` order."""
+    from nako_cli.provider_catalog import provider_catalog
 
     return provider_catalog()
 
 
 class _ScopedEnv:
     """A key's value as the current profile scope sees it: that profile's `.env`, and process
-    variables only where Hermes treats them as shared (`get_env_value` holds the policy)."""
+    variables only where Nako treats them as shared (`get_env_value` holds the policy)."""
 
     def get(self, name, default=None):
-        from hermes_cli.config import get_env_value
+        from nako_cli.config import get_env_value
 
         return get_env_value(name) or default
 
@@ -38,10 +38,10 @@ class _ScopedEnv:
 def _account_status():
     """How each account provider signs in, and whether it has (`{"slug": {"flow", "cli_command", "status"}}`).
 
-    Built the way Hermes's own Accounts page builds it, so the command shown is the one Hermes shows.
+    Built the way Nako's own Accounts page builds it, so the command shown is the one Nako shows.
     """
     try:
-        from hermes_cli.web_routers.oauth import (
+        from nako_cli.web_routers.oauth import (
             _build_oauth_catalog,
             _external_process_cli_command,
             _resolve_provider_status,
@@ -55,7 +55,7 @@ def _account_status():
             }
             for entry in _build_oauth_catalog()
         }
-    except Exception:  # an older Hermes: keys still work, the accounts tab just has nothing to say
+    except Exception:  # an older Nako: keys still work, the accounts tab just has nothing to say
         log.warning("portal: could not read provider sign-in status", exc_info=True)
         return {}
 
@@ -76,15 +76,15 @@ def _add_accounts(row):
 
 
 def _oauth_routes():
-    from hermes_cli.web_routers import oauth
+    from nako_cli.web_routers import oauth
 
     return oauth
 
 
 def _default_endpoint(slug):
-    """The address Hermes calls for a provider when nothing overrides it ("" when it has none)."""
+    """The address Nako calls for a provider when nothing overrides it ("" when it has none)."""
     try:
-        from hermes_cli.auth import PROVIDER_REGISTRY
+        from nako_cli.auth import PROVIDER_REGISTRY
 
         config = PROVIDER_REGISTRY.get(slug)
     except ImportError:
@@ -97,7 +97,7 @@ def _provider_row(entry, env, accounts, endpoint=_default_endpoint):
 
     A single pasted key needs nothing else, and a provider with a device-code sign-in needs only
     the code. Most key providers also name a base-URL variable, but only as an optional override:
-    Hermes already knows their address. Left out until they have a form of their own are the ones
+    Nako already knows their address. Left out until they have a form of their own are the ones
     that can't run on a key alone: no key variable (Bedrock's AWS login, Vertex's service-account
     file), no built-in address (Azure Foundry), or an address on this machine (a local server).
     """
@@ -121,7 +121,7 @@ def _provider_row(entry, env, accounts, endpoint=_default_endpoint):
     if not key_vars:
         return None
     address = endpoint(entry.slug)
-    # No registry entry (OpenRouter): Hermes routes it by name, so the key is all it needs.
+    # No registry entry (OpenRouter): Nako routes it by name, so the key is all it needs.
     if address is not None and (not address or LOOPBACK.match(address)):
         return None
     found = next((v for v in key_vars if env.get(v)), "")
@@ -159,7 +159,7 @@ class ProviderBackend:
     def set_provider_key(self, slug, value):
         """Save an API key to the profile on screen, under the provider's own variable name."""
         home = self._home()
-        from hermes_cli.config import save_env_value
+        from nako_cli.config import save_env_value
 
         row = self._provider_for_key(slug, home=home)
         key = str(value or "").strip()
@@ -170,7 +170,7 @@ class ProviderBackend:
 
     def remove_provider_key(self, slug):
         home = self._home()
-        from hermes_cli.config import remove_env_value
+        from nako_cli.config import remove_env_value
 
         row = self._provider_for_key(slug, home=home)
         for name in row["env_vars"]:

@@ -1,9 +1,9 @@
-// `@session:<profile>/<id>` references, the form Hermes's session search tells Nako to cite a past
-// chat in. Hermes Desktop draws them as links to the chat; here they become links to the chat's
+// `@session:<profile>/<id>` references, the form Nako's session search tells Nako to cite a past
+// chat in. Nako Desktop draws them as links to the chat; here they become links to the chat's
 // page in the portal, labelled with its title once the chat list knows it.
 import { useSyncExternalStore } from "react"
 
-// Same match as Hermes Desktop (`apps/desktop/src/lib/session-refs.ts`): a bare value or one
+// Same match as Nako Desktop (`apps/desktop/src/lib/session-refs.ts`): a bare value or one
 // fenced in backticks/quotes, not inside a word, a path or a markdown link a reply already wrote.
 const SESSION_REF = /(?<![\w/])(?<!]\()@session:(`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|\S+)/g
 const TRAILING = /[,.;:!?)\]}]+$/

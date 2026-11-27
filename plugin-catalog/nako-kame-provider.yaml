@@ -1,0 +1,17 @@
+name: nako-kame-provider
+repo: https://github.com/Kame696/kame-api-rotation-for-nako
+sha: dc8cb11c32c6295a110581a7fc1b8c4c58506efb
+subdir: nako-kame-provider
+description: "Companion to nako-kame-api-rotation (install both). A model-provider plugin that re-registers Nako' bundled API-key profiles unchanged except for create_client and create_messages_client, which return the rotation plugin's key-rotating client; otherwise None and Nako builds its own. Same endpoints as Nako, no third-party service, no core override."
+maintainer: Kame696
+tier: community
+category: models
+requires_nako: ">=0.21.4"
+version: "1.9.0.4"
+docs_url: https://github.com/Kame696/kame-api-rotation-for-nako/tree/v1.9.0.4/nako-kame-provider#readme
+readme: true
+capabilities:
+  provides_tools: []
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []

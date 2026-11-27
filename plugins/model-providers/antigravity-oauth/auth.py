@@ -1,4 +1,4 @@
-"""`hermes auth add|status|logout|refresh antigravity-oauth`, delegated to the official agy CLI.
+"""`nako auth add|status|logout|refresh antigravity-oauth`, delegated to the official agy CLI.
 
 Google owns this OAuth flow end to end. `add` runs agy's own browser sign-in (it prints a URL and
 accepts a pasted code over SSH), then confirms the session with a live `agy models` call. The plugin
@@ -57,12 +57,12 @@ def verify_session(agy: str, timeout: float = _VERIFY_TIMEOUT_S) -> tuple[bool, 
 
 
 def probe(*, live: bool = False) -> dict[str, Any]:
-    """Shape consumed by Hermes' `hermes model` setup gate (`ProviderProfile.setup_status`)."""
+    """Shape consumed by Nako' `nako model` setup gate (`ProviderProfile.setup_status`)."""
     agy = _agy_path()
     if not agy:
         return {"available": False, "logged_in": False, "plan": "", "login_command": None,
                 "detail": f"Antigravity CLI (agy) not found. Install it from {INSTALL_URL} "
-                          "or run `npx hermes-antigravity-oauth --yes`."}
+                          "or run `npx nako-antigravity-oauth --yes`."}
     logged_in, detail = is_authenticated(), ""
     if live or logged_in:
         logged_in, _, detail = verify_session(agy)
@@ -98,7 +98,7 @@ def _add(args: Any) -> None:
     if not ok:
         raise SystemExit(f"Sign-in did not complete (agy exit {rc}; {detail}).")
     print(f"\n{PROVIDER_ID}: signed in. {detail}.")
-    print(f"Use it: hermes --provider {PROVIDER_ID} -m {_base_model(models[0])}")
+    print(f"Use it: nako --provider {PROVIDER_ID} -m {_base_model(models[0])}")
 
 
 def _base_model(model_id: str) -> str:
@@ -121,7 +121,7 @@ def _status(args: Any) -> None:
 def _logout(args: Any) -> None:
     # agy's credential store is Google's; removing it is agy's job, not this plugin's.
     print(f"{PROVIDER_ID}: the session belongs to the Antigravity CLI.")
-    print("To sign out, run `agy`, type /logout, then exit. Hermes stores no token for this provider.")
+    print("To sign out, run `agy`, type /logout, then exit. Nako stores no token for this provider.")
 
 
 def _refresh(args: Any) -> None:

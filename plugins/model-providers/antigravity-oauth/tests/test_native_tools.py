@@ -1,4 +1,4 @@
-"""agy-native tool steps become Hermes tool calls; unmappable ones stay neutralized."""
+"""agy-native tool steps become Nako tool calls; unmappable ones stay neutralized."""
 
 import json
 import os
@@ -32,7 +32,7 @@ class TranslateTests(unittest.TestCase):
         self.assertEqual(json.loads(call.function.arguments), {"command": "echo hi", "workdir": "/w"})
         self.assertEqual(call.id, "agy_2_run_command")
 
-    def test_unavailable_hermes_tool_is_not_mapped(self):
+    def test_unavailable_nako_tool_is_not_mapped(self):
         self.assertIsNone(native_tools.translate(_step("run_command", {"CommandLine": "x"}), {"read_file"}, 0))
 
     def test_unknown_native_tool_is_not_mapped(self):
@@ -64,7 +64,7 @@ class StreamBridgeTests(unittest.TestCase):
                                                          messages=[{"role": "user", "content": "run it"}]))
         return chunks, term, proc
 
-    def test_native_run_command_is_reissued_as_hermes_terminal_call(self):
+    def test_native_run_command_is_reissued_as_nako_terminal_call(self):
         events = [{"event": "init", "conversation_id": "c"},
                   {"event": "step_update", "step_update": _step("run_command", {"CommandLine": "echo SOUL_42"})}]
         chunks, term, proc = self._run(events, TERMINAL_TOOL)

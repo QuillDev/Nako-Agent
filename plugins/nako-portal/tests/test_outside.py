@@ -13,14 +13,14 @@ CRON = "local-cron0000000000000000"
 DISCORD = "20261116_080000_disc01"
 
 
-def _seed(hermes):
-    hermes.add_session("20261116_100000_portal", "Trip budget", messages=[("user", "hi"), ("assistant", "hello")])
-    hermes.add_session(DISCORD, "Book club picks", source="discord", last_active=1_000, messages=[("user", "picks?"), ("assistant", "three of them")])
-    hermes.add_session(SLACK, "Shipping export", source="slack", last_active=3_000, messages=[("user", "is the export short?"), ("assistant", "4 orders moved to tonight")])
-    hermes.add_session(CRON, "Morning digest", source="cron", last_active=2_000, messages=[("user", "digest"), ("assistant", "five links")])
+def _seed(nako):
+    nako.add_session("20261116_100000_portal", "Trip budget", messages=[("user", "hi"), ("assistant", "hello")])
+    nako.add_session(DISCORD, "Book club picks", source="discord", last_active=1_000, messages=[("user", "picks?"), ("assistant", "three of them")])
+    nako.add_session(SLACK, "Shipping export", source="slack", last_active=3_000, messages=[("user", "is the export short?"), ("assistant", "4 orders moved to tonight")])
+    nako.add_session(CRON, "Morning digest", source="cron", last_active=2_000, messages=[("user", "digest"), ("assistant", "five links")])
     # A cron run with nothing saved yet still lists; a turn's helper session doesn't.
-    hermes.add_session("local-empty000000000000000", "Inbox check", source="cron", last_active=4_000)
-    hermes.add_session("20261116_110000_tool01", "helper", source="tool", last_active=5_000, messages=[("user", "x")])
+    nako.add_session("local-empty000000000000000", "Inbox check", source="cron", last_active=4_000)
+    nako.add_session("20261116_110000_tool01", "helper", source="tool", last_active=5_000, messages=[("user", "x")])
 
 
 async def _outside(world, query=""):
@@ -31,7 +31,7 @@ async def _outside(world, query=""):
 
 async def test_sessions_from_elsewhere_list_latest_first_and_stay_out_of_the_sidebar(world):
     await world.sign_up()
-    _seed(world.hermes)
+    _seed(world.nako)
 
     assert await _outside(world) == [
         ("Inbox check", "cron", False),
@@ -48,15 +48,15 @@ async def test_sessions_from_elsewhere_list_latest_first_and_stay_out_of_the_sid
 
 async def test_the_app_hears_which_sessions_elsewhere_are_running_without_any_alert(world):
     await world.sign_up()
-    _seed(world.hermes)
-    await world.hermes.hub.outside({"sources": ["cron", "discord", "slack"], "running": []})
+    _seed(world.nako)
+    await world.nako.hub.outside({"sources": ["cron", "discord", "slack"], "running": []})
     sticker = world.hub.sticker()
 
     ws = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
     joined = await next_message(ws, lambda m: m.get("kind") == "outside")
     assert joined == {"kind": "outside", "sources": ["cron", "discord", "slack"], "running": []}
 
-    await world.hermes.hub.outside({"sources": ["cron", "discord", "slack"], "running": [SLACK]})
+    await world.nako.hub.outside({"sources": ["cron", "discord", "slack"], "running": [SLACK]})
     started = await next_message(ws, lambda m: m.get("kind") == "outside")
     assert started["running"] == [SLACK]
     assert await _outside(world) == [
@@ -66,7 +66,7 @@ async def test_the_app_hears_which_sessions_elsewhere_are_running_without_any_al
         ("Book club picks", "discord", False),
     ]
 
-    await world.hermes.hub.outside({"sources": ["cron", "discord", "slack"], "running": []})
+    await world.nako.hub.outside({"sources": ["cron", "discord", "slack"], "running": []})
     assert (await next_message(ws, lambda m: m.get("kind") == "outside"))["running"] == []
     # Watching isn't being told: nothing pinged, and nothing counts toward the sticker.
     assert world.alerts == []
@@ -77,8 +77,8 @@ async def test_the_app_hears_which_sessions_elsewhere_are_running_without_any_al
 
 async def test_a_gateway_going_away_stops_showing_sessions_elsewhere_as_running(world):
     await world.sign_up()
-    _seed(world.hermes)
-    await world.hermes.hub.outside({"sources": ["slack"], "running": [SLACK]})
+    _seed(world.nako)
+    await world.nako.hub.outside({"sources": ["slack"], "running": [SLACK]})
     ws = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
     assert (await next_message(ws, lambda m: m.get("kind") == "outside"))["running"] == [SLACK]
 
@@ -90,7 +90,7 @@ async def test_a_gateway_going_away_stops_showing_sessions_elsewhere_as_running(
 
 async def test_a_session_from_elsewhere_opens_read_only(world):
     await world.sign_up()
-    _seed(world.hermes)
+    _seed(world.nako)
 
     opened = await (await world.http.get(world.url(f"/api/sessions/{SLACK}"))).json()
     assert opened["source"] == "slack"
@@ -111,13 +111,13 @@ async def test_a_session_from_elsewhere_opens_read_only(world):
             response = await world.post(f"/api/sessions/{SLACK}/{path}", body)
         assert response.status == 400, (path, response.status, await response.text())
 
-    session = world.hermes.sessions[SLACK]
+    session = world.nako.sessions[SLACK]
     assert (session["title"], session["pinned"], session["archived"], len(session["rows"])) == ("Shipping export", False, False, 2)
-    assert world.hermes.received == []
+    assert world.nako.received == []
 
 
 async def test_a_turns_helper_session_does_not_open(world):
     await world.sign_up()
-    _seed(world.hermes)
+    _seed(world.nako)
     response = await world.http.get(world.url("/api/sessions/20261116_110000_tool01"))
     assert response.status >= 400

@@ -14,7 +14,7 @@ from aiohttp import web
 
 from . import webauthn
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 
 CHALLENGE_TTL = 300
 # How long the desktop app has to collect a browser-approved sign-in.

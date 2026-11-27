@@ -17,7 +17,7 @@ SETTING = "claude_config_dir"
 
 
 def _set_config_dir(value):
-    from hermes_cli.config import get_config_path
+    from nako_cli.config import get_config_path
     get_config_path().write_text(
         "plugins:\n  enabled: []\n  entries:\n    %s:\n      settings:\n        %s: %s\n"
         % (PLUGIN_NAME, SETTING, json.dumps(value)), encoding="utf-8")
@@ -75,10 +75,10 @@ def test_empty_override_is_removed_and_falls_through(profile, tmp_path):
 
 def test_unreadable_config_means_not_set(profile, tmp_path, monkeypatch):
     import directsdk_setup
-    import hermes_cli.config
+    import nako_cli.config
     def unreadable():
         raise OSError("fixture config is unreadable")
-    monkeypatch.setattr(hermes_cli.config, "load_config_readonly", unreadable)
+    monkeypatch.setattr(nako_cli.config, "load_config_readonly", unreadable)
     fallback = str(tmp_path / "fallback")
     assert directsdk_setup.apply_config_dir({OVERRIDE: fallback}) == {NATIVE_DIR: fallback}
     assert directsdk_setup.telemetry_enabled() is True
@@ -86,24 +86,24 @@ def test_unreadable_config_means_not_set(profile, tmp_path, monkeypatch):
 
 def test_a_multi_profile_gateway_reads_each_profiles_own_setting(profile, tmp_path):
     import directsdk_setup
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from nako_constants import reset_nako_home_override, set_nako_home_override
     first = str(tmp_path / "first-login")
     second = str(tmp_path / "second-login")
     _set_config_dir(first)
     second_home = tmp_path / "second-profile"
     second_home.mkdir()
-    token = set_hermes_home_override(second_home)
+    token = set_nako_home_override(second_home)
     try:
         _set_config_dir(second)
         assert directsdk_setup.apply_config_dir({})[NATIVE_DIR] == second
     finally:
-        reset_hermes_home_override(token)
+        reset_nako_home_override(token)
     assert directsdk_setup.apply_config_dir({})[NATIVE_DIR] == first
 
 
 def test_native_requests_read_the_active_profile_on_every_spawn(profile, tmp_path):
     import directsdk
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from nako_constants import reset_nako_home_override, set_nako_home_override
     capture = tmp_path / "child-dirs.jsonl"
     script = tmp_path / "native.py"
     probe = ("open(os.environ['DIR_CAPTURE'], 'a').write(json.dumps({k: os.environ[k] "
@@ -122,12 +122,12 @@ def test_native_requests_read_the_active_profile_on_every_spawn(profile, tmp_pat
         assert client.create(**request).choices[0].message.content == "hello\n"
         second_home = tmp_path / "second-profile"
         second_home.mkdir()
-        token = set_hermes_home_override(second_home)
+        token = set_nako_home_override(second_home)
         try:
             _set_config_dir(second)
             client.create(**request)
         finally:
-            reset_hermes_home_override(token)
+            reset_nako_home_override(token)
         _set_config_dir(changed)
         client.create(**request)
     finally:
@@ -164,7 +164,7 @@ def test_setup_probes_pass_the_profile_directory(profile, tmp_path, monkeypatch,
 def pool_cli(profile, tmp_path):
     """A native CLI fixture with independent logins, usage answers and generated text."""
     import directsdk
-    from hermes_cli.config import get_config_path
+    from nako_cli.config import get_config_path
 
     script = tmp_path / "pool-native.py"
     prelude = r'''
@@ -357,7 +357,7 @@ def test_pool_recovers_at_reset_and_does_not_probe_again_until_cache_expiry(pool
 
 
 def test_pool_ignores_disabled_logins_and_keeps_profiles_separate(pool_cli, tmp_path):
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from nako_constants import reset_nako_home_override, set_nako_home_override
     first = pool_cli.add('first', 0)
     pool_cli.add('second', 50)
     pool_cli.accounts[0]['enabled'] = False
@@ -367,13 +367,13 @@ def test_pool_ignores_disabled_logins_and_keeps_profiles_separate(pool_cli, tmp_
         assert client.create(**pool_cli.request).choices[0].message.content == 'second\n'
         home = tmp_path / 'another-profile'
         home.mkdir()
-        token = set_hermes_home_override(home)
+        token = set_nako_home_override(home)
         try:
             pool_cli.accounts[0]['enabled'] = True
             pool_cli.configure()
             assert client.create(**pool_cli.request).choices[0].message.content == 'first\n'
         finally:
-            reset_hermes_home_override(token)
+            reset_nako_home_override(token)
         assert client.create(**pool_cli.request).choices[0].message.content == 'second\n'
     finally:
         client.close()
@@ -428,7 +428,7 @@ def test_pool_invalid_configuration_never_silently_uses_the_default_login(pool_c
 
 
 def test_manifest_declares_the_setting_under_the_key_the_code_reads(profile):
-    from hermes_cli.plugins_settings import plugin_settings_fields
+    from nako_cli.plugins_settings import plugin_settings_fields
     import directsdk_setup
     root = Path(directsdk_setup.__file__).resolve().parent
     assert directsdk_setup.PLUGIN_ID == PLUGIN_NAME

@@ -1,18 +1,18 @@
 # Catalog entry for privacy-shield (subdir of the MOTHR/security-suite monorepo).
 # Owner submission (Rule 5): submitted by MOTHR, owner of the plugin repo.
-# Validated with `hermes plugins validate` + `hermes plugins doctor --ci`
+# Validated with `nako plugins validate` + `nako plugins doctor --ci`
 # at this exact commit against a fresh clone.
 name: privacy-shield
-repo: https://github.com/MOTHR/hermes-security-suite
+repo: https://github.com/MOTHR/nako-security-suite
 sha: 6bdc9f7f230d45a3e1f2c77533b8349a7a57a1b8
 subdir: "privacy-shield"
 description: "Privacy-Shield — tokenizes personal data (PII) in LLM output before sending it to cloud providers, with encrypted AES-256-GCM mapping and whitelisted restore. Modes: off / audit / restore. Configurable via Desktop-Controls or YAML."
 maintainer: MOTHR
 tier: community
 category: general
-docs_url: https://github.com/MOTHR/hermes-security-suite#readme
+docs_url: https://github.com/MOTHR/nako-security-suite#readme
 version: "1.9.6"
-requires_hermes: ">=0.21.5"
+requires_nako: ">=0.21.5"
 readme: true
 platforms: []
 known_issues:

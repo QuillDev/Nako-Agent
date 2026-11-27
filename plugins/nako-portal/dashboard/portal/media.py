@@ -5,7 +5,7 @@ web/src/lib/media.ts parses the same shapes for the browser; keep the two in ste
 
 import re
 
-# Hermes's own MEDIA_DELIVERY_EXTS (gateway/platforms/base.py), longest first.
+# Nako's own MEDIA_DELIVERY_EXTS (gateway/platforms/base.py), longest first.
 EXTS = sorted(
     [
         "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "svg", "mp4", "mov", "avi", "mkv", "webm", "3gp",
@@ -26,7 +26,7 @@ MEDIA = re.compile(
     rf"|^MEDIA:(?P<line>(?:~/|/|[A-Za-z]:[\\/])[^\n]+?)[^\S\n]*$",
     re.IGNORECASE | re.MULTILINE,
 )
-# What Hermes writes into a user turn for an attached image.
+# What Nako writes into a user turn for an attached image.
 USER_IMAGE = re.compile(
     rf"\[Image attached at: (?P<hint>[^\n\]]+)\]|^@image:(?P<ref>{_QUOTED}|\S+)[^\S\n]*$",
     re.MULTILINE,

@@ -1,0 +1,21 @@
+name: Nako brand lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  brand-lint:
+    name: Forbid upstream brand outside README.md
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+      - name: Check for upstream brand references
+        run: python3 scripts/nako/check_no_upstream_brand.py --tracked-only

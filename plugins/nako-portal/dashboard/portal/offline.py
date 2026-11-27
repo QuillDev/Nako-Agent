@@ -1,16 +1,16 @@
-"""A chat's transcript read straight from Hermes's session store, for when no gateway is connected.
+"""A chat's transcript read straight from Nako's session store, for when no gateway is connected.
 
-The gateway is what normally reads transcripts (`HermesBackend.thread`). When it's down (it
+The gateway is what normally reads transcripts (`NakoBackend.thread`). When it's down (it
 crashed, an update stopped it, it was never started), the portal server still has to show what a
 chat did: the person reading it in the app, or another machine's agent following a task it handed
 over. So the server reads `state.db` itself.
 
-Hermes's own display projection is used when Hermes can be imported, in a short-lived child
-process (the server never imports Hermes, and a half-updated Hermes can't break it). If that
+Nako's own display projection is used when Nako can be imported, in a short-lived child
+process (the server never imports Nako, and a half-updated Nako can't break it). If that
 fails, the rows are projected here from the table alone: prompts, replies and tool calls with
 their results, in the same shape.
 
-Run as `python offline.py <hermes home> <session>`: prints the transcript as JSON.
+Run as `python offline.py <nako home> <session>`: prints the transcript as JSON.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def _lineage(home, session):
 
 
 def raw_thread(home, session):
-    """The transcript from the table alone, when Hermes can't be imported."""
+    """The transcript from the table alone, when Nako can't be imported."""
     columns = {row[1] for row in _query(home, "PRAGMA table_info(messages)")}
     active = " AND COALESCE(active, 1)=1" if "active" in columns else ""
     kind = ", display_kind" if "display_kind" in columns else ", NULL"
@@ -195,7 +195,7 @@ def messages_from_store(home, session, store):
     return with_results(messages, history)
 
 
-def hermes_thread(home, session, agent="hermes"):
+def nako_thread(home, session, agent="nako"):
     """The transcript in the agent's own display projection, as the gateway would read it.
     The agent reads its home from a variable named after itself."""
     os.environ[f"{agent.upper()}_HOME"] = str(home)
@@ -203,14 +203,14 @@ def hermes_thread(home, session, agent="hermes"):
 
     try:
         from persistence_assembly import open_persistence_reader
-    except ImportError:  # Hermes before the storage interface
-        from hermes_state import SessionDB
+    except ImportError:  # Nako before the storage interface
+        from nako_state import SessionDB
 
         db = SessionDB(Path(home) / "state.db", read_only=True)
         try:
             try:
                 history = db.get_messages_as_conversation(session, include_ancestors=True, include_row_ids=True, include_compacted=True)
-            except TypeError:  # a Hermes from before display reads
+            except TypeError:  # a Nako from before display reads
                 history = db.get_messages_as_conversation(session, include_ancestors=True, include_row_ids=True)
             title = db.get_session_title(session)
         finally:
@@ -227,11 +227,11 @@ def hermes_thread(home, session, agent="hermes"):
 class Offline:
     """The hub backend's read calls, answered from the session store while no gateway is there."""
 
-    def __init__(self, home, *, agent="hermes", python=None, projection=True):
+    def __init__(self, home, *, agent="nako", python=None, projection=True):
         self.home = Path(home)
-        self.agent = agent or "hermes"
+        self.agent = agent or "nako"
         self.python = python or sys.executable
-        # Off in tests that have no Hermes to import: the table projection alone.
+        # Off in tests that have no Nako to import: the table projection alone.
         self.projection = projection
 
     def _home_of(self, session):
@@ -285,12 +285,12 @@ class Offline:
 
 def main(argv):
     home, session = argv[1], argv[2]
-    agent = argv[3] if len(argv) > 3 else "hermes"
-    # This folder's modules (server, hub, link...) mustn't shadow Hermes's own on import.
+    agent = argv[3] if len(argv) > 3 else "nako"
+    # This folder's modules (server, hub, link...) mustn't shadow Nako's own on import.
     here = Path(__file__).resolve().parent
     sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != here]
     try:
-        thread = hermes_thread(home, session, agent)
+        thread = nako_thread(home, session, agent)
     except Exception:  # noqa: BLE001 - The parent falls back to raw history on any projection failure.
         return 1
     sys.stdout.write(json.dumps(thread, default=str))

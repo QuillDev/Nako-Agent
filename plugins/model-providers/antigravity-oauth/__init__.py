@@ -1,6 +1,6 @@
-"""Antigravity OAuth provider plugin for Hermes Agent.
+"""Antigravity OAuth provider plugin for Nako Agent.
 
-Sign-in is delegated to the official Antigravity CLI (``agy``): ``hermes auth add antigravity-oauth``
+Sign-in is delegated to the official Antigravity CLI (``agy``): ``nako auth add antigravity-oauth``
 runs agy's own Google OAuth flow, and inference streams through ``agy`` using that session. The plugin
 never reads, copies, or transmits the OAuth token.
 """
@@ -96,7 +96,7 @@ class AntigravityOAuthProfile(ProviderProfile):
         return AntigravityClient(**client_kwargs)
 
     def setup_status(self, **kwargs: Any) -> dict[str, Any] | None:
-        """Gate for `hermes model`: agy present + signed in; offers agy's own login when not."""
+        """Gate for `nako model`: agy present + signed in; offers agy's own login when not."""
         try:
             from .auth import probe
         except ImportError:
@@ -209,10 +209,10 @@ class AntigravityOAuthProfile(ProviderProfile):
         )
 
     def get_model_context_length(self, model: str) -> int | None:
-        """Defer to Hermes-native metadata unless a positive override is set.
+        """Defer to Nako-native metadata unless a positive override is set.
 
         This public hook declares no account-serving capacity of its own.
-        Unrecognized exact IDs may receive Hermes' generic unknown fallback.
+        Unrecognized exact IDs may receive Nako' generic unknown fallback.
         """
         env_val = os.environ.get("ANTIGRAVITY_CONTEXT_LENGTH")
         if env_val:
@@ -253,7 +253,7 @@ def _classify_antigravity_error(
     body: Any = None,
     model: str | None = None,
 ) -> dict[str, Any] | None:
-    """Classify agy CLI specific runtime errors so Hermes' smart failover /
+    """Classify agy CLI specific runtime errors so Nako' smart failover /
     recovery pipeline triggers auto-compression and retry instead of failing.
     """
     err_str = f"{error} {message}".lower()

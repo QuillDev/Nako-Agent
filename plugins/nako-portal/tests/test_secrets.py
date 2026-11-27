@@ -22,8 +22,8 @@ async def _open(world, sid):
 
 async def test_a_typed_secret_goes_to_the_gateway_answer_and_nowhere_else(world):
     await world.sign_up()
-    sid = world.hermes.add_session("20261101_010101_aaaaaa", "deploy")
-    await world.client.call("ask", world.hermes.sessions[sid]["chat"], _card())
+    sid = world.nako.add_session("20261101_010101_aaaaaa", "deploy")
+    await world.client.call("ask", world.nako.sessions[sid]["chat"], _card())
 
     opened = await _open(world, sid)
     assert opened["requests"] == [{"id": "sec-1", "method": "secret", "params": {"name": "STRIPE_KEY", "note": "for the checkout script", "replace": False}, "answerable": True}]
@@ -32,25 +32,25 @@ async def test_a_typed_secret_goes_to_the_gateway_answer_and_nowhere_else(world)
 
     answered = await world.post("/api/requests/sec-1", {"result": {"value": VALUE}})
     assert answered.status == 200, await answered.text()
-    assert world.hermes.answers == [{"id": "sec-1", "private": {"secret_request": "sec-1"}, "result": {"value": VALUE}}]
+    assert world.nako.answers == [{"id": "sec-1", "private": {"secret_request": "sec-1"}, "result": {"value": VALUE}}]
     # Not a message, not in the transcript, and the card is gone.
-    assert world.hermes.received == []
+    assert world.nako.received == []
     opened = await _open(world, sid)
     assert opened["requests"] == [] and VALUE not in json.dumps(opened)
 
 
 async def test_not_now_declines_and_an_empty_field_answers_nothing(world):
     await world.sign_up()
-    sid = world.hermes.add_session("20261101_020202_bbbbbb", "deploy")
-    await world.client.call("ask", world.hermes.sessions[sid]["chat"], _card())
+    sid = world.nako.add_session("20261101_020202_bbbbbb", "deploy")
+    await world.client.call("ask", world.nako.sessions[sid]["chat"], _card())
 
     empty = await world.post("/api/requests/sec-1", {"result": {"value": ""}})
     assert empty.status == 400
-    assert world.hermes.answers == []
+    assert world.nako.answers == []
     assert len((await _open(world, sid))["requests"]) == 1
 
     await world.post("/api/requests/sec-1", {"result": {"declined": True, "value": "ignored-value"}})
-    assert world.hermes.answers == [{"id": "sec-1", "private": {"secret_request": "sec-1"}, "result": {"declined": True}}]
+    assert world.nako.answers == [{"id": "sec-1", "private": {"secret_request": "sec-1"}, "result": {"declined": True}}]
     assert (await _open(world, sid))["requests"] == []
 
 
@@ -67,28 +67,28 @@ async def test_settings_lists_names_and_reveals_one_value_at_a_time(world):
     assert (await world.http.get(world.url("/api/secrets/MISSING"))).status == 404
     removed = await world.post("/api/secrets/OPENAI_KEY/remove")
     assert (await removed.json())["removed"] is True
-    assert world.hermes.vault == {}
+    assert world.nako.vault == {}
     await ws.close()
 
 
 async def test_without_the_secrets_plugin_the_app_is_told_there_are_none(world):
     await world.sign_up()
-    world.hermes.vault = None
+    world.nako.vault = None
     for method, path in (("GET", "/api/secrets"), ("GET", "/api/secrets/ANY"), ("POST", "/api/secrets/ANY"), ("POST", "/api/secrets/ANY/remove")):
         response = await world.http.request(method, world.url(path), json={"value": "some-value"}, headers={"Origin": ORIGIN})
         assert response.status == 404, (method, path)
         assert "agent-secrets" in (await response.json())["error"]
-    assert world.hermes.vault is None
+    assert world.nako.vault is None
 
 
 async def test_secrets_need_a_signed_in_page_from_this_origin(world):
-    world.hermes.vault["KEPT"] = {"value": "kept-value-123", "note": "", "origin": "you"}
+    world.nako.vault["KEPT"] = {"value": "kept-value-123", "note": "", "origin": "you"}
     assert (await world.http.get(world.url("/api/secrets"))).status == 401
     assert (await world.http.get(world.url("/api/secrets/KEPT"))).status == 401
     assert (await world.post("/api/secrets/NEW", {"value": "x" * 10})).status == 401
     await world.sign_up()
     assert (await world.post("/api/secrets/NEW", {"value": "x" * 10}, origin="https://evil.example.test")).status == 403
-    assert list(world.hermes.vault) == ["KEPT"]
+    assert list(world.nako.vault) == ["KEPT"]
 
 
 async def test_the_gateway_saying_secrets_changed_reaches_every_tab(world):
@@ -100,9 +100,9 @@ async def test_the_gateway_saying_secrets_changed_reaches_every_tab(world):
 
 
 async def test_a_shared_secret_line_reads_as_its_name_in_a_notification(world):
-    sid = world.hermes.add_session("20261101_070707_aaaaab", "deploy", chat="inbox")
+    sid = world.nako.add_session("20261101_070707_aaaaab", "deploy", chat="inbox")
     await world.hub.sessions()
-    await world.hermes.post(sid, "new admin password:\nSECRET:DB_ADMIN\nrotate it monthly")
+    await world.nako.post(sid, "new admin password:\nSECRET:DB_ADMIN\nrotate it monthly")
     assert [alert[2] for alert in world.alerts] == ["new admin password: DB_ADMIN rotate it monthly"]
 
 
@@ -132,7 +132,7 @@ def _plugin(monkeypatch, api):
 
 async def test_the_adapter_hands_the_answer_to_agent_secrets(monkeypatch, tmp_path):
     api = SecretsApi()
-    backend = _plugin(monkeypatch, api).HermesBackend(adapter=None, home=tmp_path)
+    backend = _plugin(monkeypatch, api).NakoBackend(adapter=None, home=tmp_path)
     await backend.resolve(_card(), {"value": VALUE})
     assert api.answers == [("sec-1", VALUE, False)]
     with pytest.raises(ValueError, match="no longer open"):

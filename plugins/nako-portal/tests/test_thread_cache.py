@@ -1,4 +1,4 @@
-"""The adapter's transcript reads, against stand-ins shaped like Hermes's session store."""
+"""The adapter's transcript reads, against stand-ins shaped like Nako's session store."""
 
 import importlib.util
 import sqlite3
@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Store:
-    """Rows of one portal chat, with Hermes's revision: it moves on appends and in-place rewrites."""
+    """Rows of one portal chat, with Nako's revision: it moves on appends and in-place rewrites."""
 
     def __init__(self):
         self.rows = []
@@ -21,7 +21,7 @@ class Store:
         self.rows.append({"id": len(self.rows) + 1, "role": role, "content": content, "compacted": False})
 
     def compact(self, summary):
-        """Hermes's in-place compaction: the rows so far stay stored for display only, and the
+        """Nako's in-place compaction: the rows so far stay stored for display only, and the
         live context continues from a summary."""
         for row in self.rows:
             row["compacted"] = True
@@ -49,7 +49,7 @@ def backend(tmp_path, monkeypatch):
         mod.__dict__.update(attrs)
         monkeypatch.setitem(sys.modules, name, mod)
 
-    module("hermes_constants", set_hermes_home_override=lambda path: None, reset_hermes_home_override=lambda token: None)
+    module("nako_constants", set_nako_home_override=lambda path: None, reset_nako_home_override=lambda token: None)
     module("tui_gateway")
     module("tui_gateway.server", _history_to_messages=lambda history, profile_home=None: [{"role": m["role"], "text": m["content"]} for m in history])
     with sqlite3.connect(tmp_path / "state.db") as db:
@@ -60,7 +60,7 @@ def backend(tmp_path, monkeypatch):
     spec.loader.exec_module(plugin)
     store = Store()
     adapter = type("Adapter", (), {"_session_store": type("SessionStore", (), {"_db": store})()})()
-    return plugin.HermesBackend(adapter, tmp_path), store
+    return plugin.NakoBackend(adapter, tmp_path), store
 
 
 def texts(backend):
@@ -76,7 +76,7 @@ def test_a_transcript_reads_fresh_after_every_kind_of_change(backend):
 
     store.add("assistant", "done")
     assert texts(backend) == ["fix the build", "on it", "done"]
-    # An in-place rewrite keeps the count and the last id; Hermes's revision still moves.
+    # An in-place rewrite keeps the count and the last id; Nako's revision still moves.
     store.rewrite(0, "fix the build, please")
     assert texts(backend) == ["fix the build, please", "on it", "done"]
     # An undo drops rows.

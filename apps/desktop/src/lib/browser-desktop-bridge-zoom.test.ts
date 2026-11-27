@@ -15,11 +15,11 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  Reflect.deleteProperty(win, 'hermesDesktop')
+  Reflect.deleteProperty(win, 'nakoDesktop')
   clearWebappSession()
   document.documentElement.style.removeProperty('zoom')
   document.documentElement.style.removeProperty('--browser-ui-scale')
-  delete document.documentElement.dataset.hermesDesktopHost
+  delete document.documentElement.dataset.nakoDesktopHost
   localStorage.clear()
   vi.unstubAllGlobals()
 })
@@ -27,7 +27,7 @@ afterEach(() => {
 describe('browser UI scale', () => {
   it('reports app scale independently of display density and applies preset changes before notifying', async () => {
     expect(installBrowserDesktopBridge()).toBe(true)
-    const zoom = win.hermesDesktop!.zoom!
+    const zoom = win.nakoDesktop!.zoom!
     expect((await zoom.get()).percent).toBe(100)
 
     const onChanged = vi.fn(({ percent }: { percent: number }) => {

@@ -1,7 +1,7 @@
 import type {
   SessionActiveItem,
   SessionActiveListResponse
-} from '@hermes/shared/gateway-types'
+} from '@nako/shared/gateway-types'
 
 import type { GatewayClient } from '../gatewayClient.js'
 

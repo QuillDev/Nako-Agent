@@ -47,11 +47,11 @@ def _make_real_session(tmp_path, monkeypatch, *, source, session_id):
     from run_agent import AIAgent
     from tests.fixtures.storage_seed import seed_session
 
-    hermes_home = tmp_path / "hermes_home"
-    hermes_home.mkdir()
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-    db_path = hermes_home / "state.db"
-    db = open_persistence(profile_scope(home=hermes_home))
+    nako_home = tmp_path / "nako_home"
+    nako_home.mkdir()
+    monkeypatch.setenv("NAKO_HOME", str(nako_home))
+    db_path = nako_home / "state.db"
+    db = open_persistence(profile_scope(home=nako_home))
     seed_session(db, session_id, source)
 
     # Exercise the production close path without constructing a model provider.
@@ -67,7 +67,7 @@ def _make_real_session(tmp_path, monkeypatch, *, source, session_id):
 
     session = _make_session(session_id)
     session["agent"] = agent
-    session["profile_home"] = str(hermes_home)
+    session["profile_home"] = str(nako_home)
     session["source"] = source
     return db_path, session, agent
 

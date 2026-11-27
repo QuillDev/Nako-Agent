@@ -1,6 +1,6 @@
-"""A provider installed by ``hermes plugins install`` must actually be found.
+"""A provider installed by ``nako plugins install`` must actually be found.
 
-The installer clones into ``$HERMES_HOME/plugins/<name>/`` (flat), provider
+The installer clones into ``$NAKO_HOME/plugins/<name>/`` (flat), provider
 discovery only scanned ``plugins/model-providers/<name>/``, and PluginManager
 skips ``kind: model-provider`` on purpose — so the documented install path
 reported success and registered nothing. These tests pin the join, and that
@@ -37,7 +37,7 @@ def _clear_provider_caches():
     _pkg._PROVIDER_LIST_CACHE = None
     _pkg._discovered = False
     for mod in list(sys.modules):
-        if mod.startswith(("plugins.model_providers", "_hermes_user_provider")):
+        if mod.startswith(("plugins.model_providers", "_nako_user_provider")):
             del sys.modules[mod]
 
 
@@ -50,17 +50,17 @@ def _write_plugin(directory: Path, *, name: str, manifest: str | None):
 
 
 @pytest.fixture
-def hermes_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+def nako_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("NAKO_HOME", str(tmp_path))
     _clear_provider_caches()
     yield tmp_path
     _clear_provider_caches()
 
 
-def test_flat_installed_model_provider_plugins_are_discovered_alongside_nested_ones(hermes_home):
-    _write_plugin(hermes_home / "plugins" / "installed-acp", name="installed-acp",
+def test_flat_installed_model_provider_plugins_are_discovered_alongside_nested_ones(nako_home):
+    _write_plugin(nako_home / "plugins" / "installed-acp", name="installed-acp",
                   manifest='name: installed-acp\nkind: "model-provider"\n')
-    _write_plugin(hermes_home / "plugins" / "model-providers" / "nested-acp", name="nested-acp",
+    _write_plugin(nako_home / "plugins" / "model-providers" / "nested-acp", name="nested-acp",
                   manifest="name: nested-acp\nkind: model-provider\n")
     from providers import get_provider_profile
 
@@ -69,11 +69,11 @@ def test_flat_installed_model_provider_plugins_are_discovered_alongside_nested_o
     assert get_provider_profile("nested-acp") is not None
 
 
-def test_other_plugins_in_the_flat_directory_are_left_to_the_plugin_manager(hermes_home):
-    _write_plugin(hermes_home / "plugins" / "other-standalone", name="other-standalone",
+def test_other_plugins_in_the_flat_directory_are_left_to_the_plugin_manager(nako_home):
+    _write_plugin(nako_home / "plugins" / "other-standalone", name="other-standalone",
                   manifest="name: other-standalone\nkind: standalone\n")
-    _write_plugin(hermes_home / "plugins" / "manifestless", name="manifestless", manifest=None)
-    _write_plugin(hermes_home / "plugins" / "broken-manifest", name="broken-manifest",
+    _write_plugin(nako_home / "plugins" / "manifestless", name="manifestless", manifest=None)
+    _write_plugin(nako_home / "plugins" / "broken-manifest", name="broken-manifest",
                   manifest="kind: [this is: not valid\n")
     from providers import get_provider_profile, list_providers
 
@@ -81,15 +81,15 @@ def test_other_plugins_in_the_flat_directory_are_left_to_the_plugin_manager(herm
     assert get_provider_profile("openrouter") is not None  # bundled set still intact
 
 
-def test_disabled_plugins_are_never_imported_or_registered(hermes_home):
+def test_disabled_plugins_are_never_imported_or_registered(nako_home):
     # Flat install keys by manifest name; legacy layout keys as model-providers/<dir> (#137671).
-    (hermes_home / "config.yaml").write_text(
+    (nako_home / "config.yaml").write_text(
         "plugins:\n  disabled:\n    - installed-acp\n    - model-providers/nested-acp\n", encoding="utf-8")
-    _write_plugin(hermes_home / "plugins" / "installed-acp", name="installed-acp",
+    _write_plugin(nako_home / "plugins" / "installed-acp", name="installed-acp",
                   manifest='name: installed-acp\nkind: "model-provider"\n')
-    _write_plugin(hermes_home / "plugins" / "kept-acp", name="kept-acp",
+    _write_plugin(nako_home / "plugins" / "kept-acp", name="kept-acp",
                   manifest='name: kept-acp\nkind: "model-provider"\n')
-    _write_plugin(hermes_home / "plugins" / "model-providers" / "nested-acp", name="nested-acp",
+    _write_plugin(nako_home / "plugins" / "model-providers" / "nested-acp", name="nested-acp",
                   manifest="name: nested-acp\nkind: model-provider\n")
     from providers import get_provider_profile, list_providers
 
@@ -102,11 +102,11 @@ def test_disabled_plugins_are_never_imported_or_registered(hermes_home):
     assert get_provider_profile("kept-acp").base_url == "acp://kept-acp"
 
 
-def test_disabled_by_manifest_name_when_directory_name_differs(hermes_home):
+def test_disabled_by_manifest_name_when_directory_name_differs(nako_home):
     # A flat manifest keys the plugin by its manifest name, not its directory name.
-    (hermes_home / "config.yaml").write_text(
+    (nako_home / "config.yaml").write_text(
         "plugins:\n  disabled:\n    - fixture-manifest-acp\n", encoding="utf-8")
-    _write_plugin(hermes_home / "plugins" / "fixture-directory-acp",
+    _write_plugin(nako_home / "plugins" / "fixture-directory-acp",
                   name="fixture-manifest-acp",
                   manifest="name: fixture-manifest-acp\nkind: model-provider\n")
     from providers import get_provider_profile
@@ -115,17 +115,17 @@ def test_disabled_by_manifest_name_when_directory_name_differs(hermes_home):
     assert not [m for m in sys.modules if "fixture_directory_acp" in m]
 
 
-def test_enabling_a_disabled_plugin_finds_it_without_touching_the_plugin_dirs(hermes_home, monkeypatch):
+def test_enabling_a_disabled_plugin_finds_it_without_touching_the_plugin_dirs(nako_home, monkeypatch):
     # Desktop's Plugins page edits only config.yaml; the plugin dirs keep their settled mtimes.
     import providers
 
     monkeypatch.setattr(providers, "_PLUGIN_DIR_STAMP_TTL_SECONDS", 0.0)
-    config = hermes_home / "config.yaml"
+    config = nako_home / "config.yaml"
     config.write_text("plugins:\n  disabled:\n    - installed-acp\n", encoding="utf-8")
-    _write_plugin(hermes_home / "plugins" / "installed-acp", name="installed-acp",
+    _write_plugin(nako_home / "plugins" / "installed-acp", name="installed-acp",
                   manifest="name: installed-acp\nkind: model-provider\n")
     settled = time.time() - 60
-    os.utime(hermes_home / "plugins", (settled, settled))
+    os.utime(nako_home / "plugins", (settled, settled))
     assert providers.get_provider_profile("installed-acp") is None
 
     config.write_text("plugins:\n  disabled: []\n", encoding="utf-8")
@@ -133,12 +133,12 @@ def test_enabling_a_disabled_plugin_finds_it_without_touching_the_plugin_dirs(he
     assert providers.get_provider_profile("installed-acp").base_url == "acp://installed-acp"
 
 
-def test_optional_bundle_disable_applies_to_one_profile_and_its_installed_copy(hermes_home, monkeypatch):
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+def test_optional_bundle_disable_applies_to_one_profile_and_its_installed_copy(nako_home, monkeypatch):
+    from nako_constants import reset_nako_home_override, set_nako_home_override
     from providers import get_provider_profile, refresh_bound_home
     import providers
 
-    bundled = hermes_home / "bundled"
+    bundled = nako_home / "bundled"
     directory = bundled / "optional-acp"
     directory.mkdir(parents=True)
     (directory / "__init__.py").write_text(
@@ -158,9 +158,9 @@ def test_optional_bundle_disable_applies_to_one_profile_and_its_installed_copy(h
         disabled = ["openrouter", slug] if slug else []
         (home / "config.yaml").write_text(f"plugins:\n  disabled: {disabled!r}\n", encoding="utf-8")
 
-    set_disabled(hermes_home, "model-providers/optional-acp")
-    from hermes_cli.auth_plugin_providers import registry_lookup
-    from hermes_cli.models_catalog_static import listed_canonical_providers
+    set_disabled(nako_home, "model-providers/optional-acp")
+    from nako_cli.auth_plugin_providers import registry_lookup
+    from nako_cli.models_catalog_static import listed_canonical_providers
 
     def assert_disabled():
         assert get_provider_profile("example-acp") is None
@@ -172,11 +172,11 @@ def test_optional_bundle_disable_applies_to_one_profile_and_its_installed_copy(h
         assert get_provider_profile("openrouter") is not None
 
     assert_disabled()  # first discovery in this process is from the disabled home
-    other = hermes_home / "other"
+    other = nako_home / "other"
     other.mkdir()
     _write_plugin(other / "plugins" / "optional-acp", name="example-acp",
                   manifest="name: optional-acp\nkind: model-provider\n")
-    token = set_hermes_home_override(other)
+    token = set_nako_home_override(other)
     try:
         profile = get_provider_profile("example-acp")
         assert profile is not None and profile.base_url == "acp://example-acp"
@@ -187,9 +187,9 @@ def test_optional_bundle_disable_applies_to_one_profile_and_its_installed_copy(h
         refresh_bound_home()
         assert_disabled()  # a previously loaded standalone copy cannot bypass the new setting
     finally:
-        reset_hermes_home_override(token)
+        reset_nako_home_override(token)
     assert_disabled()
-    set_disabled(hermes_home)
+    set_disabled(nako_home)
     refresh_bound_home()
     profile = get_provider_profile("example-alias")
     assert profile is not None and profile.base_url == "acp://bundled"

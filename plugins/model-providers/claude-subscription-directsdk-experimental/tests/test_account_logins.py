@@ -54,7 +54,7 @@ def _signed_in(directory, email, org="org-1", plan="max"):
 
 
 def _link_rows(*rows):
-    from hermes_cli.config import load_config, save_config
+    from nako_cli.config import load_config, save_config
     config = load_config()
     config.setdefault("plugins", {}).setdefault("entries", {})["claude-subscription-directsdk-experimental"] = {"settings": {"accounts": [
         {"label": label, "config_dir": directory, "enabled": True} for label, directory in rows]}}
@@ -62,7 +62,7 @@ def _link_rows(*rows):
 
 
 def _accounts():
-    from hermes_cli.config import load_config_readonly
+    from nako_cli.config import load_config_readonly
     entry = load_config_readonly().get("plugins", {}).get("entries", {}).get("claude-subscription-directsdk-experimental", {})
     return (entry.get("settings") or {}).get("accounts")
 
@@ -106,7 +106,7 @@ def test_same_email_in_another_organization_is_a_different_account(claude):
 def test_signing_in_to_a_signed_out_slot_fills_it_and_keeps_its_name(claude, tmp_path):
     _signed_in("~/.claude", "alex@example.test")
     (tmp_path / "user" / ".claude-secondary").mkdir(parents=True)
-    from hermes_cli.config import load_config, save_config
+    from nako_cli.config import load_config, save_config
     config = load_config()
     config.setdefault("plugins", {}).setdefault("entries", {})["claude-subscription-directsdk-experimental"] = {"settings": {"accounts": [
         {"label": "primary", "config_dir": "~/.claude", "enabled": True},
@@ -136,8 +136,8 @@ def test_signing_in_again_on_a_row_as_someone_else_adds_them_instead(claude):
 
 def test_a_code_that_fails_changes_nothing(claude, profile):
     _signed_in("~/.claude", "alex@example.test")
-    from hermes_constants import get_hermes_home
-    logins = Path(get_hermes_home()) / "claude-logins"
+    from nako_constants import get_nako_home
+    logins = Path(get_nako_home()) / "claude-logins"
 
     with pytest.raises(ValueError, match="didn't work"):
         _sign_in(claude, "bad")
@@ -176,8 +176,8 @@ def test_a_lapsed_login_is_refreshed_not_added_again(claude, tmp_path):
 
 def test_signing_in_again_folds_copies_of_the_same_account_into_one(claude, profile):
     _signed_in("~/.claude", "alex@example.test")
-    from hermes_constants import get_hermes_home
-    copy = Path(get_hermes_home()) / "claude-logins" / "copy"
+    from nako_constants import get_nako_home
+    copy = Path(get_nako_home()) / "claude-logins" / "copy"
     _signed_in(copy, "alex@example.test")
     _signed_in("~/.claude-sam", "sam@example.test", org="org-2")
     _link_rows(("primary", "~/.claude"), ("secondary", str(copy)), ("sam", "~/.claude-sam"))

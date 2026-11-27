@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 960" role="img" aria-labelledby="title desc">
-  <title id="title">Hermes owns the agent loop. Agy owns Google access.</title>
-  <desc id="desc">A separate installer lane invokes Hermes Git installation of the Python provider. On the host, Hermes calls an OpenAI-shaped client which launches the official agy subprocess; agy contacts Google using its own credentials. SOUL and system instructions become GEMINI.md rules. Native tool events pass through a translator to offered Hermes tools and Hermes approvals. An optional read-only conversation database reader delivers reasoning through a fenced lease to the Hermes TUI. The private HOME isolates state, not credentials or OS permissions.</desc>
+  <title id="title">Nako owns the agent loop. Agy owns Google access.</title>
+  <desc id="desc">A separate installer lane invokes Nako Git installation of the Python provider. On the host, Nako calls an OpenAI-shaped client which launches the official agy subprocess; agy contacts Google using its own credentials. SOUL and system instructions become GEMINI.md rules. Native tool events pass through a translator to offered Nako tools and Nako approvals. An optional read-only conversation database reader delivers reasoning through a fenced lease to the Nako TUI. The private HOME isolates state, not credentials or OS permissions.</desc>
   <!-- Palette discovery: no sibling SVG or theme tokens found in this repository.
-       Accent #7B3FE4 comes from README.md's Hermes plugin catalog badge.
+       Accent #7B3FE4 comes from README.md's Nako plugin catalog badge.
        Remaining colors are neutral canvas/ink/border roles, not product tokens.
        View: local runtime and external credential/network responsibility.
        Evidence for every relationship is linked in architecture.md.
@@ -31,7 +31,7 @@
     .optional { fill: none; stroke: #666666; stroke-width: 1.25; stroke-dasharray: 5 4; marker-end: url(#arrow-neutral); }
   </style>
   <rect width="1200" height="960" class="canvas"/>
-  <text x="40" y="56" class="headline">Hermes owns the loop. Agy owns Google access.</text>
+  <text x="40" y="56" class="headline">Nako owns the loop. Agy owns Google access.</text>
   <text x="40" y="84" class="body">Local runtime · processes share host-user permissions</text>
 
   <g id="installation" aria-label="One-time installation, separate from inference">
@@ -41,13 +41,13 @@
     <text x="80" y="171" class="body">Node CLI · one-time setup</text>
     <path d="M344 156 H456" class="support"/>
     <text x="368" y="145" class="body">invokes</text>
-    <text x="480" y="151" class="label">Hermes Git install → Python provider plugin</text>
+    <text x="480" y="151" class="label">Nako Git install → Python provider plugin</text>
     <text x="480" y="174" class="body">Registry package ships the installer, not the inference runtime.</text>
   </g>
 
   <g id="instruction-input" aria-label="SOUL and system instructions become agy workspace rules">
     <rect x="64" y="216" width="512" height="56" rx="6" class="node"/>
-    <text x="80" y="239" class="label">SOUL.md + Hermes system instructions</text>
+    <text x="80" y="239" class="label">SOUL.md + Nako system instructions</text>
     <text x="80" y="259" class="body">Client writes workspace GEMINI.md; inline fallback available.</text>
   </g>
   <g id="credential-input" aria-label="Credentials remain owned by agy">
@@ -78,9 +78,9 @@
     <text x="588" y="592" class="body">handoff</text>
   </g>
 
-  <g id="hermes-agent" aria-label="Hermes agent runtime">
+  <g id="nako-agent" aria-label="Nako agent runtime">
     <rect x="64" y="352" width="220" height="104" rx="8" class="node"/>
-    <text x="80" y="383" class="label">Hermes Agent</text>
+    <text x="80" y="383" class="label">Nako Agent</text>
     <text x="80" y="409" class="body">Agent loop + offered tools</text>
     <text x="80" y="433" class="body">Selects provider and model</text>
   </g>
@@ -104,16 +104,16 @@
     <text x="976" y="496" class="body">Agy handles network</text>
     <text x="976" y="516" class="body">and account session.</text>
   </g>
-  <g id="tool-translator" aria-label="Known native tool names map to offered Hermes tools">
+  <g id="tool-translator" aria-label="Known native tool names map to offered Nako tools">
     <rect x="656" y="560" width="240" height="96" rx="8" class="node"/>
     <text x="672" y="589" class="label">Native-tool translator</text>
     <text x="672" y="614" class="body">Known name + offered tool</text>
     <text x="672" y="637" class="body">Close agy; reject unmapped</text>
   </g>
-  <g id="hermes-tool-execution" aria-label="Hermes executes forwarded calls under its approvals">
+  <g id="nako-tool-execution" aria-label="Nako executes forwarded calls under its approvals">
     <rect x="64" y="560" width="512" height="96" rx="8" class="node"/>
-    <text x="80" y="589" class="label">Hermes tool execution + approval policy</text>
-    <text x="80" y="614" class="body">Forward mapped calls; Hermes decides approval and execution.</text>
+    <text x="80" y="589" class="label">Nako tool execution + approval policy</text>
+    <text x="80" y="614" class="body">Forward mapped calls; Nako decides approval and execution.</text>
     <text x="80" y="637" class="body">Example: run_command → terminal</text>
   </g>
   <g id="security-boundary-note" aria-label="State isolation does not isolate credentials or OS access">
@@ -134,7 +134,7 @@
     <text x="392" y="873" class="body">Request / session identity + callback / client liveness</text>
     <path d="M832 856 H904" class="optional"/>
     <rect x="904" y="824" width="248" height="64" rx="8" class="node"/>
-    <text x="920" y="850" class="label">Hermes TUI callback</text>
+    <text x="920" y="850" class="label">Nako TUI callback</text>
     <text x="920" y="873" class="body">Existing show / hide controls</text>
   </g>
   <text x="40" y="928" class="body">Solid: runtime / inputs. Dashed: optional / external boundary.</text>

@@ -1,4 +1,4 @@
-"""Load the plugin the way Hermes does (a package from its directory), with a scratch Hermes home."""
+"""Load the plugin the way Nako does (a package from its directory), with a scratch Nako home."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Ctx:
-    """The parts of Hermes's plugin context this plugin uses, keeping what it registered."""
+    """The parts of Nako's plugin context this plugin uses, keeping what it registered."""
 
     def __init__(self):
         self.tools, self.hooks, self.commands = {}, {}, {}
@@ -31,11 +31,11 @@ class Ctx:
 def home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    constants = type(sys)("hermes_constants")
-    constants.get_hermes_home = lambda: Path(state["home"])
+    constants = type(sys)("nako_constants")
+    constants.get_nako_home = lambda: Path(state["home"])
     state = {"home": home}
     constants.state = state
-    monkeypatch.setitem(sys.modules, "hermes_constants", constants)
+    monkeypatch.setitem(sys.modules, "nako_constants", constants)
     return state
 
 

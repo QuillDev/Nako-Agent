@@ -1,4 +1,4 @@
-import { registryBackendScopeKey } from '@hermes/shared'
+import { registryBackendScopeKey } from '@nako/shared'
 import { atom } from 'nanostores'
 
 import { normalizeProfileKey } from './profile'

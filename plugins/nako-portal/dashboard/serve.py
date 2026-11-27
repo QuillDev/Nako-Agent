@@ -2,7 +2,7 @@
 
 The gateway's adapter starts it (outside the gateway's own service, so it outlives a gateway
 restart) and then dials in over the loopback link. Run as `python serve.py <server.json>`;
-the adapter writes that file. Only aiohttp and cryptography are needed, not Hermes.
+the adapter writes that file. Only aiohttp and cryptography are needed, not Nako.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from portal.offline import Offline
 from portal.server import Portal
 from portal.store import Store
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 BIND_RETRY = 2
 # Another server still holding the port this long means one is already serving: leave it be.
@@ -73,15 +73,15 @@ async def main(config_path):
         link = GatewayLink(config["code"], on_stale=done.set)
         hub = Hub(link, alert=alert)
         link.serve(hub)
-        # Hermes's home: chats are read from its session store while no gateway is connected.
+        # Nako's home: chats are read from its session store while no gateway is connected.
         home = Path(config.get("home") or data.parent)
         # What the agent calls itself: it names its home variable, update marker and service after that.
         agent = config.get("agent")
         link.offline = Offline(home, agent=agent)
         mesh = config.get("mesh") or {}
-        # This machine's Hermes, looked after from here: its version, gateway restarts, updates.
+        # This machine's Nako, looked after from here: its version, gateway restarts, updates.
         # A machine in someone's mesh also brings its gateway back when it goes away and stays away.
-        ops = MachineOps(data, home, config.get("hermes"), hub, agent=agent, watchdog=bool(mesh.get("hub")) and mesh.get("watchdog", True) is not False)
+        ops = MachineOps(data, home, config.get("nako"), hub, agent=agent, watchdog=bool(mesh.get("hub")) and mesh.get("watchdog", True) is not False)
         portal = Portal(
             hub,
             store,

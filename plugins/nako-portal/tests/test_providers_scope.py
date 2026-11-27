@@ -1,6 +1,6 @@
 """The Providers page reads keys the way a turn in the shown profile sees them.
 
-Needs a real Hermes to import, so CI skips it; run it with Hermes's own interpreter.
+Needs a real Nako to import, so CI skips it; run it with Nako's own interpreter.
 """
 
 import importlib.util
@@ -9,7 +9,7 @@ import types
 import pytest
 from conftest import ROOT
 
-config = pytest.importorskip("hermes_cli.config")
+config = pytest.importorskip("nako_cli.config")
 secret_scope = pytest.importorskip("agent.secret_scope")
 
 
@@ -18,18 +18,18 @@ def _backend(home):
     plugin = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(plugin)
     shown = types.SimpleNamespace(_home=lambda profile=None: home)
-    shown._profile_scope = types.MethodType(plugin.HermesBackend._profile_scope, shown)
-    return lambda: {row["slug"]: row for row in plugin.HermesBackend.providers(shown)}
+    shown._profile_scope = types.MethodType(plugin.NakoBackend._profile_scope, shown)
+    return lambda: {row["slug"]: row for row in plugin.NakoBackend.providers(shown)}
 
 
 def test_account_providers_show_how_they_sign_in(tmp_path, monkeypatch):
     (tmp_path / "config.yaml").write_text("model:\n  default: some-model\n", encoding="utf-8")
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("NAKO_HOME", str(tmp_path))
     rows = _backend(tmp_path)()
 
     assert rows["nous"]["kind"] == "signin"
     assert rows["qwen-oauth"]["kind"] == "cli"
-    assert rows["qwen-oauth"]["command"] == "hermes auth add qwen-oauth"
+    assert rows["qwen-oauth"]["command"] == "nako auth add qwen-oauth"
     assert all(row["command"] for row in rows.values() if row["kind"] == "cli")
 
 
@@ -40,7 +40,7 @@ def test_a_key_only_another_profile_has_does_not_count_as_set_up(tmp_path, monke
         (home / "config.yaml").write_text("model:\n  default: some-model\n", encoding="utf-8")
     (main / ".env").write_text("OPENROUTER_API_KEY=sk-or-main-only\n", encoding="utf-8")
     (other / ".env").write_text("", encoding="utf-8")
-    monkeypatch.setenv("HERMES_HOME", str(main))
+    monkeypatch.setenv("NAKO_HOME", str(main))
     # The gateway process carries the main profile's keys, as it does when that profile starts it.
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-main-only")
     secret_scope.set_multiplex_active(True)

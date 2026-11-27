@@ -1,4 +1,4 @@
-"""Opt-in real agy probe through unmodified Hermes nonstream dispatch.
+"""Opt-in real agy probe through unmodified Nako nonstream dispatch.
 
 Run explicitly, not test discovery. Uses the existing account/bare Argon model.
 Only UI egress (write_json) is captured in-process; no live gateway is restarted.
@@ -13,9 +13,9 @@ import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path.home() / '.hermes' / 'hermes-agent'))
-import hermes_bootstrap  # activate the installed host dependencies before other Hermes imports
-from hermes_cli.plugins_discovery import suppress_plugin_discovery
+sys.path.insert(0, str(Path.home() / '.nako' / 'nako-agent'))
+import nako_bootstrap  # activate the installed host dependencies before other Nako imports
+from nako_cli.plugins_discovery import suppress_plugin_discovery
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
         from agent.turn_api_call import _should_stream, perform_api_call
         from agent.subagent_lifecycle import bind_subagent_parent
         from providers import get_provider_profile
-        from hermes_cli.plugins import get_plugin_manager
+        from nako_cli.plugins import get_plugin_manager
         from tui_gateway import server
         profile = get_provider_profile('antigravity-oauth')
         assert profile.auth_type == 'external_process'

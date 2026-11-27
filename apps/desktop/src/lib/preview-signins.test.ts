@@ -10,8 +10,8 @@ async function load() {
 }
 
 function setBridge(bridge: unknown) {
-  ;(globalThis as { window: { hermesDesktop?: unknown } }).window = bridge
-    ? { hermesDesktop: { syncPreviewSignins: bridge } }
+  ;(globalThis as { window: { nakoDesktop?: unknown } }).window = bridge
+    ? { nakoDesktop: { syncPreviewSignins: bridge } }
     : {}
 }
 

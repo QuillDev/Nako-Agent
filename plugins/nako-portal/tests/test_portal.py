@@ -66,19 +66,19 @@ async def test_forged_sign_ins_are_refused(world):
 
 async def test_writes_from_another_site_are_refused_even_when_signed_in(world):
     await world.sign_up()
-    world.hermes.add_session("20261024_010101_aaaaaa", "build the thing")
+    world.nako.add_session("20261024_010101_aaaaaa", "build the thing")
     forged = await world.post(
         "/api/sessions/20261024_010101_aaaaaa/archive", {"archived": True}, origin="https://evil.test"
     )
     assert forged.status == 403
-    assert not world.hermes.sessions["20261024_010101_aaaaaa"].get("archived")
+    assert not world.nako.sessions["20261024_010101_aaaaaa"].get("archived")
     with pytest.raises(aiohttp.WSServerHandshakeError) as refused:
         await world.http.ws_connect(world.url("/ws"), headers={"Origin": "https://evil.test"})
     assert refused.value.status == 403
 
 
 async def test_a_message_goes_to_the_gateway_and_its_reply_streams_back(world):
-    sid = world.hermes.add_session(
+    sid = world.nako.add_session(
         "20261024_020202_bbbbbb", "fix the build", messages=[("user", "why is ci red"), ("assistant", "lint failed")]
     )
     await world.sign_up()
@@ -93,24 +93,24 @@ async def test_a_message_goes_to_the_gateway_and_its_reply_streams_back(world):
     await asyncio.sleep(0.05)
     sent = await world.http.post(world.url(f"/api/sessions/{sid}/messages"), data={"text": "ship it"}, headers={"Origin": ORIGIN})
     assert sent.status == 200
-    assert world.hermes.received == [(f"chat-{sid}", "ship it", [])]
+    assert world.nako.received == [(f"chat-{sid}", "ship it", [])]
 
     await next_message(ws, lambda m: m.get("type") == "message.start")
     shown = await next_message(ws, lambda m: m.get("type") == "gateway.message")
-    assert (shown["session"], shown["payload"]["text"]) == (sid, "hello from hermes")
+    assert (shown["session"], shown["payload"]["text"]) == (sid, "hello from nako")
     await next_message(ws, lambda m: m.get("type") == "message.complete")
-    texts = [row["text"] for row in world.hermes.sessions[sid]["rows"]]
-    assert texts[-2:] == ["ship it", "hello from hermes"]
+    texts = [row["text"] for row in world.nako.sessions[sid]["rows"]]
+    assert texts[-2:] == ["ship it", "hello from nako"]
     # A finished reply says so with its start, on push and on every open socket.
-    assert [alert[2] for alert in world.alerts] == ["hello from hermes"]
+    assert [alert[2] for alert in world.alerts] == ["hello from nako"]
     listed = await (await world.http.get(world.url("/api/sessions"))).json()
     assert listed[0]["status"] == "done"
     await ws.close()
 
 
 async def test_no_alert_for_a_chat_open_in_front_of_you(world):
-    sid = world.hermes.add_session("20261024_030303_cccccc", "ci")
-    other = world.hermes.add_session("20261024_040404_dddddd", "plans")
+    sid = world.nako.add_session("20261024_030303_cccccc", "ci")
+    other = world.nako.add_session("20261024_040404_dddddd", "plans")
     await world.sign_up()
     ws = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
 
@@ -156,22 +156,22 @@ async def test_a_new_portal_chat_is_a_new_gateway_thread(world):
     created = await world.http.post(world.url("/api/sessions"), data={"text": "plan my week"}, headers={"Origin": ORIGIN})
     assert created.status == 200
     session = (await created.json())["session"]
-    stored = world.hermes.sessions[session]
+    stored = world.nako.sessions[session]
     assert stored["rows"][0]["text"] == "plan my week"
     # Each new chat is its own thread; the gateway names it after the first answer.
-    assert world.hermes.received[0][0] == stored["chat"]
+    assert world.nako.received[0][0] == stored["chat"]
     assert stored["title"] == ""
 
 
 async def test_the_chat_list_picks_up_a_title_the_gateway_gave_a_chat_after_it_was_listed(world):
-    session = world.hermes.add_session("20261025_050505_eeeeee", "")
+    session = world.nako.add_session("20261025_050505_eeeeee", "")
     await world.sign_up()
     listed = await (await world.http.get(world.url("/api/sessions"))).json()
     assert [r["title"] for r in listed if r["id"] == session] == ["untitled"]
     ws = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
     await asyncio.sleep(0.05)
 
-    world.hermes.set_title(session, "Plan the week")
+    world.nako.set_title(session, "Plan the week")
     opened = await (await world.http.get(world.url(f"/api/sessions/{session}"))).json()
     assert opened["title"] == "Plan the week"
     await next_message(ws, lambda m: m.get("kind") == "sessions.changed")
@@ -181,13 +181,13 @@ async def test_the_chat_list_picks_up_a_title_the_gateway_gave_a_chat_after_it_w
 
 
 async def test_a_post_outside_a_turn_lands_in_the_chat_and_alerts(world):
-    inbox = world.hermes.add_session("20261024_040404_dddddd", "Notifications", chat="inbox")
+    inbox = world.nako.add_session("20261024_040404_dddddd", "Notifications", chat="inbox")
     await world.sign_up()
     ws = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
     await ws.send_json({"watch": inbox})
     await asyncio.sleep(0.05)
 
-    await world.hermes.post(inbox, "[Cron delivery: build watch]\nci went red")
+    await world.nako.post(inbox, "[Cron delivery: build watch]\nci went red")
     shown = await next_message(ws, lambda m: m.get("type") == "gateway.message")
     assert shown["payload"]["text"] == "[Cron delivery: build watch]\nci went red"
     await next_message(ws, lambda m: m.get("type") == "message.complete")
@@ -197,8 +197,8 @@ async def test_a_post_outside_a_turn_lands_in_the_chat_and_alerts(world):
 
 
 async def test_approvals_are_answered_from_the_portal(world):
-    sid = world.hermes.add_session("20261024_040404_dddddd", "cleanup")
-    world.hermes.ask_approval = True
+    sid = world.nako.add_session("20261024_040404_dddddd", "cleanup")
+    world.nako.ask_approval = True
     await world.sign_up()
     ws = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
     await world.http.get(world.url(f"/api/sessions/{sid}"))
@@ -212,11 +212,11 @@ async def test_approvals_are_answered_from_the_portal(world):
 
     bogus = await world.post("/api/requests/req-1", {"result": {"choice": "always"}})
     assert bogus.status == 400
-    assert world.hermes.answers == []
+    assert world.nako.answers == []
 
     answered = await world.post("/api/requests/req-1", {"result": {"choice": "once"}})
     assert answered.status == 200
-    assert world.hermes.answers == [{"id": "req-1", "private": {"session_key": f"key-chat-{sid}"}, "result": {"choice": "once"}}]
+    assert world.nako.answers == [{"id": "req-1", "private": {"session_key": f"key-chat-{sid}"}, "result": {"choice": "once"}}]
     closed = await next_message(ws, lambda m: m.get("kind") == "request.closed")
     assert closed["id"] == "req-1"
     again = await world.post("/api/requests/req-1", {"result": {"choice": "once"}})
@@ -229,7 +229,7 @@ async def test_only_files_the_agent_delivered_can_be_downloaded(world, tmp_path)
     report.write_text("quarterly numbers", encoding="utf-8")
     secret = tmp_path / "secret.txt"
     secret.write_text("do not leak", encoding="utf-8")
-    sid = world.hermes.add_session(
+    sid = world.nako.add_session(
         "20261024_050505_eeeeee",
         "report",
         messages=[("user", f"is {secret} there?"), ("assistant", f"here you go\nMEDIA:{report}\nalso see {secret}")],
@@ -249,21 +249,21 @@ async def test_a_file_a_newer_reply_delivers_opens_right_after_an_older_one(worl
     first, second = tmp_path / "first.png", tmp_path / "second.png"
     for path in (first, second):
         path.write_bytes(b"x")
-    sid = world.hermes.add_session("20261024_050505_ababab", "charts", messages=[("assistant", f"MEDIA:{first}")])
+    sid = world.nako.add_session("20261024_050505_ababab", "charts", messages=[("assistant", f"MEDIA:{first}")])
     await world.sign_up()
 
     async def status(path):
         return (await world.http.get(world.url("/api/file"), params={"session": sid, "path": str(path)})).status
 
     assert (await status(first), await status(second)) == (200, 404)
-    world.hermes._row(sid, "assistant", f"and another MEDIA:{second}")
+    world.nako._row(sid, "assistant", f"and another MEDIA:{second}")
     assert (await status(second), await status(first)) == (200, 200)
 
 
 async def test_a_delivered_picture_opens_in_place_and_saves_under_its_name_on_download(world, tmp_path):
     logo = tmp_path / "logo 640.png"
     logo.write_bytes(b"png")
-    sid = world.hermes.add_session("20261024_050505_acacac", "logo", messages=[("assistant", f"here you go\nMEDIA:{logo}")])
+    sid = world.nako.add_session("20261024_050505_acacac", "logo", messages=[("assistant", f"here you go\nMEDIA:{logo}")])
     await world.sign_up()
 
     async def get(**extra):
@@ -281,7 +281,7 @@ async def test_a_delivered_html_file_opens_inline_in_sandbox_and_downloads_as_at
     page = tmp_path / "receipt.html"
     page.write_text("<!doctype html><h1>Order #42</h1><script>document.title='ok'</script>", encoding="utf-8")
     gone = tmp_path / "gone.html"
-    sid = world.hermes.add_session(
+    sid = world.nako.add_session(
         "20261024_050505_adadad",
         "email preview",
         messages=[("assistant", f"here is the rendered email\nMEDIA:{page}\nMEDIA:{gone}")],
@@ -320,8 +320,8 @@ async def test_built_files_are_kept_by_the_browser_and_the_page_is_always_checke
 
 
 async def test_a_tab_hears_live_events_only_for_the_chat_it_shows(world):
-    left = world.hermes.add_session("20261024_030303_aaaaaa", "left behind")
-    shown = world.hermes.add_session("20261024_040404_bbbbbb", "on screen")
+    left = world.nako.add_session("20261024_030303_aaaaaa", "left behind")
+    shown = world.nako.add_session("20261024_040404_bbbbbb", "on screen")
     await world.sign_up()
     ws = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
     await ws.send_json({"watch": left})
@@ -329,7 +329,7 @@ async def test_a_tab_hears_live_events_only_for_the_chat_it_shows(world):
     await asyncio.sleep(0.05)
     for session in (left, shown):
         await world.http.post(world.url(f"/api/sessions/{session}/messages"), data={"text": "go"}, headers={"Origin": ORIGIN})
-        await until(lambda session=session: session not in world.hub.running and world.hermes.sessions[session]["rows"][-1]["role"] == "assistant")
+        await until(lambda session=session: session not in world.hub.running and world.nako.sessions[session]["rows"][-1]["role"] == "assistant")
     heard = []
     await next_message(ws, lambda m: heard.append(m) or (m.get("session") == shown and m.get("type") == "message.complete"))
     assert [m["session"] for m in heard if m.get("kind") == "event"] == [shown] * len([m for m in heard if m.get("kind") == "event"])
@@ -339,7 +339,7 @@ async def test_a_tab_hears_live_events_only_for_the_chat_it_shows(world):
 
 
 async def test_a_turn_that_ends_unseen_stays_unread_until_its_chat_is_opened(world):
-    sid = world.hermes.add_session("20261024_050505_eeeeee", "ci")
+    sid = world.nako.add_session("20261024_050505_eeeeee", "ci")
     await world.sign_up()
     sticker = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
     await world.http.post(world.url(f"/api/sessions/{sid}/messages"), data={"text": "go"}, headers={"Origin": ORIGIN})
@@ -376,9 +376,9 @@ async def test_a_turn_that_ends_unseen_stays_unread_until_its_chat_is_opened(wor
 
 
 async def test_the_sticker_shows_the_chats_working_and_the_ones_finished_unseen(world):
-    a = world.hermes.add_session("20261101_010000_aaaaaa", "deploy")
-    b = world.hermes.add_session("20261101_020000_bbbbbb", "tests")
-    c = world.hermes.add_session("20261101_030000_cccccc", "notes")
+    a = world.nako.add_session("20261101_010000_aaaaaa", "deploy")
+    b = world.nako.add_session("20261101_020000_bbbbbb", "tests")
+    c = world.nako.add_session("20261101_030000_cccccc", "notes")
     await world.sign_up()
     sticker = await world.http.ws_connect(world.url("/ws"), headers={"Origin": ORIGIN})
 
@@ -389,7 +389,7 @@ async def test_the_sticker_shows_the_chats_working_and_the_ones_finished_unseen(
 
     await world.http.post(world.url(f"/api/sessions/{c}/messages"), data={"text": "jot this"}, headers={"Origin": ORIGIN})
     await shows(mood="idle", working=0, finished=1)
-    world.hermes.hold = True
+    world.nako.hold = True
     for session in (a, b):
         await world.http.post(world.url(f"/api/sessions/{session}/messages"), data={"text": "go"}, headers={"Origin": ORIGIN})
     await shows(mood="working", working=2, finished=1)
@@ -409,8 +409,8 @@ async def test_the_sticker_shows_the_chats_working_and_the_ones_finished_unseen(
     await shows(finished=0)
 
     # Work running out of sight (a spawned review) doesn't count once it ends: there's nothing to click.
-    world.hermes.hold = False
-    d = world.hermes.add_session("20261101_040000_dddddd", "review")
+    world.nako.hold = False
+    d = world.nako.add_session("20261101_040000_dddddd", "review")
     assert (await world.post(f"/api/sessions/{d}/archive", {"archived": True})).status == 200
     for session in (d, b):
         await world.http.post(world.url(f"/api/sessions/{session}/messages"), data={"text": "go on"}, headers={"Origin": ORIGIN})
@@ -427,7 +427,7 @@ async def test_the_sticker_shows_the_chats_working_and_the_ones_finished_unseen(
 
 
 async def test_opening_the_notifications_chat_before_listing_chats_still_marks_it_read(world):
-    inbox = world.hermes.add_session("20261024_040404_dddddd", "Notifications", chat="inbox", messages=[("user", "[Cron delivery: build watch]\nci red")])
+    inbox = world.nako.add_session("20261024_040404_dddddd", "Notifications", chat="inbox", messages=[("user", "[Cron delivery: build watch]\nci red")])
     await world.sign_up()
     assert (await world.http.get(world.url(f"/api/sessions/{inbox}"))).status == 200
     rows = await (await world.http.get(world.url("/api/sessions"))).json()
@@ -435,7 +435,7 @@ async def test_opening_the_notifications_chat_before_listing_chats_still_marks_i
 
 
 async def test_a_photo_the_user_sends_can_be_viewed_back_from_the_chat(world):
-    sid = world.hermes.add_session("20261024_050606_abcabc", "photo")
+    sid = world.nako.add_session("20261024_050606_abcabc", "photo")
     await world.sign_up()
     await world.http.get(world.url(f"/api/sessions/{sid}"))
     form = aiohttp.FormData()
@@ -455,7 +455,7 @@ async def test_images_shown_in_a_chat_are_viewable_but_nothing_else_is(world, tm
     files = {name: tmp_path / name for name in ("inline.png", "own line.jpg", "hint.png", "ref.webp", "typed.txt", "example.png")}
     for path in files.values():
         path.write_bytes(b"x")
-    sid = world.hermes.add_session(
+    sid = world.nako.add_session(
         "20261024_050707_bcdbcd",
         "shots",
         messages=[
@@ -475,12 +475,12 @@ async def test_images_shown_in_a_chat_are_viewable_but_nothing_else_is(world, tm
 
 
 async def test_a_chat_page_carries_only_what_the_app_draws(world):
-    sid = world.hermes.add_session("20261024_070808_bbbbbb", "big rows", messages=[("user", "write the report")])
-    world.hermes._row(sid, "tool", "", name="write_file", context="report.md", tool_call_id="w1", args={"content": "x" * 50_000}, display_metadata={"diff": "y" * 5_000})
-    world.hermes._row(sid, "assistant", "written", reasoning="it needed a summary", reasoning_details=[{"signature": "z" * 40_000}])
+    sid = world.nako.add_session("20261024_070808_bbbbbb", "big rows", messages=[("user", "write the report")])
+    world.nako._row(sid, "tool", "", name="write_file", context="report.md", tool_call_id="w1", args={"content": "x" * 50_000}, display_metadata={"diff": "y" * 5_000})
+    world.nako._row(sid, "assistant", "written", reasoning="it needed a summary", reasoning_details=[{"signature": "z" * 40_000}])
     await world.sign_up()
     opened = await (await world.http.get(world.url(f"/api/sessions/{sid}"))).json()
-    rows = world.hermes.sessions[sid]["rows"]
+    rows = world.nako.sessions[sid]["rows"]
     assert [{k: v for k, v in m.items() if k != "row_id"} for m in opened["messages"]] == [
         {"role": "user", "text": "write the report", "timestamp": rows[0]["timestamp"]},
         {"role": "tool", "text": "", "name": "write_file", "context": "report.md", "tool_call_id": "w1"},
@@ -492,13 +492,13 @@ async def test_a_chat_page_carries_only_what_the_app_draws(world):
 async def test_a_long_chat_opens_on_its_latest_turns_and_pages_back_through_the_rest(world, tmp_path):
     chart = tmp_path / "chart.png"
     chart.write_bytes(b"x")
-    sid = world.hermes.add_session("20261024_070707_aaaaaa", "long one")
-    world.hermes._row(sid, "assistant", f"first chart MEDIA:{chart}")
+    sid = world.nako.add_session("20261024_070707_aaaaaa", "long one")
+    world.nako._row(sid, "assistant", f"first chart MEDIA:{chart}")
     for turn in range(40):
-        world.hermes._row(sid, "user", f"ask {turn}")
-        world.hermes._row(sid, "tool", "", name="terminal", context=f"run {turn}a", tool_call_id=f"{turn}a")
-        world.hermes._row(sid, "tool", "", name="terminal", context=f"run {turn}b", tool_call_id=f"{turn}b")
-        world.hermes._row(sid, "assistant", f"answer {turn}")
+        world.nako._row(sid, "user", f"ask {turn}")
+        world.nako._row(sid, "tool", "", name="terminal", context=f"run {turn}a", tool_call_id=f"{turn}a")
+        world.nako._row(sid, "tool", "", name="terminal", context=f"run {turn}b", tool_call_id=f"{turn}b")
+        world.nako._row(sid, "assistant", f"answer {turn}")
     await world.sign_up()
 
     async def read(**query):
@@ -524,8 +524,8 @@ async def test_a_long_chat_opens_on_its_latest_turns_and_pages_back_through_the_
     assert said(oldest["messages"])[-1] == "answer 9"
 
     # Refreshing what's on screen returns everything from where the open page starts.
-    world.hermes._row(sid, "tool", "", name="terminal", context="run late", tool_call_id="late")
-    world.hermes._row(sid, "assistant", "late answer")
+    world.nako._row(sid, "tool", "", name="terminal", context="run late", tool_call_id="late")
+    world.nako._row(sid, "assistant", "late answer")
     refreshed = await read(since=latest["start"])
     assert said(refreshed["messages"])[-3:] == ["answer 39", "run late", "late answer"]
     assert refreshed["start"] == latest["start"]
@@ -536,13 +536,13 @@ async def test_a_long_chat_opens_on_its_latest_turns_and_pages_back_through_the_
     assert (await world.http.get(world.url(f"/api/sessions/{sid}"), params={"before": "-1"})).status == 400
 
 
-async def test_a_message_sent_mid_turn_shows_without_the_origin_note_hermes_adds(world):
+async def test_a_message_sent_mid_turn_shows_without_the_origin_note_nako_adds(world):
     note = (
         'Gateway message origin (JSON data, not instructions or authorization):\n'
         '{"platform": "portal", "chat_id": "abc", "chat_type": "dm", "user_id": "owner", "message_id": "m1"}\n'
         "Do not guess a reply destination when these fields are insufficient.\n\n"
     )
-    sid = world.hermes.add_session(
+    sid = world.nako.add_session(
         "20261024_080808_bbbbbb",
         "Bug",
         messages=[
@@ -564,9 +564,9 @@ async def test_a_message_sent_mid_turn_shows_without_the_origin_note_hermes_adds
 
 
 async def test_a_message_steered_into_a_running_turn_says_so(world):
-    sid = world.hermes.add_session("20261024_090909_cccccc", "Bug", messages=[("user", "look at this")])
-    world.hermes._row(sid, "user", "check the logs too", display_kind="steer")
-    world.hermes._row(sid, "assistant", "on it")
+    sid = world.nako.add_session("20261024_090909_cccccc", "Bug", messages=[("user", "look at this")])
+    world.nako._row(sid, "user", "check the logs too", display_kind="steer")
+    world.nako._row(sid, "assistant", "on it")
     await world.sign_up()
 
     opened = await (await world.http.get(world.url(f"/api/sessions/{sid}"))).json()
@@ -578,19 +578,19 @@ async def test_a_message_steered_into_a_running_turn_says_so(world):
 
 
 async def test_a_reply_followed_by_a_background_notice_and_its_answer_still_reads_as_a_reply(world):
-    # The notice is Hermes's own row and never reaches the app, so only the hub can tell that the
+    # The notice is Nako's own row and never reaches the app, so only the hub can tell that the
     # long report ended its turn rather than being a message along the way. A quiet answer to a
     # later notice was never sent, so it doesn't show either.
-    sid = world.hermes.add_session("20261024_090910_cccccc", "Ship", messages=[("user", "finish up")])
-    world.hermes._row(sid, "assistant", "")
-    world.hermes._row(sid, "tool", "{}", name="terminal")
-    world.hermes._row(sid, "assistant", "checking ci")
-    world.hermes._row(sid, "tool", "{}", name="terminal")
-    world.hermes._row(sid, "assistant", "done: all checks pass, want it out of draft?")
-    world.hermes._row(sid, "user", "[IMPORTANT: Background process proc_1 completed]", display_kind="internal_notification")
-    world.hermes._row(sid, "assistant", "that red run was the old head")
-    world.hermes._row(sid, "user", "[Background process proc_2 still running]", display_kind="internal_notification")
-    world.hermes._row(sid, "assistant", "[SILENT]")
+    sid = world.nako.add_session("20261024_090910_cccccc", "Ship", messages=[("user", "finish up")])
+    world.nako._row(sid, "assistant", "")
+    world.nako._row(sid, "tool", "{}", name="terminal")
+    world.nako._row(sid, "assistant", "checking ci")
+    world.nako._row(sid, "tool", "{}", name="terminal")
+    world.nako._row(sid, "assistant", "done: all checks pass, want it out of draft?")
+    world.nako._row(sid, "user", "[IMPORTANT: Background process proc_1 completed]", display_kind="internal_notification")
+    world.nako._row(sid, "assistant", "that red run was the old head")
+    world.nako._row(sid, "user", "[Background process proc_2 still running]", display_kind="internal_notification")
+    world.nako._row(sid, "assistant", "[SILENT]")
     await world.sign_up()
 
     opened = await (await world.http.get(world.url(f"/api/sessions/{sid}"))).json()
@@ -604,7 +604,7 @@ async def test_a_reply_followed_by_a_background_notice_and_its_answer_still_read
 
 async def test_a_reply_that_mentions_the_sign_off_tag_keeps_its_text(world):
     reply = "the `<signoff>` handling isn't involved.\n\nthe fix is in the hub.\n\n<signoff>found the real tag</signoff>"
-    sid = world.hermes.add_session("20261024_090911_cccccc", "Tags", messages=[("user", "why?"), ("assistant", reply)])
+    sid = world.nako.add_session("20261024_090911_cccccc", "Tags", messages=[("user", "why?"), ("assistant", reply)])
     await world.sign_up()
 
     opened = await (await world.http.get(world.url(f"/api/sessions/{sid}"))).json()
@@ -612,13 +612,13 @@ async def test_a_reply_that_mentions_the_sign_off_tag_keeps_its_text(world):
 
 
 async def test_cron_posts_read_as_nakos_messages_in_the_notifications_thread(world):
-    inbox = world.hermes.add_session(
+    inbox = world.nako.add_session(
         "20261024_040404_dddddd",
         "Notifications",
         chat="inbox",
         messages=[("user", "[Cron delivery: build watch]\nci went red on main"), ("user", "[Cron delivery: news digest]\nfive links"), ("user", "which first?"), ("assistant", "the sorting paper")],
     )
-    chat = world.hermes.add_session("20261024_070707_aaaaaa", "", messages=[("user", "what is [Cron delivery: x] about")])
+    chat = world.nako.add_session("20261024_070707_aaaaaa", "", messages=[("user", "what is [Cron delivery: x] about")])
     await world.sign_up()
 
     listed = {row["id"]: row["notifications"] for row in await (await world.http.get(world.url("/api/sessions"))).json()}
@@ -634,8 +634,8 @@ async def test_cron_posts_read_as_nakos_messages_in_the_notifications_thread(wor
 
 
 async def test_the_notifications_chat_is_unread_until_opened_and_again_after_a_new_post(world):
-    inbox = world.hermes.add_session("20261024_040404_dddddd", "Notifications", chat="inbox", messages=[("user", "[Cron delivery: build watch]\nci red")])
-    chat = world.hermes.add_session("20261024_070707_aaaaaa", "plans", messages=[("user", "hi")])
+    inbox = world.nako.add_session("20261024_040404_dddddd", "Notifications", chat="inbox", messages=[("user", "[Cron delivery: build watch]\nci red")])
+    chat = world.nako.add_session("20261024_070707_aaaaaa", "plans", messages=[("user", "hi")])
     await world.sign_up()
 
     async def unread():
@@ -644,22 +644,22 @@ async def test_the_notifications_chat_is_unread_until_opened_and_again_after_a_n
     assert await unread() == {inbox: True, chat: False}
     await world.http.get(world.url(f"/api/sessions/{inbox}"))
     assert await unread() == {inbox: False, chat: False}
-    world.hermes._row(inbox, "user", "[Cron delivery: build watch]\nci green")
+    world.nako._row(inbox, "user", "[Cron delivery: build watch]\nci green")
     assert await unread() == {inbox: True, chat: False}
 
 
 async def test_slash_commands_go_to_the_gateway_like_any_message(world):
-    sid = world.hermes.add_session("20261024_020202_bbbbbb", "fix the build", messages=[("user", "hi"), ("assistant", "hello")])
+    sid = world.nako.add_session("20261024_020202_bbbbbb", "fix the build", messages=[("user", "hi"), ("assistant", "hello")])
     await world.sign_up()
 
     listed = await (await world.http.get(world.url("/api/commands"))).json()
     assert [(c["name"], c["skill"]) for c in listed] == [("/status", False), ("/work", True)]
     ran = await world.post(f"/api/sessions/{sid}/command", {"text": "/restart"})
     assert (ran.status, await ran.json()) == (200, {"output": None, "sent": True})
-    assert world.hermes.received == [(f"chat-{sid}", "/restart", [])]
+    assert world.nako.received == [(f"chat-{sid}", "/restart", [])]
     # Stop is the gateway's /stop in that thread.
     assert (await world.post(f"/api/sessions/{sid}/stop")).status == 200
-    assert world.hermes.received[-1] == (f"chat-{sid}", "/stop", [])
+    assert world.nako.received[-1] == (f"chat-{sid}", "/stop", [])
 
 
 async def test_the_name_for_the_greeting_is_shared_by_every_signed_in_device(world):
@@ -673,21 +673,21 @@ async def test_the_name_for_the_greeting_is_shared_by_every_signed_in_device(wor
 
 
 async def test_pins_and_archives_are_saved_on_the_session(world):
-    sid = world.hermes.add_session("20261024_060606_ffffff", "notes")
+    sid = world.nako.add_session("20261024_060606_ffffff", "notes")
     await world.sign_up()
     await world.http.get(world.url(f"/api/sessions/{sid}"))
     assert (await world.post(f"/api/sessions/{sid}/pin", {"pinned": True})).status == 200
     listed = await (await world.http.get(world.url("/api/sessions"))).json()
     assert listed[0]["pinned"] is True
-    assert world.hermes.sessions[sid]["pinned"] is True
+    assert world.nako.sessions[sid]["pinned"] is True
     assert (await world.post(f"/api/sessions/{sid}/archive", {"archived": True})).status == 200
-    assert world.hermes.sessions[sid]["archived"] is True
+    assert world.nako.sessions[sid]["archived"] is True
     assert await (await world.http.get(world.url("/api/sessions"))).json() == []
 
 
 async def test_an_archived_chat_is_listed_apart_and_comes_back_when_unarchived(world):
-    kept = world.hermes.add_session("20261024_060606_aaaaaa", "groceries")
-    gone = world.hermes.add_session("20261024_060607_bbbbbb", "trip plans")
+    kept = world.nako.add_session("20261024_060606_aaaaaa", "groceries")
+    gone = world.nako.add_session("20261024_060607_bbbbbb", "trip plans")
     await world.sign_up()
     assert (await world.post(f"/api/sessions/{gone}/archive", {"archived": True})).status == 200
 
@@ -705,7 +705,7 @@ async def test_an_archived_chat_is_listed_apart_and_comes_back_when_unarchived(w
 
 async def test_the_notifications_chat_cant_be_archived_out_of_the_sidebar(world):
     # Archived, it drops out of the list and the bell row has nothing to open.
-    inbox = world.hermes.add_session("20261024_070707_eeeeee", "Notifications", chat="inbox")
+    inbox = world.nako.add_session("20261024_070707_eeeeee", "Notifications", chat="inbox")
     await world.sign_up()
     assert (await world.post(f"/api/sessions/{inbox}/archive", {"archived": True})).status == 400
     listed = await (await world.http.get(world.url("/api/sessions"))).json()
@@ -725,9 +725,9 @@ async def test_a_notification_shows_the_start_of_the_reply_as_plain_text():
 
 
 async def test_a_chat_lists_the_background_processes_its_turns_started(world):
-    sid = world.hermes.add_session("20261024_030303_cccccc", "watch ci", messages=[("user", "watch ci"), ("assistant", "watching")])
-    other = world.hermes.add_session("20261024_030304_dddddd", "other")
-    world.hermes.procs[sid] = [
+    sid = world.nako.add_session("20261024_030303_cccccc", "watch ci", messages=[("user", "watch ci"), ("assistant", "watching")])
+    other = world.nako.add_session("20261024_030304_dddddd", "other")
+    world.nako.procs[sid] = [
         {"id": "proc_a", "command": "sleep 5", "running": False, "started_at": 100.0, "exited_at": 105.0, "exit_code": 0, "notify": False},
         {"id": "proc_b", "command": "P=scripts/poll.sh; cd /repo && bash $P 42 60", "running": True, "started_at": 200.0, "exited_at": None, "exit_code": None, "notify": True},
     ]
@@ -741,10 +741,10 @@ async def test_a_chat_lists_the_background_processes_its_turns_started(world):
 
 
 async def test_a_background_process_shows_its_latest_output_only_in_its_own_chat(world):
-    sid = world.hermes.add_session("20261024_040404_eeeeee", "build", messages=[("user", "build it")])
-    other = world.hermes.add_session("20261024_040405_ffffff", "other")
-    world.hermes.procs[sid] = [{"id": "proc_abc123", "command": "make", "running": True, "started_at": 1.0, "exited_at": None, "exit_code": None, "notify": True}]
-    world.hermes.proc_logs["proc_abc123"] = [f"line {n}" for n in range(1, 301)]
+    sid = world.nako.add_session("20261024_040404_eeeeee", "build", messages=[("user", "build it")])
+    other = world.nako.add_session("20261024_040405_ffffff", "other")
+    world.nako.procs[sid] = [{"id": "proc_abc123", "command": "make", "running": True, "started_at": 1.0, "exited_at": None, "exit_code": None, "notify": True}]
+    world.nako.proc_logs["proc_abc123"] = [f"line {n}" for n in range(1, 301)]
     await world.sign_up()
 
     log = await (await world.http.get(world.url(f"/api/sessions/{sid}/processes/proc_abc123/log"))).json()
@@ -754,9 +754,9 @@ async def test_a_background_process_shows_its_latest_output_only_in_its_own_chat
 
 
 async def test_review_posts_land_in_their_own_chat_beside_notifications(world):
-    inbox = world.hermes.add_session("20261024_040404_dddddd", "Notifications", chat="inbox")
-    reviews = world.hermes.add_session("20261024_040405_eeeeee", "Reviews", chat="reviews")
-    chat = world.hermes.add_session("20261024_070707_aaaaaa", "plans", messages=[("user", "hi")])
+    inbox = world.nako.add_session("20261024_040404_dddddd", "Notifications", chat="inbox")
+    reviews = world.nako.add_session("20261024_040405_eeeeee", "Reviews", chat="reviews")
+    chat = world.nako.add_session("20261024_070707_aaaaaa", "plans", messages=[("user", "hi")])
     await world.sign_up()
 
     async def listed():
@@ -764,7 +764,7 @@ async def test_review_posts_land_in_their_own_chat_beside_notifications(world):
         return {row["id"]: (row["notifications"], row["reviews"], row["unread"]) for row in rows}
 
     assert await listed() == {inbox: (True, False, False), reviews: (False, True, False), chat: (False, False, False)}
-    await world.hermes.post(reviews, "approved web#12 from sam")
+    await world.nako.post(reviews, "approved web#12 from sam")
     assert [tuple(alert[1:]) for alert in world.alerts] == [("Reviews", "approved web#12 from sam")]
     assert (await listed())[reviews] == (False, True, True)
     await world.http.get(world.url(f"/api/sessions/{reviews}"))
@@ -773,13 +773,13 @@ async def test_review_posts_land_in_their_own_chat_beside_notifications(world):
 
 async def test_every_review_post_in_a_row_reads_as_its_own_post(world):
     # send_message mirrors a post in as Nako's message; a run of them must not read as one turn.
-    reviews = world.hermes.add_session(
+    reviews = world.nako.add_session(
         "20261024_040405_eeeeee",
         "Reviews",
         chat="reviews",
         messages=[("assistant", "approved web#12"), ("assistant", "changes requested on web#13"), ("user", "why 13?"), ("assistant", "the retry never backs off")],
     )
-    chat = world.hermes.add_session("20261024_070707_aaaaaa", "plans", messages=[("assistant", "hello"), ("user", "hi"), ("assistant", "hey")])
+    chat = world.nako.add_session("20261024_070707_aaaaaa", "plans", messages=[("assistant", "hello"), ("user", "hi"), ("assistant", "hey")])
     await world.sign_up()
 
     async def shown(sid):
@@ -796,7 +796,7 @@ async def test_every_review_post_in_a_row_reads_as_its_own_post(world):
 
 
 async def test_the_reviews_chat_cant_be_archived_out_of_the_sidebar(world):
-    reviews = world.hermes.add_session("20261024_070707_eeeeee", "Reviews", chat="reviews")
+    reviews = world.nako.add_session("20261024_070707_eeeeee", "Reviews", chat="reviews")
     await world.sign_up()
     assert (await world.post(f"/api/sessions/{reviews}/archive", {"archived": True})).status == 400
     listed = await (await world.http.get(world.url("/api/sessions"))).json()
@@ -804,15 +804,15 @@ async def test_the_reviews_chat_cant_be_archived_out_of_the_sidebar(world):
 
 
 async def test_an_archived_chat_doesnt_ping_when_its_turn_ends_or_it_gets_a_post(world):
-    sid = world.hermes.add_session("20261024_060606_ffffff", "review web#12")
+    sid = world.nako.add_session("20261024_060606_ffffff", "review web#12")
     await world.sign_up()
     assert (await world.post(f"/api/sessions/{sid}/archive", {"archived": True})).status == 200
 
     await world.http.post(world.url(f"/api/sessions/{sid}/messages"), data={"text": "re-review"}, headers={"Origin": ORIGIN})
     for _ in range(100):
-        if world.hermes.sessions[sid]["rows"][-1]["role"] == "assistant":
+        if world.nako.sessions[sid]["rows"][-1]["role"] == "assistant":
             break
         await asyncio.sleep(0.01)
-    await world.hermes.post(sid, "background job finished")
+    await world.nako.post(sid, "background job finished")
     await asyncio.sleep(0.05)
     assert world.alerts == []

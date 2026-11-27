@@ -1,6 +1,6 @@
 """The portal's own data: passkeys, sign-in sessions, setup links, push subscriptions, inbox.
 
-Conversations are NOT stored here: they live in the Hermes session database and
+Conversations are NOT stored here: they live in the Nako session database and
 are read through the backend, so Desktop and the portal show one transcript.
 """
 

@@ -80,9 +80,9 @@ async def test_a_push_reaches_the_browser_encrypted_and_dead_subscriptions_are_d
 
 async def test_cron_deliveries_to_the_portal_platform_land_in_its_inbox(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    fake_constants = type(sys)("hermes_constants")
-    fake_constants.get_hermes_home = lambda: home
-    monkeypatch.setitem(sys.modules, "hermes_constants", fake_constants)
+    fake_constants = type(sys)("nako_constants")
+    fake_constants.get_nako_home = lambda: home
+    monkeypatch.setitem(sys.modules, "nako_constants", fake_constants)
     spec = importlib.util.spec_from_file_location("nako_portal_plugin", ROOT / "__init__.py")
     plugin = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(plugin)
@@ -105,12 +105,12 @@ async def test_cron_deliveries_to_the_portal_platform_land_in_its_inbox(tmp_path
     await asyncio.sleep(0)
 
 
-async def test_hermes_send_can_address_the_reviews_chat_and_waits_for_it_to_open(tmp_path, monkeypatch):
+async def test_nako_send_can_address_the_reviews_chat_and_waits_for_it_to_open(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    fake_constants = type(sys)("hermes_constants")
-    fake_constants.get_hermes_home = lambda: home
-    monkeypatch.setitem(sys.modules, "hermes_constants", fake_constants)
+    fake_constants = type(sys)("nako_constants")
+    fake_constants.get_nako_home = lambda: home
+    monkeypatch.setitem(sys.modules, "nako_constants", fake_constants)
     spec = importlib.util.spec_from_file_location("nako_portal_plugin_send", ROOT / "__init__.py")
     plugin = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(plugin)
@@ -128,7 +128,7 @@ async def test_hermes_send_can_address_the_reviews_chat_and_waits_for_it_to_open
     assert [parse(ref) for ref in ("reviews", "inbox", "new", "a467018aadf64780")] == [
         ("reviews", None), ("inbox", None), ("new", None), ("a467018aadf64780", None)
     ]
-    # Names it doesn't own go on to Hermes's channel directory.
+    # Names it doesn't own go on to Nako's channel directory.
     assert parse("Nako") is None and parse("reviews; rm") is None
 
     # The gateway opens the thread once the post reaches it; the mirror runs right after the send.
@@ -153,7 +153,7 @@ async def test_hermes_send_can_address_the_reviews_chat_and_waits_for_it_to_open
 
 
 async def test_the_portal_keeps_one_titled_chat_for_its_posts(monkeypatch):
-    # Hermes's cron mirror appends each post to the open gateway session for portal:inbox, so
+    # Nako's cron mirror appends each post to the open gateway session for portal:inbox, so
     # that session must exist before the first post, and every post must find the same one.
     gateway, config, session = (type(sys)(name) for name in ("gateway", "gateway.config", "gateway.session"))
     config.Platform = lambda name: f"platform:{name}"

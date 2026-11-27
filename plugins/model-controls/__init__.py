@@ -1,4 +1,4 @@
-"""Shared model controls for Hermes client plugins."""
+"""Shared model controls for Nako client plugins."""
 import sys
 from . import api
 

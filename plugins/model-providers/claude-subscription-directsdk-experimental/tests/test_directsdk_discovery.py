@@ -39,13 +39,13 @@ def test_missing_claude_is_reported_on_every_path(profile, tmp_path, caplog):
         client.close()
 
     # Load-time check: importing the plugin logs the install hint (never raises) when Claude Code
-    # is absent, so the provider stays selectable and `hermes model` can explain what is missing.
+    # is absent, so the provider stays selectable and `nako model` can explain what is missing.
     import providers
     module_name = type(profile).__module__
     assert module_name.startswith(user_provider_prefix())
     del sys.modules[module_name]
     with caplog.at_level(logging.WARNING):
-        providers._import_plugin_dir(Path(os.environ["HERMES_HOME"]) / "plugins" / PLUGIN_NAME, "user")
+        providers._import_plugin_dir(Path(os.environ["NAKO_HOME"]) / "plugins" / PLUGIN_NAME, "user")
     assert any("Claude Code is not installed" in rec.getMessage() for rec in caplog.records)
     assert providers.get_provider_profile(PLUGIN_NAME) is not None
 

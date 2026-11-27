@@ -56,7 +56,7 @@ def _resolve(command, env):
 
 
 # The plugin's settings live at plugins.entries.<manifest name>.settings in the active profile's
-# config.yaml (plugin.yaml `config_schema`; Desktop → Capabilities → Plugins, or `hermes config set`).
+# config.yaml (plugin.yaml `config_schema`; Desktop → Capabilities → Plugins, or `nako config set`).
 PLUGIN_ID = "claude-subscription-directsdk-experimental"
 TELEMETRY_SETTING = "claude_code_telemetry"
 CONFIG_DIR_SETTING = "claude_config_dir"
@@ -82,7 +82,7 @@ _OFF = ("false", "0", "no", "off")
 BACKEND_OVERRIDES = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_FOUNDRY_API_KEY")
 BACKEND_SWITCHES = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 
-# Hermes loads `~/.hermes/.env` into its own process, so a key set there for its `anthropic` provider
+# Nako loads `~/.nako/.env` into its own process, so a key set there for its `anthropic` provider
 # is inherited here too. Claude Code would sign in with it and bill API usage instead of the
 # subscription, so no child of this plugin receives one.
 API_CREDENTIAL_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_FOUNDRY_API_KEY")
@@ -98,11 +98,11 @@ def _setting(key, default=None):
     """Read one plugin setting, with unreadable config or missing keys treated as not set.
 
     Read from the active profile's config on every call (``load_config_readonly`` resolves
-    ``get_hermes_home()`` per call and caches on the file signature), so a multi-profile gateway
+    ``get_nako_home()`` per call and caches on the file signature), so a multi-profile gateway
     honors each profile's choice and a change applies to the next spawn without a restart.
     """
     try:
-        from hermes_cli.config import load_config_readonly
+        from nako_cli.config import load_config_readonly
         value = load_config_readonly()
     except Exception:
         return default
@@ -134,7 +134,7 @@ def apply_config_dir(env):
 def apply_traffic_policy(env, telemetry=None):
     """Set the plugin's Claude Code traffic flags on a child ``env`` (in place) and return it.
 
-    Never removes anything: a flag the user exported in Hermes' own environment
+    Never removes anything: a flag the user exported in Nako' own environment
     (``DISABLE_TELEMETRY``, ``DO_NOT_TRACK``, ...) still reaches the child with the setting on.
     The caller name is the one value replaced, whatever the parent set.
     """
@@ -205,7 +205,7 @@ def _first_party(env):
 
 
 def discover_models(command=None, env=None, timeout: float = 40, config_dir=None):
-    """The account's live picker as ``[{id, label, note, upstream_requests}]`` in Hermes route ids,
+    """The account's live picker as ``[{id, label, note, upstream_requests}]`` in Nako route ids,
     or ``None`` when the CLI is missing, logged out, or the handshake fails."""
     if config_dir is None:
         try:

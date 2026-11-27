@@ -1,5 +1,5 @@
-// MCP servers: the list `hermes mcp` keeps for the shown profile. The gateway reads and writes
-// it with Hermes's own helpers; header and env values never come back, only their names.
+// MCP servers: the list `nako mcp` keeps for the shown profile. The gateway reads and writes
+// it with Nako's own helpers; header and env values never come back, only their names.
 import { useSyncExternalStore } from "react"
 import { api, ApiError } from "@/lib/api"
 
@@ -55,7 +55,7 @@ export function reloadMcp() {
       for (const l of listeners) l()
     },
     e => {
-      // A Hermes that can't run MCP servers (or a gateway that went away): no page.
+      // A Nako that can't run MCP servers (or a gateway that went away): no page.
       list = e instanceof ApiError && e.status === 404 ? false : list || false
       for (const l of listeners) l()
     },

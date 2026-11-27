@@ -29,7 +29,7 @@ def load(name):
     spec.loader.exec_module(plugin)
     return plugin
 
-first = load("hermes_plugin_first")
+first = load("nako_plugin_first")
 accounts = first._provider_accounts()
 mesh = first._mesh_tools()
 groups = first._groups_tools()
@@ -37,12 +37,12 @@ assert callable(accounts.source_for)
 assert callable(groups.CALL)
 assert callable(first.register)
 assert callable(first.SecretSurface)
-assert callable(first.HermesBackend.providers)
-assert callable(first.HermesBackend.mcp_servers)
+assert callable(first.NakoBackend.providers)
+assert callable(first.NakoBackend.mcp_servers)
 assert mesh.PORTAL is first._portal
 first._LIVE_TOOLS["first_only"] = True
 
-second = load("hermes_plugin_second")
+second = load("nako_plugin_second")
 assert second._provider_accounts() is accounts
 assert second._mesh_tools() is mesh
 assert second._groups_tools() is groups

@@ -1,5 +1,5 @@
 // Portal state: the signed-in user, the chat list, the open chat and its live turn.
-// Transcripts are never stored here; every open reads Hermes's own history.
+// Transcripts are never stored here; every open reads Nako's own history.
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { ModelSelection } from "@/components/portal/model-picker"
 import { d } from "@/lib/decode"
@@ -70,7 +70,7 @@ export function usePortal() {
   }, [])
   const generation = useRef({ request: 0, turn: 0 })
   const [connected, setConnected] = useState(true)
-  const [hermes, setHermes] = useState<import("@/lib/types").HermesBuild | null>(null)
+  const [nako, setNako] = useState<import("@/lib/types").NakoBuild | null>(null)
   // Bumped when a machine in the mesh joins, leaves or starts work; Settings rereads the list.
   const [machinesSeen, setMachinesSeen] = useState(0)
   // Whether this page's socket to the portal is up; while it's down nothing live arrives.
@@ -166,12 +166,12 @@ export function usePortal() {
       switch (frame.kind) {
         case "hub.connected":
           setConnected(true)
-          setHermes(frame.hermes ?? null)
+          setNako(frame.nako ?? null)
           loadSessions()
           if (currentRef.current) refresh(currentRef.current.session)
           return
         case "hub.disconnected":
-          setHermes(null)
+          setNako(null)
           return setConnected(false)
         case "sessions.changed":
           loadSessions()
@@ -564,7 +564,7 @@ export function usePortal() {
     }
   }, [current, live])
 
-  return { me, setName, boot, refresh, sessions, sessionsState, outside, route, current, live, connected, hermes, linked, error, setError, send, stop, answer, rename, pin, archive, unarchive, setGroup, createGroup, updateGroup, deleteGroup, loadOlder, prefetch, commands, command, notes, signOff, machinesSeen }
+  return { me, setName, boot, refresh, sessions, sessionsState, outside, route, current, live, connected, nako, linked, error, setError, send, stop, answer, rename, pin, archive, unarchive, setGroup, createGroup, updateGroup, deleteGroup, loadOlder, prefetch, commands, command, notes, signOff, machinesSeen }
 }
 
 export type Portal = ReturnType<typeof usePortal>

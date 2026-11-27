@@ -2,7 +2,7 @@
 
 In subscription mode native prepends its per-request context block (the account-email
 reminder) to the conversation's first user turn, but replays that turn without it on every
-later request. Unless the relay sends Hermes' own frame alone, call #2 re-writes the whole
+later request. Unless the relay sends Nako' own frame alone, call #2 re-writes the whole
 first turn, and Claude reads native's context as part of the user's message (#195). These
 fixtures use native's real 2.1.280 message layout.
 """
@@ -22,7 +22,7 @@ ENV = 'Primary working directory: /tmp/claude-directsdk-cwd-501\nPlatform: darwi
 
 
 def call1():
-    """Native's opening request: reminder ahead of Hermes' frame, marker on the env/date message."""
+    """Native's opening request: reminder ahead of Nako' frame, marker on the env/date message."""
     return [
         {'role': 'user', 'content': [REMINDER, FRAME]},
         {'role': 'system', 'content': [{'type': 'text', 'text': ENV + "\n\nToday's date is 2026-09-30.",
@@ -35,7 +35,7 @@ def call2():
     return [
         {'role': 'user', 'content': [FRAME]},
         {'role': 'system', 'content': ENV},
-        {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 't1', 'name': 'mcp__hermes__terminal',
+        {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 't1', 'name': 'mcp__nako__terminal',
                                            'input': {'command': 'echo alpha'}}]},
         {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 't1',
                                       'content': 'alpha\n\n' + REMINDER['text']}]},
@@ -80,7 +80,7 @@ def test_first_request_caches_a_prefix_the_second_request_replays():
     assert prefix is not None
     # the whole cached span of call #1 recurs, block for block, at the head of call #2
     assert replayed(second)[:len(prefix)] == prefix
-    # and it covers Hermes' first turn, the part that was being re-written
+    # and it covers Nako' first turn, the part that was being re-written
     assert prefix[-1] == ('user', json.dumps(FRAME, sort_keys=True))
 
 

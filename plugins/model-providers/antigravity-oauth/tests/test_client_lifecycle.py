@@ -152,7 +152,7 @@ class CyclicGcLockReentranceTests(unittest.TestCase):
         # Explicit cwd: close() never removes it (the TemporaryDirectory
         # does, LIFO after this body). No addCleanup(client.close) -- see
         # the module docstring for why that would be unsafe here.
-        temp_dir = tempfile.TemporaryDirectory(prefix="hermes_agy_test_")
+        temp_dir = tempfile.TemporaryDirectory(prefix="nako_agy_test_")
         self.addCleanup(temp_dir.cleanup)
         return AntigravityClient(cwd=temp_dir.name)
 
@@ -561,7 +561,7 @@ class WorkspaceCleanupTests(unittest.TestCase):
         a second pass. Mocked so the assertion is about the sequence, not
         the filesystem.
         """
-        with tempfile.TemporaryDirectory(prefix="hermes_agy_force_") as survivor_root:
+        with tempfile.TemporaryDirectory(prefix="nako_agy_force_") as survivor_root:
             nested = Path(survivor_root) / "conversations" / "sub"
             nested.mkdir(parents=True)
             victim = nested / "workspace.db"
@@ -613,7 +613,7 @@ class WorkspaceCleanupTests(unittest.TestCase):
         Skipped as root (DAC is bypassed, nothing to reclaim); CI runners
         are non-root, so this runs there.
         """
-        with tempfile.TemporaryDirectory(prefix="hermes_agy_ro_") as root:
+        with tempfile.TemporaryDirectory(prefix="nako_agy_ro_") as root:
             locked_dir = Path(root) / "conversations"
             locked_dir.mkdir()
             victim = locked_dir / "session.db"
@@ -683,7 +683,7 @@ class WorkspaceCleanupTests(unittest.TestCase):
         and skips links. The assertion is on the MODE, so it holds under
         root (DAC bypassed) as much as under a normal uid.
         """
-        with tempfile.TemporaryDirectory(prefix="hermes_agy_out_") as outside:
+        with tempfile.TemporaryDirectory(prefix="nako_agy_out_") as outside:
             token = Path(outside) / "real-token"
             token.write_text("secret", encoding="utf-8")
             os.chmod(token, 0o400)
@@ -695,7 +695,7 @@ class WorkspaceCleanupTests(unittest.TestCase):
             # both (POSIX 0o600, Windows 0o666 -- see the round's
             # portability simulation).
             baseline = stat.S_IMODE(os.stat(token).st_mode)
-            with tempfile.TemporaryDirectory(prefix="hermes_agy_ws_") as workspace:
+            with tempfile.TemporaryDirectory(prefix="nako_agy_ws_") as workspace:
                 os.symlink(token, Path(workspace) / "token-link")
                 self._force_with_residual_survivors(workspace)
 
@@ -732,12 +732,12 @@ class WorkspaceCleanupTests(unittest.TestCase):
         residual -- nothing but the undeletable token link survives, its
         mode and content untouched.
         """
-        with tempfile.TemporaryDirectory(prefix="hermes_agy_out_") as outside:
+        with tempfile.TemporaryDirectory(prefix="nako_agy_out_") as outside:
             token = Path(outside) / "real-token"
             token.write_text("secret", encoding="utf-8")
             os.chmod(token, 0o400)
             baseline = stat.S_IMODE(os.stat(token).st_mode)
-            with tempfile.TemporaryDirectory(prefix="hermes_agy_ws_") as workspace:
+            with tempfile.TemporaryDirectory(prefix="nako_agy_ws_") as workspace:
                 os.link(token, Path(workspace) / "token-link")
                 self.assertEqual(os.lstat(Path(workspace) / "token-link").st_nlink, 2)
                 self._force_with_residual_survivors(workspace)
@@ -802,12 +802,12 @@ class WorkspaceCleanupTests(unittest.TestCase):
         assertion is on the MODE, so it holds under root (DAC bypassed)
         just like the siblings.
         """
-        with tempfile.TemporaryDirectory(prefix="hermes_agy_out_") as outside:
+        with tempfile.TemporaryDirectory(prefix="nako_agy_out_") as outside:
             secret = Path(outside) / "real-token"
             secret.write_text("secret", encoding="utf-8")
             os.chmod(secret, 0o400)
             baseline = stat.S_IMODE(os.stat(secret).st_mode)
-            with tempfile.TemporaryDirectory(prefix="hermes_agy_ws_") as workspace:
+            with tempfile.TemporaryDirectory(prefix="nako_agy_ws_") as workspace:
                 os.symlink(outside, Path(workspace) / "linked-dir")
                 self._force_with_residual_survivors(workspace)
 
@@ -872,7 +872,7 @@ class StaleStreamFinalizationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         _pin_host_dependent_seams(self)
-        temp_dir = tempfile.TemporaryDirectory(prefix="hermes_agy_test_")
+        temp_dir = tempfile.TemporaryDirectory(prefix="nako_agy_test_")
         self.addCleanup(temp_dir.cleanup)
         self.client = AntigravityClient(cwd=temp_dir.name)
 
@@ -1068,7 +1068,7 @@ class TestNeutralizedToolStepDoesNotMisreportAsACrash(unittest.TestCase):
 
     def setUp(self) -> None:
         _pin_host_dependent_seams(self)
-        temp_dir = tempfile.TemporaryDirectory(prefix="hermes_agy_test_")
+        temp_dir = tempfile.TemporaryDirectory(prefix="nako_agy_test_")
         self.addCleanup(temp_dir.cleanup)
         self.client = AntigravityClient(cwd=temp_dir.name)
         self.addCleanup(self.client.close)

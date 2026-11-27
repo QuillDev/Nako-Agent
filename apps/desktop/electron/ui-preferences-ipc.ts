@@ -4,15 +4,15 @@ import { BrowserWindow, ipcMain } from 'electron'
 
 import { registerUiPreferencesIpc } from './ui-preferences'
 
-/** `hermesHome` is main's resolved ROOT home (never a profile's), the one the
+/** `nakoHome` is main's resolved ROOT home (never a profile's), the one the
  *  Webapp's Python server resolves too. */
-export function registerMachineUiPreferences(hermesHome: string): () => void {
+export function registerMachineUiPreferences(nakoHome: string): () => void {
   return registerUiPreferencesIpc({
     ipcMain,
-    hermesHome,
+    nakoHome,
     broadcast: snapshot => {
       for (const window of BrowserWindow.getAllWindows()) {
-        window.webContents.send('hermes:ui-preferences:changed', snapshot)
+        window.webContents.send('nako:ui-preferences:changed', snapshot)
       }
     }
   })

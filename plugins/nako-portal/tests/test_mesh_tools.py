@@ -34,13 +34,13 @@ async def test_mesh_tools_request_payloads_and_responses():
     seen = []
     state = {
         "machines": [
-            {"name": "hub", "hub": True, "online": True, "hermes": {"commit": "abcdef1234567890", "line": "Hermes v1.0"}},
+            {"name": "hub", "hub": True, "online": True, "nako": {"commit": "abcdef1234567890", "line": "Nako v1.0"}},
             {"name": "macbook", "hub": False, "online": True, "gateway": True},
         ],
         "job": {
             "gateway": True,
-            "hermes": {"commit": "abcdef1234999999", "line": "Hermes v1.0"},
-            "job": {"kind": "update", "status": "done", "update_exit": 0, "old": {"line": "Hermes v0.9"}, "log_tail": "ok"},
+            "nako": {"commit": "abcdef1234999999", "line": "Nako v1.0"},
+            "job": {"kind": "update", "status": "done", "update_exit": 0, "old": {"line": "Nako v0.9"}, "log_tail": "ok"},
         },
     }
 
@@ -126,7 +126,7 @@ async def test_mesh_tools_request_payloads_and_responses():
         assert "No machines" in empty["note"]
 
         state["machines"] = [
-            {"name": "hub", "hub": True, "online": True, "hermes": {"commit": "abcdef1234567890", "line": "Hermes v1.0"}},
+            {"name": "hub", "hub": True, "online": True, "nako": {"commit": "abcdef1234567890", "line": "Nako v1.0"}},
             {"name": "macbook", "hub": False, "online": True, "gateway": True},
         ]
 
@@ -157,7 +157,7 @@ async def test_mesh_tools_request_payloads_and_responses():
         updated = await _invoke(tools, "mesh_update", {"machine": "macbook", "channel": "stable", "wait_seconds": 0})
         assert updated["matches_hub"] is True
         assert updated["update_exit"] == 0
-        assert updated["hermes_before"] == "Hermes v0.9"
+        assert updated["nako_before"] == "Nako v0.9"
         assert seen[-1] == ("update", "macbook", {"channel": "stable"})
 
         # Restart with gateway still down adds recovery note.

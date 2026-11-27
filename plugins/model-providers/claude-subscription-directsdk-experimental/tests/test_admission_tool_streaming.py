@@ -8,8 +8,8 @@ import json
 
 from admission import Capture, stream_tool_input
 
-TOOLS = [{'name': 'mcp__hermes__write_file', 'input_schema': {'type': 'object'}},
-         {'name': 'mcp__hermes__read_file', 'input_schema': {'type': 'object'}, 'eager_input_streaming': False}]
+TOOLS = [{'name': 'mcp__nako__write_file', 'input_schema': {'type': 'object'}},
+         {'name': 'mcp__nako__read_file', 'input_schema': {'type': 'object'}, 'eager_input_streaming': False}]
 
 
 def test_every_tool_asks_for_streamed_arguments_and_native_values_win():
@@ -29,7 +29,7 @@ def sse(*events):
 
 def test_a_tool_call_cut_off_mid_argument_is_dropped_and_the_stream_still_captures():
     """Streamed input is unvalidated: a max_tokens cut leaves partial JSON. The relay must keep going
-    (it forwards each chunk after capturing it) and must never hand Hermes a call with guessed arguments."""
+    (it forwards each chunk after capturing it) and must never hand Nako a call with guessed arguments."""
     capture = Capture()
     capture.feed(sse(
         {'type': 'message_start', 'message': {'id': 'm', 'role': 'assistant', 'content': [], 'usage': {'input_tokens': 1}}},

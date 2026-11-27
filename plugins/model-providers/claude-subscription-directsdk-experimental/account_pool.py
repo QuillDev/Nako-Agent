@@ -1,7 +1,7 @@
 """Usage-aware routing over isolated, official-CLI-managed Claude logins.
 
 Only config-directory names and usage answers live here. Tokens remain owned by Claude Code.
-The pool is shared by clients in one process, but isolated by Hermes profile and configuration.
+The pool is shared by clients in one process, but isolated by Nako profile and configuration.
 """
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -205,10 +205,10 @@ def get_pool(command, env):
     accounts = configured_accounts()
     if not accounts:
         return None
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
     # Tokens are never keys, values or persisted pool state. Different profile/config/CLI/traffic
     # choices must not reuse another profile's usage or cooldowns.
-    key = (str(get_hermes_home()), accounts, tuple(_resolve(command, env) or command), telemetry_enabled())
+    key = (str(get_nako_home()), accounts, tuple(_resolve(command, env) or command), telemetry_enabled())
     with _pools_lock:
         if key not in _pools:
             _pools[key] = Pool(accounts)

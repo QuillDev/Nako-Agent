@@ -34,7 +34,7 @@ export type Command = { name: string; description: string; skill: boolean }
 // `at` is the transcript index it follows.
 export type CommandNote = { session: string; at: number; text: string; key: string }
 
-// A background process a chat's turn started (terminal background=true), from Hermes's process registry.
+// A background process a chat's turn started (terminal background=true), from Nako's process registry.
 export type BackgroundProcess = {
   id: string
   command: string
@@ -55,7 +55,7 @@ export type Status = "working" | "needs you" | "done" | "failed"
 export type Machine = {
   name: string
   online: boolean
-  // Its Hermes gateway is up, so it can run tasks (only while online).
+  // Its Nako gateway is up, so it can run tasks (only while online).
   gateway: boolean
   os: string | null
   hostname: string | null
@@ -72,7 +72,7 @@ export type Sender = { session: string; title: string }
 
 export type HistoryMessage =
   // images: local previews for a turn that is still being sent
-  // steered: sent while a turn was running, so Hermes fed it into that turn
+  // steered: sent while a turn was running, so Nako fed it into that turn
   // sender: the thread that sent it in (a report back, a brief), when it isn't the person's own
   // timestamp: when it was written, Unix seconds
   | { role: "user"; text: string; row_id?: string | number; timestamp?: number; images?: string[]; steered?: boolean; sender?: Sender }
@@ -127,15 +127,15 @@ export type Live = { messages: LiveMessage[]; tools: LiveTool[] }
 export type Passkey = { id: string; label: string; current?: boolean }
 
 // A session that came in another way (Slack, Discord, cron, the CLI), from `/api/outside`.
-// source: Hermes's name for the way in; last_active: Unix seconds.
+// source: Nako's name for the way in; last_active: Unix seconds.
 export type OutsideRow = { id: string; title: string; source: string; last_active: number; running: boolean }
 
 // The ways in other than the portal that have sessions, and which of those sessions run a turn now.
 export type Outside = { sources: string[]; running: string[] }
-export type HermesBuild = { version: string; build: string }
+export type NakoBuild = { version: string; build: string }
 
 export type Frame =
-  | { kind: "hub.connected"; hermes?: HermesBuild | null }
+  | { kind: "hub.connected"; nako?: NakoBuild | null }
   | { kind: "hub.disconnected" | "sessions.changed" | "status.synced" }
   | { kind: "status"; session: string; status: Status | null; unread?: boolean }
   | { kind: "sticker"; mood: "idle" | "working" | "needs-you"; working: number; finished: number }

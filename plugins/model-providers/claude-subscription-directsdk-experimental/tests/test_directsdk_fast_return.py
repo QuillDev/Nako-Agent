@@ -138,7 +138,7 @@ def native_case(tmp_path, monkeypatch):
                 self.send_response(config.get('status', 200))
                 self.send_header('Content-Type', 'text/event-stream')
                 self.end_headers()
-                block = ({'type': 'tool_use', 'id': 'toolu_1', 'name': 'mcp__hermes__lookup',
+                block = ({'type': 'tool_use', 'id': 'toolu_1', 'name': 'mcp__nako__lookup',
                           'input': {'q': 'fixture'}} if config.get('tool') else
                          {'type': 'text', 'text': 'FIRST'})
                 events = [
@@ -270,7 +270,7 @@ def test_close_and_cancel_detach_only_after_result(native_case):
             assert not state.admission.cancelled
             (state.root / 'late').touch()
             wait_for(lambda: (state.root / 'late-response').exists())
-            assert 'HERMES_MODEL_ADMISSION_CONSUMED' in (state.root / 'late-response').read_text(encoding="utf-8-sig")
+            assert 'NAKO_MODEL_ADMISSION_CONSUMED' in (state.root / 'late-response').read_text(encoding="utf-8-sig")
             assert state.calls == ['/v1/messages']
             (state.root / 'release').touch()
             stream.close()

@@ -1,6 +1,6 @@
 """Native progress the plugin does not translate into text is still proof of life for the host.
 
-Hermes' stale detector only sees chunks. While the model generates a tool call, native streams
+Nako' stale detector only sees chunks. While the model generates a tool call, native streams
 ``input_json_delta`` events and no text, so a plugin that yields nothing for them looks stalled
 and the host kills a healthy request. Synthetic CLI only.
 """

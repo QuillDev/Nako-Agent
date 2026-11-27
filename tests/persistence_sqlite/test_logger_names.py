@@ -1,5 +1,5 @@
 """Every logger the SQLite backend writes to carries a name main's own modules log under for the same code, so the
-per-component log views (``hermes logs --component``, gateway.log), which select records by logger name, show the
+per-component log views (``nako logs --component``, gateway.log), which select records by logger name, show the
 backend's records where they show main's.
 
 Each backend module holds the loggers it writes to as module globals; the case imports every module of the package
@@ -21,16 +21,16 @@ _MAIN_LOGGER_NAMES = frozenset({
     "gateway.lifecycle_ledger",
     "gateway.session",
     "gateway.session_api",
-    "hermes_cli.backup_restore",
-    "hermes_cli.backup_sqlite",
-    "hermes_cli.session_lost_and_found",
-    "hermes_cli.timefmt",
-    "hermes_state",
-    "hermes_state_health",
-    "hermes_state_holders",
-    "hermes_state_lockowners",
-    "hermes_state_reconcile",
-    "hermes_state_registry",
+    "nako_cli.backup_restore",
+    "nako_cli.backup_sqlite",
+    "nako_cli.session_lost_and_found",
+    "nako_cli.timefmt",
+    "nako_state",
+    "nako_state_health",
+    "nako_state_holders",
+    "nako_state_lockowners",
+    "nako_state_reconcile",
+    "nako_state_registry",
     "tools.async_delegation",
 })
 

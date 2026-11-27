@@ -1,7 +1,7 @@
-"""Async-compat regression tests for the Hermes async auxiliary wire (issue #8).
+"""Async-compat regression tests for the Nako async auxiliary wire (issue #8).
 
-Hermes' async auxiliary client does ``await client.chat.completions.create(...)``
-even for clients that declare ``HERMES_SKIP_ASYNC_WRAP`` (the "already
+Nako' async auxiliary client does ``await client.chat.completions.create(...)``
+even for clients that declare ``NAKO_SKIP_ASYNC_WRAP`` (the "already
 async-safe" contract), and its forced-stream plan does ``chunks = await
 create(**stream_kwargs)`` followed by ``async for chunk in chunks``.
 AntigravityClient.create used to return a plain ``SimpleNamespace`` / a
@@ -14,8 +14,8 @@ gains ``__await__``/``__aiter__``/``__anext__`` (one subprocess read per
 await, off the event loop). Sync callers are unchanged and pinned here as a
 regression guard.
 
-The suite is run with Hermes source on the path, as in CI:
-    PYTHONPATH=/usr/local/lib/hermes-agent:. python3 -m pytest tests/ -q
+The suite is run with Nako source on the path, as in CI:
+    PYTHONPATH=/usr/local/lib/nako-agent:. python3 -m pytest tests/ -q
 The GOLD tests import the real ``agent.auxiliary_client._acreate_with_progress``
 and drive both of its plans through an AntigravityClient with a mocked
 subprocess; they skip (never silently pass) when that module is unavailable.
@@ -48,10 +48,10 @@ from stream import AntigravityStream, _AwaitableCompletion
 
 try:
     from agent.auxiliary_client import _acreate_with_progress, aux_progress_hook
-except ImportError as exc:  # host without the Hermes source tree on sys.path
-    _HERMES_AUX_IMPORT_ERROR: Exception | None = exc
+except ImportError as exc:  # host without the Nako source tree on sys.path
+    _NAKO_AUX_IMPORT_ERROR: Exception | None = exc
 else:
-    _HERMES_AUX_IMPORT_ERROR = None
+    _NAKO_AUX_IMPORT_ERROR = None
 
 MODEL = "gemini-3.8-flash-high"
 TASK = "vision"  # the aux task of the reported failure
@@ -80,7 +80,7 @@ async def _await_via_task(value: Any) -> Any:
 
     A Task given a non-Future yield crashes with "Task got bad yield", so this
     harness pins ``__await__`` against the tempting-but-broken
-    ``iter([self])`` shortcut, in the same position Hermes awaits our result.
+    ``iter([self])`` shortcut, in the same position Nako awaits our result.
     """
     return await asyncio.create_task(_await_directly(value))
 
@@ -94,7 +94,7 @@ def _await_in_task(value: Any) -> Any:
 
 
 async def _consume_stream_async(value: Any) -> tuple[Any, list[Any]]:
-    """Mirror the Hermes async wire: ``chunks = await create(...)`` then ``async for``."""
+    """Mirror the Nako async wire: ``chunks = await create(...)`` then ``async for``."""
     chunks = await value
     collected: list[Any] = []
     async for chunk in chunks:
@@ -206,7 +206,7 @@ class _PinnedSeamsMixin:
         self.addCleanup(patcher_keychains.stop)
 
     def _client(self) -> AntigravityClient:
-        temp_dir = tempfile.TemporaryDirectory(prefix="hermes_agy_test_")
+        temp_dir = tempfile.TemporaryDirectory(prefix="nako_agy_test_")
         self.addCleanup(temp_dir.cleanup)
         client = AntigravityClient(cwd=temp_dir.name)
         self.addCleanup(client.close)
@@ -531,7 +531,7 @@ class AsyncStreamSemanticsTests(_PinnedSeamsMixin, unittest.TestCase):
 
     def test_aclosing_context_manager_and_double_aclose(self):
         # aclose() exists for `async with contextlib.aclosing(stream)` and
-        # direct-await consumers (Hermes' _close_chunk_stream prefers the
+        # direct-await consumers (Nako' _close_chunk_stream prefers the
         # plain close attribute). It must mark the stream closed and be safe
         # to await twice.
         client = self._client()
@@ -721,23 +721,23 @@ class AsyncStreamSemanticsTests(_PinnedSeamsMixin, unittest.TestCase):
 
 
 @unittest.skipIf(
-    _HERMES_AUX_IMPORT_ERROR is not None,
-    f"agent.auxiliary_client not importable ({_HERMES_AUX_IMPORT_ERROR}); "
-    "run with PYTHONPATH=/usr/local/lib/hermes-agent:.",
+    _NAKO_AUX_IMPORT_ERROR is not None,
+    f"agent.auxiliary_client not importable ({_NAKO_AUX_IMPORT_ERROR}); "
+    "run with PYTHONPATH=/usr/local/lib/nako-agent:.",
 )
-class HermesAuxAsyncWireTests(_PinnedSeamsMixin, unittest.TestCase):
-    """GOLD: the real Hermes async auxiliary wire against this plugin.
+class NakoAuxAsyncWireTests(_PinnedSeamsMixin, unittest.TestCase):
+    """GOLD: the real Nako async auxiliary wire against this plugin.
 
     Both plans of ``_acreate_with_progress`` are driven with the await intact
     (nothing patches it out): the plain non-stream plan and the forced-stream
-    plan, plus the progress-hook plan Hermes itself uses while compressing.
+    plan, plus the progress-hook plan Nako itself uses while compressing.
     With the ``__await__`` methods reverted these tests fail with the original
     ``TypeError: object ... can't be used in 'await' expression``.
     """
 
     @staticmethod
     def _kwargs() -> dict:
-        """Aux request kwargs as Hermes' vision/aux path sends them (no stream)."""
+        """Aux request kwargs as Nako' vision/aux path sends them (no stream)."""
         return {"model": MODEL, "messages": MESSAGES, "timeout": 60}
 
     def test_acreate_with_progress_nonstream_plan(self):
@@ -771,7 +771,7 @@ class HermesAuxAsyncWireTests(_PinnedSeamsMixin, unittest.TestCase):
         with patch("subprocess.Popen", return_value=_mock_proc(self._turn_lines())):
             with aux_progress_hook(_tick_progress):
                 res = asyncio.run(_acreate_with_progress(client, self._kwargs(), TASK))
-        # An active progress hook switches Hermes to the streamed plan, whose
+        # An active progress hook switches Nako to the streamed plan, whose
         # per-chunk ticks are the whole point of that plan.
         self.assertTrue(ticks)
         self.assertEqual(res.choices[0].message.content, "answer one")

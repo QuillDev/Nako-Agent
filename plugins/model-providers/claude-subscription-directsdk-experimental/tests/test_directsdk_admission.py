@@ -163,7 +163,7 @@ def test_a_revoked_oauth_login_gets_one_refresh_retry_upstream(tmp_path):
 
 def test_a_second_401_keeps_the_gate_closed(tmp_path):
     """A login Anthropic still rejects cannot be refreshed away: one retry is allowed, then the
-    gate denies again and Hermes gets the real 401 with the revocation text, exit code and all."""
+    gate denies again and Nako gets the real 401 with the revocation text, exit code and all."""
     peer = ScriptedPeer([_auth_answer(401), _auth_answer(401)])
     thread = threading.Thread(target=peer.serve_forever, daemon=True); thread.start()
     try:
@@ -208,8 +208,8 @@ def test_a_401_that_is_not_an_auth_error_stays_denied(tmp_path):
     (None, None),
 ])
 def test_contentless_refusal_is_a_terminal_content_filter(tmp_path, details, refusal):
-    """A refusal carries no content block; as `stop` with no content Hermes would retry it as an empty reply (re-billing
-    the prompt each time). It is content_filter with stop_details' reason, through Hermes' own transport normalizer."""
+    """A refusal carries no content block; as `stop` with no content Nako would retry it as an empty reply (re-billing
+    the prompt each time). It is content_filter with stop_details' reason, through Nako' own transport normalizer."""
     from agent.transports import get_transport
     usage = {'input_tokens':0, 'output_tokens':0, 'cache_read_input_tokens':0, 'cache_creation_input_tokens':0}
     class Peer(BaseHTTPRequestHandler):
@@ -232,9 +232,9 @@ def test_contentless_refusal_is_a_terminal_content_filter(tmp_path, details, ref
     client=directsdk.Client(command=[sys.executable,str(native)],env={'PATH':os.defpath,'HOME':str(tmp_path),'ANTHROPIC_BASE_URL':f'http://127.0.0.1:{peer.server_port}'})
     try:
         if details:
-            # A tool call the classifier cut off must not reach Hermes as tool_calls: Hermes would run it.
+            # A tool call the classifier cut off must not reach Nako as tool_calls: Nako would run it.
             tools=[{'type':'function','function':{'name':'list_things','description':'list','parameters':{'type':'object','properties':{}}}}]
-            tool_use=[{'type':'content_block_start','index':0,'content_block':{'type':'tool_use','id':'toolu_1','name':'mcp__hermes__list_things','input':{}}},
+            tool_use=[{'type':'content_block_start','index':0,'content_block':{'type':'tool_use','id':'toolu_1','name':'mcp__nako__list_things','input':{}}},
                       {'type':'content_block_delta','index':0,'delta':{'type':'input_json_delta','partial_json':''}},
                       {'type':'content_block_stop','index':0}]
             Peer.extra = tool_use
@@ -255,9 +255,9 @@ def test_contentless_refusal_is_a_terminal_content_filter(tmp_path, details, ref
 
 
 @pytest.mark.parametrize('text', ['', 'done'])
-def test_a_thinking_only_turn_reaches_hermes_without_reasoning(tmp_path, text):
-    """With summarized display, a turn of thinking alone would reach Hermes as a reasoning-only `stop`, which Hermes
-    promotes to the final answer, ending the tool loop mid-task. It arrives with no reasoning, so Hermes' empty-response
+def test_a_thinking_only_turn_reaches_nako_without_reasoning(tmp_path, text):
+    """With summarized display, a turn of thinking alone would reach Nako as a reasoning-only `stop`, which Nako
+    promotes to the final answer, ending the tool loop mid-task. It arrives with no reasoning, so Nako' empty-response
     recovery nudges the model on; the signed thinking still replays. A turn with text keeps its reasoning."""
     usage = {'input_tokens':0, 'output_tokens':0, 'cache_read_input_tokens':0, 'cache_creation_input_tokens':0}
     class Peer(BaseHTTPRequestHandler):
@@ -294,8 +294,8 @@ def test_a_thinking_only_turn_reaches_hermes_without_reasoning(tmp_path, text):
         client.close(); peer.shutdown(); thread.join(); peer.server_close()
 
 
-def _hermes_reply(response):
-    """What Hermes shows the user for a content_filter response: core's own refusal handler, no fallback configured."""
+def _nako_reply(response):
+    """What Nako shows the user for a content_filter response: core's own refusal handler, no fallback configured."""
     from types import SimpleNamespace
     from agent.transports import get_transport
     from agent.turn_retry_state import TurnRetryState
@@ -316,12 +316,12 @@ def _hermes_reply(response):
     return verdict.result['final_response']
 
 
-def _hermes_stream_response(chunks):
-    """Assemble streamed chunks the way Hermes' chat-completions stream loop does (its tool-call accumulator,
+def _nako_stream_response(chunks):
+    """Assemble streamed chunks the way Nako' chat-completions stream loop does (its tool-call accumulator,
     delta.refusal collection and _finish_chat_stream), so the test reads what core would act on."""
     from types import SimpleNamespace
     from agent.chat_completion_helpers import _StreamingCall
-    try:  # core moved the accumulator into its own module (hermes-agent 208fd6e)
+    try:  # core moved the accumulator into its own module (nako-agent 208fd6e)
         from agent.chat_completion_helpers_tool_calls import _ToolCallAccumulator
     except ImportError:
         from agent.chat_completion_helpers import _ToolCallAccumulator
@@ -348,8 +348,8 @@ def _hermes_stream_response(chunks):
     ({'category': 'cyber', 'explanation': None}, 'provider refusal category: cyber'),
 ])
 def test_refusal_after_a_tool_call_reaches_the_user(tmp_path, stream, details, refusal):
-    """Claude refuses after it started a tool call. Hermes must not run the cut-off call AND must show the refusal's
-    reason. With the call left in tool_calls Hermes' normalizer keeps content empty (a refusal is promoted only when
+    """Claude refuses after it started a tool call. Nako must not run the cut-off call AND must show the refusal's
+    reason. With the call left in tool_calls Nako' normalizer keeps content empty (a refusal is promoted only when
     it is the sole payload) and the user reads "the model returned no explanation"."""
     from agent.transports import get_transport
     usage = {'input_tokens':0, 'output_tokens':0, 'cache_read_input_tokens':0, 'cache_creation_input_tokens':0}
@@ -360,7 +360,7 @@ def test_refusal_after_a_tool_call_reaches_the_user(tmp_path, stream, details, r
             self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.end_headers()
             events = [
                 {'type':'message_start','message':{'id':'first','role':'assistant','model':'sonnet','content':[], 'usage':usage}},
-                {'type':'content_block_start','index':0,'content_block':{'type':'tool_use','id':'toolu_1','name':'mcp__hermes__list_things','input':{}}},
+                {'type':'content_block_start','index':0,'content_block':{'type':'tool_use','id':'toolu_1','name':'mcp__nako__list_things','input':{}}},
                 {'type':'content_block_delta','index':0,'delta':{'type':'input_json_delta','partial_json':''}},
                 {'type':'content_block_stop','index':0},
                 {'type':'message_delta','delta':{'stop_reason':'refusal','stop_details':details},'usage':usage},
@@ -378,14 +378,14 @@ def test_refusal_after_a_tool_call_reaches_the_user(tmp_path, stream, details, r
             chunks = list(client.create(**request, stream=True))
             last = chunks[-1].choices[0]
             assert last.finish_reason == 'content_filter' and last.delta.refusal == refusal
-            assert not any(c.choices[0].delta.tool_calls for c in chunks)  # nothing for Hermes to run
+            assert not any(c.choices[0].delta.tool_calls for c in chunks)  # nothing for Nako to run
             carrier = last.delta.reasoning_details[0]
-            response = _hermes_stream_response(chunks)
+            response = _nako_stream_response(chunks)
         else:
             response = client.create(**request)
             message = response.choices[0].message
             assert response.choices[0].finish_reason == 'content_filter' and message.refusal == refusal
-            assert not message.tool_calls  # nothing for Hermes to run
+            assert not message.tool_calls  # nothing for Nako to run
             carrier = message.reasoning_details[0]
         # The signed native turn is kept whole, refused tool_use included.
         native_turn = carrier['messages'][0]
@@ -393,7 +393,7 @@ def test_refusal_after_a_tool_call_reaches_the_user(tmp_path, stream, details, r
         assert [b['type'] for b in native_turn['content']] == ['tool_use'] and native_turn['content'][0]['id'] == 'toolu_1'
         normalized = get_transport('chat_completions').normalize_response(response)
         assert normalized.finish_reason == 'content_filter' and not normalized.tool_calls and normalized.content == refusal
-        shown = _hermes_reply(response)
+        shown = _nako_reply(response)
         assert shown.endswith('Provider said: ' + refusal)
         assert 'no explanation' not in shown
     finally:
@@ -412,7 +412,7 @@ def test_empty_tool_input_completes_the_capture(tmp_path):
             self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.end_headers()
             events = [
                 {'type':'message_start','message':{'id':'first','role':'assistant','model':'sonnet','content':[], 'usage':usage}},
-                {'type':'content_block_start','index':0,'content_block':{'type':'tool_use','id':'toolu_1','name':'mcp__hermes__list_things','input':{}}},
+                {'type':'content_block_start','index':0,'content_block':{'type':'tool_use','id':'toolu_1','name':'mcp__nako__list_things','input':{}}},
                 {'type':'content_block_delta','index':0,'delta':{'type':'input_json_delta','partial_json':''}},
                 {'type':'content_block_stop','index':0},
                 {'type':'message_delta','delta':{'stop_reason':'tool_use'},'usage':usage},
@@ -538,7 +538,7 @@ def test_incomplete_upstream_error_names_the_first_attempt(tmp_path):
 
 @pytest.mark.parametrize('status', [429, 401, 400, 500, 529, 200])
 def test_incomplete_upstream_error_carries_the_first_status(tmp_path, status):
-    """Hermes routes on status_code: the first attempt's real HTTP status, none for a 200 cut short."""
+    """Nako routes on status_code: the first attempt's real HTTP status, none for a 200 cut short."""
     class Peer(BaseHTTPRequestHandler):
         def log_message(self, *args): pass
         def do_POST(self):
@@ -654,7 +654,7 @@ def test_invalid_stream_json_error_names_the_offending_line(tmp_path):
 
 def test_silent_upstream_fails_fast_instead_of_hanging(tmp_path, monkeypatch):
     """Headers, one event, then silence (a dead path that keeps TCP ESTAB): the relay must error out
-    within the idle bound, not wait out the request timeout while Hermes sees nothing."""
+    within the idle bound, not wait out the request timeout while Nako sees nothing."""
     import time
     import admission
     monkeypatch.setattr(admission, 'UPSTREAM_IDLE_SECONDS', 1)

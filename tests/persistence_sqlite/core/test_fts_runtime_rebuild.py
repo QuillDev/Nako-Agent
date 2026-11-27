@@ -99,7 +99,7 @@ class TestRuntimeFtsRebuild:
         assert _concrete_state_db_holder_pids(
             db_path,
             [
-                (222, "uninspectable holder: python -m hermes_cli.main serve --port 0"),
+                (222, "uninspectable holder: python -m nako_cli.main serve --port 0"),
                 (-1, "open-file scan failed"),
             ],
         ) == []
@@ -142,50 +142,50 @@ class TestRuntimeFtsRebuild:
     @pytest.mark.parametrize(
         "argv",
         (
-            ("journalctl", "-u", "hermes-agent.service"),
-            ("grep", "hermes-agent", "/var/log/syslog"),
+            ("journalctl", "-u", "nako-agent.service"),
+            ("grep", "nako-agent", "/var/log/syslog"),
             (
                 "/usr/sbin/tailscaled",
                 "be-child",
                 "ssh",
-                "--cmd=python -m hermes_cli.main gateway",
+                "--cmd=python -m nako_cli.main gateway",
             ),
-            ("tmux", "new-session", "/opt/hermes-agent/.venv/bin/hermes gateway"),
-            ("python3", "/opt/hermes-agent/tools/check_state.py"),
-            ("hermes-monitor", "gateway"),
-            ("hermesctl", "serve"),
-            ("python3", "worker.py", "hermes_cli.main"),
-            ("python3", "-m", "other.module", "hermes_cli.main"),
-            ("python3", "-c", "hermes_cli.main"),
-            ("python3", "-Icprint('hermes_cli.main')", "hermes_cli/main.py"),
+            ("tmux", "new-session", "/opt/nako-agent/.venv/bin/nako gateway"),
+            ("python3", "/opt/nako-agent/tools/check_state.py"),
+            ("nako-monitor", "gateway"),
+            ("nakoctl", "serve"),
+            ("python3", "worker.py", "nako_cli.main"),
+            ("python3", "-m", "other.module", "nako_cli.main"),
+            ("python3", "-c", "nako_cli.main"),
+            ("python3", "-Icprint('nako_cli.main')", "nako_cli/main.py"),
         ),
     )
-    def test_uninspectable_non_hermes_process_is_not_a_holder(self, argv):
-        assert not state_holders._looks_like_hermes(argv)
+    def test_uninspectable_non_nako_process_is_not_a_holder(self, argv):
+        assert not state_holders._looks_like_nako(argv)
 
     @pytest.mark.parametrize(
         "argv",
         (
-            ("/usr/local/bin/hermes", "gateway"),
-            ("/usr/local/bin/hermes-agent", "serve"),
-            ("/usr/local/bin/hermes-acp", "--stdio"),
-            ("/usr/bin/python3", "-m", "hermes_cli.main", "gateway"),
+            ("/usr/local/bin/nako", "gateway"),
+            ("/usr/local/bin/nako-agent", "serve"),
+            ("/usr/local/bin/nako-acp", "--stdio"),
+            ("/usr/bin/python3", "-m", "nako_cli.main", "gateway"),
             ("/usr/bin/python3", "-m", "acp_adapter"),
-            ("/usr/bin/python3", "-Im", "hermes_cli.main", "gateway"),
-            ("/usr/bin/python3", "-mhermes_cli.main", "gateway"),
-            ("/usr/bin/python3", "-W", "ignore", "-m", "hermes_cli.main"),
-            ("/usr/bin/python3", "-Xdev", "-m", "hermes_cli.main"),
+            ("/usr/bin/python3", "-Im", "nako_cli.main", "gateway"),
+            ("/usr/bin/python3", "-mnako_cli.main", "gateway"),
+            ("/usr/bin/python3", "-W", "ignore", "-m", "nako_cli.main"),
+            ("/usr/bin/python3", "-Xdev", "-m", "nako_cli.main"),
             (
-                "/opt/hermes-agent/.venv/bin/python",
-                "/opt/hermes-agent/hermes_cli/main.py",
+                "/opt/nako-agent/.venv/bin/python",
+                "/opt/nako-agent/nako_cli/main.py",
                 "gateway",
             ),
-            ("python.exe", "--", "hermes_cli/main.py", "gateway"),
-            ("python3", "/opt/hermes-agent/run_agent.py", "--query", "hello"),
+            ("python.exe", "--", "nako_cli/main.py", "gateway"),
+            ("python3", "/opt/nako-agent/run_agent.py", "--query", "hello"),
         ),
     )
-    def test_uninspectable_hermes_process_remains_a_holder(self, argv):
-        assert state_holders._looks_like_hermes(argv)
+    def test_uninspectable_nako_process_remains_a_holder(self, argv):
+        assert state_holders._looks_like_nako(argv)
 
     @pytest.mark.parametrize(
         "options",
@@ -201,10 +201,10 @@ class TestRuntimeFtsRebuild:
         ),
     )
     def test_operand_taking_interpreter_options_are_read_past_to_the_program(self, options):
-        module = ("/usr/bin/python3", *options, "-m", "hermes_cli.main", "gateway")
-        script = ("/usr/bin/python3", *options, "/opt/hermes-agent/run_agent.py", "--query", "hello")
-        assert state_holders._python_execution_target(module) == ("module", "hermes_cli.main")
-        assert state_holders._python_execution_target(script) == ("script", "/opt/hermes-agent/run_agent.py")
+        module = ("/usr/bin/python3", *options, "-m", "nako_cli.main", "gateway")
+        script = ("/usr/bin/python3", *options, "/opt/nako-agent/run_agent.py", "--query", "hello")
+        assert state_holders._python_execution_target(module) == ("module", "nako_cli.main")
+        assert state_holders._python_execution_target(script) == ("script", "/opt/nako-agent/run_agent.py")
 
     @pytest.mark.platforms("linux")
     def test_foreign_holder_detection_proc_readlink_deleted_wal(
@@ -266,7 +266,7 @@ class TestRuntimeFtsRebuild:
         self, db, tmp_path, monkeypatch
     ):
         """A process whose fd table is unreadable (different user) is still
-        flagged when /proc/<pid>/cmdline identifies it as a Hermes process."""
+        flagged when /proc/<pid>/cmdline identifies it as a Nako process."""
         db_path = tmp_path / "state.db"
 
         proc_root = tmp_path / "proc"
@@ -274,10 +274,10 @@ class TestRuntimeFtsRebuild:
             (proc_root / str(pid) / "fd").mkdir(parents=True)
         # PID 222's fd dir is unreadable (PermissionError)
         os.chmod(proc_root / "222" / "fd", 0o000)
-        # PID 222's cmdline is world-readable and looks like Hermes
+        # PID 222's cmdline is world-readable and looks like Nako
         cmdline_path = proc_root / "222" / "cmdline"
         cmdline_path.write_bytes(
-            b"python3\x00-m\x00hermes_cli.main\x00chat\x00"
+            b"python3\x00-m\x00nako_cli.main\x00chat\x00"
         )
 
         monkeypatch.setattr(state_holders.os, "getpid", lambda: 111)
@@ -307,7 +307,7 @@ class TestRuntimeFtsRebuild:
         # Should include PID 222 with the cmdline info
         assert len(holders) == 1
         assert holders[0][0] == 222
-        assert "hermes_cli.main" in holders[0][1]
+        assert "nako_cli.main" in holders[0][1]
 
         # Cleanup
         os.chmod(proc_root / "222" / "fd", 0o755)
@@ -782,12 +782,12 @@ class TestRuntimeFtsRebuild:
             _schema, "_reap_inactive_orphan_desktop_holders", lambda holder, holders, *, min_age_seconds: [],
         )
         monkeypatch.setattr(
-            _schema, "_read_proc_argv", lambda pid: ["python", "-m", "hermes_cli.main", "serve"], raising=False,
+            _schema, "_read_proc_argv", lambda pid: ["python", "-m", "nako_cli.main", "serve"], raising=False,
         )
         clock = [1000.0]
         monkeypatch.setattr(_schema.time, "time", lambda: clock[0])
 
-        from hermes_cli.doctor_state import _render_state_db_stats
+        from nako_cli.doctor_state import _render_state_db_stats
         from persistence.sqlite._state.dbfile import collect_state_db_stats
 
         def doctor_blob():
@@ -818,7 +818,7 @@ class TestRuntimeFtsRebuild:
             futile_lines = [r for r in caplog.records if "waiting is futile" in r.getMessage()]
             assert len(futile_lines) == 1 and futile_lines[0].levelno == logging.ERROR
             msg = futile_lines[0].getMessage()
-            assert "pid 4242: python -m hermes_cli.main serve" in msg
+            assert "pid 4242: python -m nako_cli.main serve" in msg
             assert "Stop ONLY the other holder" in msg and "with the gateway stopped" not in msg
             blob = doctor_blob()
             assert "4242" in blob and "waiting is futile" in blob and "stop only" in blob
@@ -969,7 +969,7 @@ class TestPhysicalCorruptionAcceptance:
         db = StoreHolder(db_path=db_path)
         try:
             caplog.clear()
-            with caplog.at_level("WARNING", logger="hermes_state"):
+            with caplog.at_level("WARNING", logger="nako_state"):
                 with pytest.raises(sqlite3.DatabaseError) as caught:
                     append_message(db, "s1", "user", "post-corruption write")
             # The genuine structural error propagated, not an FTS retry result.
@@ -995,7 +995,7 @@ class TestPhysicalCorruptionAcceptance:
             with pytest.raises(StateDbCorruptError):
                 append_message(db, "s1", "user", "second write after corruption")
             caplog.clear()
-            with caplog.at_level("WARNING", logger="hermes_state"):
+            with caplog.at_level("WARNING", logger="nako_state"):
                 db.close()
             assert "Skipping the close-time WAL checkpoint" in caplog.text
         finally:

@@ -23,7 +23,7 @@ class Ctx:
 
 
 def test_the_portal_gets_no_text_progress_or_interim_bubbles_but_keeps_streaming():
-    # Runs against the real resolver where Hermes is installed; CI has no Hermes and skips.
+    # Runs against the real resolver where Nako is installed; CI has no Nako and skips.
     display_config = pytest.importorskip("gateway.display_config")
     display_config._PLATFORM_DEFAULTS.pop("portal", None)
     load_plugin().register(Ctx())
@@ -40,8 +40,8 @@ def test_the_portal_gets_no_text_progress_or_interim_bubbles_but_keeps_streaming
     assert resolved("tool_progress", {"display": {"platforms": {"portal": {"tool_progress": "all"}}}}) == "all"
 
 
-def test_the_portal_quiets_hermes_display_defaults_without_dropping_the_rest(monkeypatch):
-    # The same contract against a stand-in shaped like Hermes's display_config, so CI covers it.
+def test_the_portal_quiets_nako_display_defaults_without_dropping_the_rest(monkeypatch):
+    # The same contract against a stand-in shaped like Nako's display_config, so CI covers it.
     gateway = type(sys)("gateway")
     display_config = type(sys)("gateway.display_config")
     display_config._TIERS = {"high": {"tool_progress": "all", "interim_assistant_messages": True, "streaming": None}}

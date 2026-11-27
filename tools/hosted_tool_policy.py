@@ -21,9 +21,9 @@ until someone shows it acts only through the agent's sandbox:
 A local install (no scope, or a local one) is untouched: neither set is consulted, and every
 function here answers "allowed", with one exception. The features that start a command the profile's
 own files name (:data:`RUNS_PROFILE_COMMANDS`) are also off while a plugin runs this process's
-profile elsewhere (``hermes_cli.profiles_run_elsewhere``): that backend writes those files and starts
-the commands itself, so no host process does, whichever command asks (``hermes hooks test``,
-``hermes mcp test``, a process that was already running when the profile was marked).
+profile elsewhere (``nako_cli.profiles_run_elsewhere``): that backend writes those files and starts
+the commands itself, so no host process does, whichever command asks (``nako hooks test``,
+``nako mcp test``, a process that was already running when the profile was marked).
 """
 
 from __future__ import annotations
@@ -100,9 +100,9 @@ def hosted_tool_refusal(tool_name: str) -> Optional[str]:
 def _home_elsewhere() -> bool:
     """Whether a plugin runs this process's profile elsewhere (the home a multi-profile host has
     bound for the caller). Kept per home, so asking at every hook event is cheap."""
-    from hermes_cli.profiles_run_elsewhere import home_runs_elsewhere
-    from hermes_constants import get_hermes_home
-    return home_runs_elsewhere(get_hermes_home())
+    from nako_cli.profiles_run_elsewhere import home_runs_elsewhere
+    from nako_constants import get_nako_home
+    return home_runs_elsewhere(get_nako_home())
 
 
 def host_feature_enabled(feature: str) -> bool:
@@ -120,9 +120,9 @@ def host_feature_refusal(feature: str, what: str) -> Optional[str]:
     if host_feature_enabled(feature):
         return None
     if not _hosted():
-        from hermes_cli.profiles_run_elsewhere import run_elsewhere_for_home
-        from hermes_constants import get_hermes_home
-        if (elsewhere := run_elsewhere_for_home(get_hermes_home())) is not None:
+        from nako_cli.profiles_run_elsewhere import run_elsewhere_for_home
+        from nako_constants import get_nako_home
+        if (elsewhere := run_elsewhere_for_home(get_nako_home())) is not None:
             return elsewhere.message()
     return _message(what, f"it uses this host's {feature.replace('_', ' ')}")
 

@@ -22,17 +22,17 @@ from unittest.mock import patch
 from gateway.config import GatewayConfig, Platform
 from gateway.session import SessionEntry, SessionStore
 
-def test_session_store_default_db_uses_runtime_hermes_home(tmp_path, monkeypatch):
-    """SessionStore must honor runtime HERMES_HOME when opening the default DB.
+def test_session_store_default_db_uses_runtime_nako_home(tmp_path, monkeypatch):
+    """SessionStore must honor runtime NAKO_HOME when opening the default DB.
 
     Regression for an import-time default-path freeze: a store path resolved
-    before a fixture redirected HERMES_HOME pinned every default store at the
-    developer's real ~/.hermes/state.db.
+    before a fixture redirected NAKO_HOME pinned every default store at the
+    developer's real ~/.nako/state.db.
     """
     config = GatewayConfig()
-    fake_home = tmp_path / "alt_hermes_home"
+    fake_home = tmp_path / "alt_nako_home"
     fake_home.mkdir()
-    monkeypatch.setenv("HERMES_HOME", str(fake_home))
+    monkeypatch.setenv("NAKO_HOME", str(fake_home))
 
     with patch("gateway.session.SessionStore._ensure_loaded"):
         store = SessionStore(sessions_dir=tmp_path / "sessions", config=config)

@@ -9,9 +9,9 @@ from pathlib import Path
 from portal.machine_job import Job, parse_version
 
 
-def _stub_hermes(tmp_path: Path, *, behavior: str) -> tuple[list[str], Path]:
+def _stub_nako(tmp_path: Path, *, behavior: str) -> tuple[list[str], Path]:
     calls = tmp_path / "calls.jsonl"
-    script = tmp_path / "stub_hermes.py"
+    script = tmp_path / "stub_nako.py"
     script.write_text(
         "import json, pathlib, sys\n"
         f"calls = pathlib.Path({str(calls)!r})\n"
@@ -23,7 +23,7 @@ def _stub_hermes(tmp_path: Path, *, behavior: str) -> tuple[list[str], Path]:
     return [sys.executable, str(script)], calls
 
 
-def _run_job(tmp_path: Path, *, kind: str, hermes: list[str], channel: str | None = None, platform: str = "linux") -> dict:
+def _run_job(tmp_path: Path, *, kind: str, nako: list[str], channel: str | None = None, platform: str = "linux") -> dict:
     job_file = tmp_path / "job.json"
     log_file = tmp_path / "job.log"
     log_file.write_text("", encoding="utf-8")
@@ -33,7 +33,7 @@ def _run_job(tmp_path: Path, *, kind: str, hermes: list[str], channel: str | Non
             "kind": kind,
             "channel": channel,
             "status": "starting",
-            "hermes": hermes,
+            "nako": nako,
             "platform": platform,
             "log": str(log_file),
         }),
@@ -44,20 +44,20 @@ def _run_job(tmp_path: Path, *, kind: str, hermes: list[str], channel: str | Non
 
 
 def test_parse_version_handles_standard_rebranded_and_invalid_lines():
-    full = parse_version("noise\nHermes Agent v0.22.5 (2026.9.24) · stable · commit 3333bbbb4444\n")
+    full = parse_version("noise\nNako Agent v0.22.5 (2026.9.24) · stable · commit 3333bbbb4444\n")
     assert full == {
         "version": "v0.22.5",
         "date": "2026.9.24",
         "channel": "stable",
         "commit": "3333bbbb4444",
-        "line": "Hermes Agent v0.22.5 (2026.9.24) · stable · commit 3333bbbb4444",
+        "line": "Nako Agent v0.22.5 (2026.9.24) · stable · commit 3333bbbb4444",
     }
 
     rebranded = parse_version("Nako Agent v1.2.0-rc1 (2026.11.01) · main · git deadbeef1234")
     assert rebranded is not None
     assert (rebranded["version"], rebranded["channel"], rebranded["commit"]) == ("v1.2.0-rc1", "main", "deadbeef1234")
 
-    minimal = parse_version("Hermes Agent v0.9.0")
+    minimal = parse_version("Nako Agent v0.9.0")
     assert minimal is not None and minimal["version"] == "v0.9.0" and minimal["commit"] is None
 
     assert parse_version("") is None
@@ -65,14 +65,14 @@ def test_parse_version_handles_standard_rebranded_and_invalid_lines():
 
 
 def test_start_job_runs_gateway_start_without_restarting(tmp_path):
-    hermes, calls = _stub_hermes(
+    nako, calls = _stub_nako(
         tmp_path,
         behavior=(
-            "if sys.argv[1:] == ['--version']: print('Hermes Agent v0.22.2 (2026.9.1) · stable · commit 1111aaaa'); sys.exit(0)\n"
+            "if sys.argv[1:] == ['--version']: print('Nako Agent v0.22.2 (2026.9.1) · stable · commit 1111aaaa'); sys.exit(0)\n"
             "print('gateway started'); sys.exit(0)\n"
         ),
     )
-    result = _run_job(tmp_path, kind="start", hermes=hermes)
+    result = _run_job(tmp_path, kind="start", nako=nako)
     assert result["status"] == "done"
     assert result["started_gateway"] is True
     assert result["old"]["version"] == "v0.22.2"
@@ -84,16 +84,16 @@ def test_start_job_runs_gateway_start_without_restarting(tmp_path):
 
 
 def test_restart_job_falls_back_to_gateway_start_when_restart_fails(tmp_path):
-    hermes, calls = _stub_hermes(
+    nako, calls = _stub_nako(
         tmp_path,
         behavior=(
-            "if sys.argv[1:] == ['--version']: print('Hermes Agent v0.22.2'); sys.exit(0)\n"
+            "if sys.argv[1:] == ['--version']: print('Nako Agent v0.22.2'); sys.exit(0)\n"
             "if sys.argv[1:] == ['gateway', 'restart']: print('not running'); sys.exit(1)\n"
             "if sys.argv[1:] == ['gateway', 'start']: print('started fresh'); sys.exit(0)\n"
             "sys.exit(2)\n"
         ),
     )
-    result = _run_job(tmp_path, kind="restart", hermes=hermes)
+    result = _run_job(tmp_path, kind="restart", nako=nako)
     assert result["status"] == "done"
     assert result["started_gateway"] is True
     assert "started fresh" in result["log_tail"]
@@ -103,16 +103,16 @@ def test_restart_job_falls_back_to_gateway_start_when_restart_fails(tmp_path):
 
 def test_update_job_passes_channel_records_versions_and_restarts(tmp_path):
     (tmp_path / "ver").write_text("v0.22.2 · stable · commit 1111aaaa", encoding="utf-8")
-    hermes, calls = _stub_hermes(
+    nako, calls = _stub_nako(
         tmp_path,
         behavior=(
-            "if sys.argv[1:] == ['--version']: print('Hermes Agent ' + state.read_text()); sys.exit(0)\n"
+            "if sys.argv[1:] == ['--version']: print('Nako Agent ' + state.read_text()); sys.exit(0)\n"
             "if sys.argv[1:2] == ['update']: state.write_text('v0.23.0 · beta · commit 9999ffff'); print('updated'); sys.exit(0)\n"
             "if sys.argv[1:] == ['gateway', 'restart']: print('restarted'); sys.exit(0)\n"
             "sys.exit(2)\n"
         ),
     )
-    result = _run_job(tmp_path, kind="update", hermes=hermes, channel="beta")
+    result = _run_job(tmp_path, kind="update", nako=nako, channel="beta")
     assert result["status"] == "done"
     assert result["update_exit"] == 0
     assert result["started_gateway"] is True
@@ -123,16 +123,16 @@ def test_update_job_passes_channel_records_versions_and_restarts(tmp_path):
 
 
 def test_failed_update_still_starts_gateway_and_marks_job_failed(tmp_path):
-    hermes, calls = _stub_hermes(
+    nako, calls = _stub_nako(
         tmp_path,
         behavior=(
-            "if sys.argv[1:] == ['--version']: print('Hermes Agent v0.22.2'); sys.exit(0)\n"
+            "if sys.argv[1:] == ['--version']: print('Nako Agent v0.22.2'); sys.exit(0)\n"
             "if sys.argv[1:2] == ['update']: print('network error'); sys.exit(1)\n"
             "if sys.argv[1:] == ['gateway', 'restart']: print('back up'); sys.exit(0)\n"
             "sys.exit(2)\n"
         ),
     )
-    result = _run_job(tmp_path, kind="update", hermes=hermes)
+    result = _run_job(tmp_path, kind="update", nako=nako)
     assert result["status"] == "failed"
     assert result["update_exit"] == 1
     assert result["started_gateway"] is True
@@ -142,7 +142,7 @@ def test_failed_update_still_starts_gateway_and_marks_job_failed(tmp_path):
 
 
 def test_missing_command_marks_job_failed_cleanly(tmp_path):
-    result = _run_job(tmp_path, kind="restart", hermes=[str(tmp_path / "does-not-exist")])
+    result = _run_job(tmp_path, kind="restart", nako=[str(tmp_path / "does-not-exist")])
     assert result["status"] == "failed"
     assert result["started_gateway"] is False
     assert result["old"] is None

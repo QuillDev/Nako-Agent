@@ -3,7 +3,7 @@ import { usePromptInputController } from "@/components/ai-elements/prompt-input"
 import type { Command } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-// `/` at the start, then a bare name and whitespace or the end: what Hermes treats as a command.
+// `/` at the start, then a bare name and whitespace or the end: what Nako treats as a command.
 // `/usr/local` (a second slash) is prose.
 export const isCommand = (text: string) => /^\/[^\s/]*(?:\s|$)/.test(text.trim())
 

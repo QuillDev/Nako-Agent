@@ -7,7 +7,7 @@ import sys
 def main():
     manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8-sig"))
     # A client loaded before this file was updated starts it without the name.
-    host = sys.argv[2] if len(sys.argv) > 2 else 'hermes'
+    host = sys.argv[2] if len(sys.argv) > 2 else 'nako'
     for line in sys.stdin:
         row = json.loads(line)
         method = row.get('method')

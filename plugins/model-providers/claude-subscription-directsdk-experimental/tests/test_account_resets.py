@@ -120,7 +120,7 @@ def test_summarize_resets_groups_kinds_and_skips_paused_and_expired():
 def test_linked_usage_surfaces_resets_per_account_and_redeem_invalidates_cache(profile, tmp_path, monkeypatch):
     import providers
     import resets
-    from hermes_cli.config import get_config_path
+    from nako_cli.config import get_config_path
 
     first, second = tmp_path / "acct-a", tmp_path / "acct-b"
     _write_login(first, token="tok-a", org="org-aaaa")
@@ -207,7 +207,7 @@ def test_reset_check_runs_every_five_minutes_and_waits_ten_after_a_refusal(profi
     from email.message import Message
     import time
     import providers
-    from hermes_cli.config import get_config_path
+    from nako_cli.config import get_config_path
 
     login = tmp_path / "acct-a"
     _write_login(login, token="tok-a", org="org-aaaa")
@@ -277,7 +277,7 @@ def test_reset_check_runs_every_five_minutes_and_waits_ten_after_a_refusal(profi
 def test_redeem_handles_errors_and_missing_accounts(profile, tmp_path, monkeypatch):
     import providers
     import resets
-    from hermes_cli.config import get_config_path
+    from nako_cli.config import get_config_path
 
     first = tmp_path / "acct-a"
     _write_login(first, token="tok-a", org="org-aaaa")

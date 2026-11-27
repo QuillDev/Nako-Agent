@@ -56,10 +56,10 @@ export function copyReplyText(text: string): string {
   return splitReply(clean).body.replace(/\n{3,}/g, "\n\n").trim()
 }
 
-/** A user turn without Hermes's image hints and placeholders, and the images they name. */
+/** A user turn without Nako's image hints and placeholders, and the images they name. */
 // An image turn is stored as [your text, image parts..., turn context]. Flattened, the image
 // parts become hints plus one placeholder each, so whatever follows the last placeholder is
-// context Hermes added for the model (plugin notes, memory recall), not something you typed.
+// context Nako added for the model (plugin notes, memory recall), not something you typed.
 function withoutTurnContext(text: string) {
   const placeholders = [...text.matchAll(PLACEHOLDER)]
   const last = placeholders.at(-1)

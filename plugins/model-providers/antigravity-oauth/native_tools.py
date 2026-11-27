@@ -1,9 +1,9 @@
-"""Translate agy-native tool steps into Hermes tool calls.
+"""Translate agy-native tool steps into Nako tool calls.
 
 Some Antigravity models (Claude in particular) ignore the ``<tool_call>`` text protocol and call agy's
 built-in tools such as ``run_command``. The plugin never lets agy execute those on the host. Before
 this module, the step was killed and the turn came back empty. Now the intent is re-issued as the
-equivalent Hermes tool call, so Hermes' own tool, approval and sandbox layer runs it. Unmappable
+equivalent Nako tool call, so Nako' own tool, approval and sandbox layer runs it. Unmappable
 native tools are still neutralized as before.
 """
 
@@ -86,8 +86,8 @@ def _web_extract(p: dict[str, Any]) -> dict[str, Any] | None:
     return {"urls": [str(url)]} if url else None
 
 
-# agy tool name -> (Hermes tool name, argument mapper)
-NATIVE_TO_HERMES: dict[str, tuple[str, Mapper]] = {
+# agy tool name -> (Nako tool name, argument mapper)
+NATIVE_TO_NAKO: dict[str, tuple[str, Mapper]] = {
     "run_command": ("terminal", _terminal),
     "view_file": ("read_file", _read_file),
     "write_to_file": ("write_file", _write_file),
@@ -168,19 +168,19 @@ def restore_truncated(params: dict[str, Any], native: str, conversation_id: str,
 
 def translate(step: dict[str, Any], available: set[str], index: int,
               resolve: Callable[[dict[str, Any], str], dict[str, Any] | None] | None = None) -> SimpleNamespace | None:
-    """Return a Hermes tool-call delta for an agy native tool step, or None if it cannot be mapped."""
+    """Return a Nako tool-call delta for an agy native tool step, or None if it cannot be mapped."""
     native = str(step.get("tool_name") or (step.get("tool_info") or {}).get("name") or "")
-    mapping = NATIVE_TO_HERMES.get(native)
+    mapping = NATIVE_TO_NAKO.get(native)
     if not mapping:
         return None
-    hermes_name, mapper = mapping
-    if hermes_name not in available:
+    nako_name, mapper = mapping
+    if nako_name not in available:
         return None
     params = (step.get("tool_info") or {}).get("parameters")
     if not isinstance(params, dict):
         return None
     if truncated_keys(params):
-        # Never hand Hermes a cut command: restore the full text or refuse to translate.
+        # Never hand Nako a cut command: restore the full text or refuse to translate.
         params = resolve(params, native) if resolve else None
         if params is None:
             return None
@@ -189,4 +189,4 @@ def translate(step: dict[str, Any], available: set[str], index: int,
         return None
     ident = f"agy_{step.get('step_index', index)}_{native}"
     return SimpleNamespace(index=index, id=ident, type="function",
-                           function=SimpleNamespace(name=hermes_name, arguments=json.dumps(args, ensure_ascii=False)))
+                           function=SimpleNamespace(name=nako_name, arguments=json.dumps(args, ensure_ascii=False)))

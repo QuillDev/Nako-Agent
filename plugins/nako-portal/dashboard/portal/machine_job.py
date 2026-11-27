@@ -1,4 +1,4 @@
-"""Restarting or updating this machine's Hermes, run apart from both the gateway and the server.
+"""Restarting or updating this machine's Nako, run apart from both the gateway and the server.
 
 `python machine_job.py <job.json>`. The portal server writes the job file and starts this in its
 own detached process, so neither a gateway that stops nor a server that's replaced mid-update
@@ -7,11 +7,11 @@ takes the job down with it. Progress goes back into the same file, which the ser
 Jobs:
   restart  bring the gateway up fresh (stop it if it runs, then start it)
   start    start a gateway that's down (the server's watchdog)
-  update   `hermes update --yes [--channel C]`, then restart; records the version before and after
+  update   `nako update --yes [--channel C]`, then restart; records the version before and after
 
 The gateway is always started as a background service, never in the foreground of this process:
-through the Hermes_Gateway scheduled task on Windows (installed first if it's missing), and with
-`hermes gateway restart`/`start` elsewhere.
+through the Nako_Gateway scheduled task on Windows (installed first if it's missing), and with
+`nako gateway restart`/`start` elsewhere.
 
 Only the standard library: this runs with whatever Python the server has, even mid-update.
 """
@@ -35,7 +35,7 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def parse_version(text):
-    """{version, date, channel, commit, line} from `hermes --version`, or None."""
+    """{version, date, channel, commit, line} from `nako --version`, or None."""
     for line in str(text or "").splitlines():
         found = VERSION.search(line)
         if found:
@@ -44,9 +44,9 @@ def parse_version(text):
     return None
 
 
-def hermes_version(hermes, timeout=60):
+def nako_version(nako, timeout=60):
     try:
-        done = subprocess.run([*hermes, "--version"], check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
+        done = subprocess.run([*nako, "--version"], check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return None
     return parse_version(done.stdout)
@@ -57,7 +57,7 @@ class Job:
         self.path = Path(path)
         self.state = json.loads(self.path.read_text(encoding="utf-8-sig"))
         self.log_path = Path(self.state["log"])
-        self.hermes = list(self.state["hermes"])
+        self.nako = list(self.state["nako"])
 
     def save(self, **changes):
         self.state.update(changes)
@@ -96,31 +96,31 @@ class Job:
     def start_gateway(self, fresh):
         """Bring the gateway up as a background service. `fresh`: stop a running one first."""
         if self.state.get("platform") == "windows":
-            task = self.state.get("task") or f"{Path(self.hermes[0]).stem.capitalize()}_Gateway"
+            task = self.state.get("task") or f"{Path(self.nako[0]).stem.capitalize()}_Gateway"
             if not self._task_registered(task):
                 self.say(f"no {task} scheduled task yet; installing it")
-                self.run([*self.hermes, "gateway", "install", "--if-missing", "--start-on-login", "--no-start-now"])
+                self.run([*self.nako, "gateway", "install", "--if-missing", "--start-on-login", "--no-start-now"])
             if not self._task_registered(task):
                 self.say(f"the {task} task still isn't registered, so the gateway can't be started in the background")
                 return False
             if fresh:
-                self.run([*self.hermes, "gateway", "stop"])
+                self.run([*self.nako, "gateway", "stop"])
             return self.run(["schtasks", "/Run", "/TN", task], timeout=60) == 0
-        if fresh and self.run([*self.hermes, "gateway", "restart"]) == 0:
+        if fresh and self.run([*self.nako, "gateway", "restart"]) == 0:
             return True
-        return self.run([*self.hermes, "gateway", "start"]) == 0
+        return self.run([*self.nako, "gateway", "start"]) == 0
 
     # Jobs
 
     def main(self):
         kind = self.state["kind"]
         self.save(pid=os.getpid(), status="running")
-        old = hermes_version(self.hermes)
+        old = nako_version(self.nako)
         self.save(old=old)
         ok = True
         if kind == "update":
             self.save(step="updating")
-            argv = [*self.hermes, "update", "--yes"]
+            argv = [*self.nako, "update", "--yes"]
             if self.state.get("channel"):
                 argv += ["--channel", self.state["channel"]]
             code = self.run(argv, timeout=UPDATE_TIMEOUT)
@@ -128,7 +128,7 @@ class Job:
             self.save(update_exit=code)
         self.save(step="starting the gateway")
         started = self.start_gateway(fresh=kind != "start")
-        new = hermes_version(self.hermes)
+        new = nako_version(self.nako)
         try:
             tail = self.log_path.read_text(encoding="utf-8-sig", errors="replace")[-LOG_TAIL:]
         except OSError:

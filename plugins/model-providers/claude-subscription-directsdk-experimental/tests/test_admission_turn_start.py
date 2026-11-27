@@ -27,26 +27,26 @@ STEER = {'type': 'text', 'text': 'User sent a /steer: also print the date.'}
 REMINDER = '\n<system-reminder>userEmail: user@example.invalid</system-reminder>'
 LAYOUTS = {
     # tools, system, whether native also marks the last assistant block
-    '2.1.285': ([{'name': 'mcp__hermes__terminal', 'description': 'run', 'input_schema': {'type': 'object'}}],
+    '2.1.285': ([{'name': 'mcp__nako__terminal', 'description': 'run', 'input_schema': {'type': 'object'}}],
                 [{'type': 'text', 'text': 'x-anthropic-billing-header: cc'},
                  {'type': 'text', 'text': 'You are Claude Code.', 'cache_control': MARKER},
-                 {'type': 'text', 'text': 'Hermes system prompt.', 'cache_control': MARKER}], False),
-    '2.1.287': ([{'name': 'mcp__hermes__terminal', 'description': 'run', 'input_schema': {'type': 'object'},
+                 {'type': 'text', 'text': 'Nako system prompt.', 'cache_control': MARKER}], False),
+    '2.1.287': ([{'name': 'mcp__nako__terminal', 'description': 'run', 'input_schema': {'type': 'object'},
                   'cache_control': MARKER}],
                 [{'type': 'text', 'text': 'x-anthropic-billing-header: cc'},
-                 {'type': 'text', 'text': 'You are Claude Code. Hermes system prompt.', 'cache_control': MARKER}], True),
+                 {'type': 'text', 'text': 'You are Claude Code. Nako system prompt.', 'cache_control': MARKER}], True),
 }
 
 
 def assistant(n, think, calls):
     return {'role': 'assistant', 'content': [
         *([{'type': 'thinking', 'thinking': f'plan {n}', 'signature': f'sig{n}'}] if think else []),
-        *({'type': 'tool_use', 'id': f't{n}c{k}', 'name': 'mcp__hermes__terminal', 'input': {'command': f'echo {n}.{k}'}}
+        *({'type': 'tool_use', 'id': f't{n}c{k}', 'name': 'mcp__nako__terminal', 'input': {'command': f'echo {n}.{k}'}}
           for k in range(calls))]}
 
 
 def turn(opening, rounds, think, calls=1, steer=None, start=0):
-    """Hermes' messages for one turn: its opening, ``rounds`` tool rounds and the answer. Round n's
+    """Nako' messages for one turn: its opening, ``rounds`` tool rounds and the answer. Round n's
     assistant message thinks when ``think(n)``; a /steer row rides in the results of round ``steer``."""
     messages = [{'role': 'user', 'content': [opening]}]
     for n in range(start, start + rounds):
@@ -157,7 +157,7 @@ def test_next_turn_after_a_long_loop_reads_up_to_the_finished_turns_first_thinki
     think = lambda n: n in (first, 9, 14)
     messages = turn(OPENING, 14, think) + [{'role': 'user', 'content': [FOLLOW_UP]}]
     sent = replay(messages, layout)
-    # Hermes index of the frame before the first thinking: the opening, or round first-1's results.
+    # Nako index of the frame before the first thinking: the opening, or round first-1's results.
     anchor = (native_index(2 * first), 0)
     body, read = sent[-1]
     assert anchor in message_marks(body)

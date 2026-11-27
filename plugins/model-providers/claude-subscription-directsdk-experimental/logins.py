@@ -45,12 +45,12 @@ _lock = threading.Lock()
 
 
 def _home():
-    from hermes_constants import get_hermes_home
-    return str(get_hermes_home())
+    from nako_constants import get_nako_home
+    return str(get_nako_home())
 
 
 def _login_root():
-    """Where new logins live: inside the active Hermes profile, private to this user."""
+    """Where new logins live: inside the active Nako profile, private to this user."""
     root = os.path.join(_home(), "claude-logins")
     os.makedirs(root, mode=0o700, exist_ok=True)
     return root
@@ -313,7 +313,7 @@ def remove_account_login(account_id):
 
 
 def _save_accounts(rows):
-    from hermes_cli.config import load_config, save_config
+    from nako_cli.config import load_config, save_config
     config = load_config()
     settings = config.setdefault("plugins", {}).setdefault("entries", {}).setdefault(PLUGIN_ID, {}).setdefault("settings", {})
     settings["accounts"] = [{"label": r["label"], "config_dir": r["config_dir"], "enabled": r.get("enabled", True) is not False}

@@ -10,25 +10,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      HERMES_HOME: ${{ github.workspace }}/.hermes-test-home
-      HERMES_AGENT_REPO: ${{ github.workspace }}/hermes-agent
-      PYTHONPATH: ${{ github.workspace }}/hermes-agent
+      NAKO_HOME: ${{ github.workspace }}/.nako-test-home
+      NAKO_AGENT_REPO: ${{ github.workspace }}/nako-agent
+      PYTHONPATH: ${{ github.workspace }}/nako-agent
     steps:
       - uses: actions/checkout@v4
         with:
           path: plugin
       - uses: actions/checkout@v4
         with:
-          repository: NousResearch/hermes-agent
+          repository: QuillDev/Nako-Agent
           ref: bf0203a794a07aac3ff764972ab9087baa4e4f4e
-          path: hermes-agent
+          path: nako-agent
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
-      - name: Build the tested Hermes environment
-        run: python -m pm.build_env --source hermes-agent --out hermes-agent/.venv --group dev --group test
+      - name: Build the tested Nako environment
+        run: python -m pm.build_env --source nako-agent --out nako-agent/.venv --group dev --group test
       - name: Validate the plugin
-        run: hermes-agent/.venv/bin/python -m hermes_cli.main plugins validate plugin
+        run: nako-agent/.venv/bin/python -m nako_cli.main plugins validate plugin
       - name: Test
         working-directory: plugin
-        run: ../hermes-agent/.venv/bin/python -m pytest -q
+        run: ../nako-agent/.venv/bin/python -m pytest -q

@@ -1,9 +1,9 @@
-"""Swap the word "hermes" for an alias on the way to agy, and back on the way out.
+"""Swap the word "nako" for an alias on the way to agy, and back on the way out.
 
-Google's backend answers some prompts that name Hermes (its persona line, docs URL and steering
+Google's backend answers some prompts that name Nako (its persona line, docs URL and steering
 section) with a fake ``RESOURCE_EXHAUSTED (429)`` after minutes of waiting (issue #27). The same
 text with the word swapped goes through, so every prompt and rules file is masked before agy sees
-it, and every reply, reasoning delta and tool call is unmasked before Hermes sees it.
+it, and every reply, reasoning delta and tool call is unmasked before Nako sees it.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 ALIAS = "personal-nako-agent"
-_WORD = re.compile("hermes", re.IGNORECASE)
+_WORD = re.compile("nako", re.IGNORECASE)
 _ALIAS = re.compile(re.escape(ALIAS), re.IGNORECASE)
 
 
@@ -28,7 +28,7 @@ def mask(text: str) -> str:
 
 
 def unmask(text: str) -> str:
-    return _ALIAS.sub(lambda m: _same_case(m.group(0), "hermes"), text)
+    return _ALIAS.sub(lambda m: _same_case(m.group(0), "nako"), text)
 
 
 class StreamUnmasker:

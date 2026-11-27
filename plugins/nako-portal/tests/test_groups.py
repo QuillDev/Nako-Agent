@@ -43,9 +43,9 @@ async def _sidebar(world):
 
 async def test_the_agent_groups_chats_and_the_sidebar_shows_them_after_a_restart(world, tmp_path):
     await world.sign_up()
-    here = world.hermes.add_session("20261103_090000_aaaaaa", "fix stock check")
-    world.hermes.add_session("20261103_090100_bbbbbb", "picking PR review")
-    world.hermes.add_session("20261103_090200_cccccc", "tax forms")
+    here = world.nako.add_session("20261103_090000_aaaaaa", "fix stock check")
+    world.nako.add_session("20261103_090100_bbbbbb", "picking PR review")
+    world.nako.add_session("20261103_090200_cccccc", "tax forms")
     tool = _tools(world)
 
     # The agent puts the chat it runs in, and another, into a new group.
@@ -83,7 +83,7 @@ async def test_the_agent_groups_chats_and_the_sidebar_shows_them_after_a_restart
 
 async def test_bad_group_changes_are_refused_and_change_nothing(world):
     await world.sign_up()
-    chat = world.hermes.add_session("20261103_100000_dddddd", "assembly labels")
+    chat = world.nako.add_session("20261103_100000_dddddd", "assembly labels")
     tool = _tools(world)
     await tool("group_create", {"name": "Home server", "color": "orange"})
     before = (world.store.groups(), world.store.chat_groups())
@@ -104,7 +104,7 @@ async def test_bad_group_changes_are_refused_and_change_nothing(world):
 
 
 async def test_group_routes_need_a_signed_in_app_or_the_loopback_token(world):
-    world.hermes.add_session("20261103_110000_eeeeee", "assembly labels")
+    world.nako.add_session("20261103_110000_eeeeee", "assembly labels")
     for path in ("/api/groups", "/api/sessions/20261103_110000_eeeeee/group"):
         refused = await world.post(path, {"name": "x", "group": "x"})
         assert refused.status == 401

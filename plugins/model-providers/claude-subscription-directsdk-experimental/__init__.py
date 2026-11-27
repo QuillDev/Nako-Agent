@@ -1,4 +1,4 @@
-"""Claude Subscription DirectSDK (Experimental) — standalone Hermes model-provider registration."""
+"""Claude Subscription DirectSDK (Experimental) — standalone Nako model-provider registration."""
 from datetime import datetime, timezone
 import logging
 import math
@@ -8,7 +8,7 @@ import shutil
 from providers import register_provider
 from providers.base import ProviderProfile
 
-# Dual import: the Hermes loader imports this directory as a package; the flat test path does not.
+# Dual import: the Nako loader imports this directory as a package; the flat test path does not.
 try:
     from . import host
     from .model_catalog import ALIASES, MODEL_METADATA, MODEL_CAPABILITIES, PICKER_ROUTES, native_model
@@ -94,8 +94,8 @@ class ClaudeOAuthDirectSDKProfile(ProviderProfile):
         route = native_model(model)
         pinned = self.model_metadata.get(route, {}).get('context_window')
         # Unpinned: behind the relay native Claude Code runs a plain id within its 200K default, and
-        # Hermes' own family guess (claude-opus-5-5 -> 1M before it was pinned) would outgrow that.
-        # A [1m] id stays unreported: no Hermes guess exceeds the 1M native budget, nor is it promised.
+        # Nako' own family guess (claude-opus-5-5 -> 1M before it was pinned) would outgrow that.
+        # A [1m] id stays unreported: no Nako guess exceeds the 1M native budget, nor is it promised.
         return pinned or (None if route.endswith('[1m]') else 200_000)
 
     def get_usage_cost(self, model, usage):
@@ -127,7 +127,7 @@ class ClaudeOAuthDirectSDKProfile(ProviderProfile):
 
     def fetch_models(self, **kwargs):
         # No HTTP /models endpoint: the account's own picker (CLI `initialize` handshake) is the
-        # live list for /model, the Desktop picker and `hermes model`; None degrades to the catalog.
+        # live list for /model, the Desktop picker and `nako model`; None degrades to the catalog.
         rows = self.discover_models(**kwargs)
         return [row["id"] for row in rows] if rows else None
 
@@ -147,11 +147,11 @@ class ClaudeOAuthDirectSDKProfile(ProviderProfile):
 
     def build_api_kwargs_extras(self, *, reasoning_config=None, **context):
         extra = {'reasoning': dict(reasoning_config)} if reasoning_config else {}
-        # Hermes' auxiliary calls (call_llm: compression summaries, titles) reach this hook without the
+        # Nako' auxiliary calls (call_llm: compression summaries, titles) reach this hook without the
         # conversation context its chat path always passes (session_id). Mark them so the client can skip
         # a message cache write that no later request would read.
         auxiliary = context.get('task') is not None or 'session_id' not in context
-        return extra, ({'hermes_auxiliary': True} if auxiliary else {})
+        return extra, ({'nako_auxiliary': True} if auxiliary else {})
 
     # Account logins for clients that manage them (a settings page): list, then add or refresh
     # through the official CLI's own sign-in, or unlink one. See logins.py for how add vs refresh is decided.
@@ -245,9 +245,9 @@ def _resets():
 
 
 def classify_api_error(error, **_):
-    # Hermes' stale-call watchdog stops a hung call through Client.cancel(), so its kill comes back as our cancel
-    # error, which Hermes would retry as unknown: classify it as the timeout it is. A user interrupt never arrives
-    # as this error; Hermes marks its request cancelled first, drops ours and raises InterruptedError.
+    # Nako' stale-call watchdog stops a hung call through Client.cancel(), so its kill comes back as our cancel
+    # error, which Nako would retry as unknown: classify it as the timeout it is. A user interrupt never arrives
+    # as this error; Nako marks its request cancelled first, drops ours and raises InterruptedError.
     if isinstance(error, RuntimeError) and str(error) == 'Claude request cancelled':
         return {'reason': 'timeout'}
     return None
@@ -273,7 +273,7 @@ profile = ClaudeOAuthDirectSDKProfile(
     # Access-gated models (Mythos) stay out: an account sees one only when its own picker offers it.
     fallback_models=PICKER_ROUTES,
     model_aliases={alias: native_model(alias) for alias in ALIASES},
-    # A dataclass field (Hermes >= 0.21.4), so a method on the subclass would be shadowed by its None default.
+    # A dataclass field (Nako >= 0.21.4), so a method on the subclass would be shadowed by its None default.
     classify_api_error=classify_api_error,
 )
 # Attribute assignment keeps the plugin loadable on hosts predating this capability.
@@ -281,7 +281,7 @@ profile = ClaudeOAuthDirectSDKProfile(
 profile.supports_streaming = True
 register_provider(profile)
 
-# The provider stays registered when Claude Code is missing so `hermes model` can show the
+# The provider stays registered when Claude Code is missing so `nako model` can show the
 # install hint; the request path (`directsdk.Client`) refuses with the same message.
 if _found is None:
     logger.warning("%s: %s", profile.display_name, INSTALL_HINT)

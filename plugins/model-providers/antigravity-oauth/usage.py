@@ -1,8 +1,8 @@
 """Quota windows for `/usage`, read from agy's own `agy -p /usage` command.
 
 agy answers it from its signed-in session without a model turn, so this keeps the plugin's
-contract: no HTTP requests of its own, and the OAuth token is never read. Hermes types stay out of
-this module so it imports without Hermes' runtime dependencies; the profile hook adapts the result.
+contract: no HTTP requests of its own, and the OAuth token is never read. Nako types stay out of
+this module so it imports without Nako' runtime dependencies; the profile hook adapts the result.
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ except ImportError:  # flat source tree under test
 # Print-mode slash commands shipped in agy 1.1.11. Older builds send "/usage" to the model as a
 # prompt, which spends quota on every refresh.
 MIN_AGY_VERSION = (1, 1, 11)
-# Hermes discards the hook's result after 10 s (PLUGIN_USAGE_HOOK_DEADLINE_S) and abandons the
+# Nako discards the hook's result after 10 s (PLUGIN_USAGE_HOOK_DEADLINE_S) and abandons the
 # thread without killing our children, so the agy runs share one budget that, plus the post-kill
 # cleanup, ends before that. Our own cleanup is a taskkill and a drain of DRAIN_TIMEOUT_S each. On
-# the Windows Job Object path the cleanup is Hermes': it closes the job before its taskkill, which
+# the Windows Job Object path the cleanup is Nako': it closes the job before its taskkill, which
 # then finds a dead tree; only a hung taskkill could overrun, and that costs one /usage result.
 # is_authenticated()'s keyring probes carry their own timeouts and are not covered: once they eat
 # the budget, agy is never spawned.
@@ -111,20 +111,20 @@ def run_agy(agy: str, args: tuple[str, ...], deadline: float) -> str | None:
 
 
 def _windows_job_runner() -> Callable[..., subprocess.CompletedProcess[str] | None] | None:
-    """Hermes' Job Object probe runner on Windows; None on POSIX or where it is unusable."""
+    """Nako' Job Object probe runner on Windows; None on POSIX or where it is unusable."""
     # taskkill /T finds children through their live parent, so a child left behind by an agy that
-    # already exited escapes it. Hermes' runner starts agy inside a Job Object and closes the job on
+    # already exited escapes it. Nako' runner starts agy inside a Job Object and closes the job on
     # timeout, which takes the whole tree down regardless of ancestry. It also closes the job after
     # a clean exit, so nothing agy leaves behind outlives the call.
     if os.name != "nt":
         return None
-    # A private Hermes API, so every way it can be unusable falls back to our own runner rather
-    # than failing /usage: missing (Hermes < 0.21.4), a backend that won't import (the runner
+    # A private Nako API, so every way it can be unusable falls back to our own runner rather
+    # than failing /usage: missing (Nako < 0.21.4), a backend that won't import (the runner
     # imports it lazily and would report every run as a spawn failure; it needs psutil), or a
     # signature that no longer takes the arguments we pass.
     try:
-        compat = importlib.import_module("hermes_cli._subprocess_compat")
-        importlib.import_module("hermes_cli.local_runtime.processes")
+        compat = importlib.import_module("nako_cli._subprocess_compat")
+        importlib.import_module("nako_cli.local_runtime.processes")
         runner = compat.bounded_probe_run
         inspect.signature(runner).bind(["agy"], timeout=1.0, env={}, cwd=".")
     except Exception:  # fail-open capability probe, see above
@@ -161,7 +161,7 @@ def _kill_agy_tree(proc: subprocess.Popen) -> None:
     # when a timeout fires, so neither branch checks whether the leader is alive (process.py's
     # _kill_process_tree does, and would skip the child).
     if os.name == "nt":
-        # Only reached when Hermes' Job Object runner is unusable. taskkill can't reach children of
+        # Only reached when Nako' Job Object runner is unusable. taskkill can't reach children of
         # an already-exited leader there; _drain bounds the wait on those instead.
         with contextlib.suppress(OSError, subprocess.SubprocessError):
             subprocess.run(

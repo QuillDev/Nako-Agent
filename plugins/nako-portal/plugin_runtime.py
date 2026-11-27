@@ -1,6 +1,6 @@
-"""Path-based sibling loading and optional Hermes APIs shared by the plugin modules.
+"""Path-based sibling loading and optional Nako APIs shared by the plugin modules.
 
-Hermes can install this plugin in a directory containing hyphens. Private module
+Nako can install this plugin in a directory containing hyphens. Private module
 names keep sibling imports independent of that directory's Python package name.
 """
 
@@ -34,9 +34,9 @@ def _agent_name():
 
     A rebranded build renames its core modules together with those, so the name is read off one."""
     try:
-        import hermes_constants as constants
+        import nako_constants as constants
     except ImportError:  # no agent on the path (tests)
-        return "hermes"
+        return "nako"
     return constants.__name__.partition("_")[0]
 
 

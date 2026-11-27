@@ -1,6 +1,6 @@
 # Dashboard compilation consumes prepared icons; no npm lifecycle preparation.
-{ hermesNpmLib, generatedIcons, ... }:
-hermesNpmLib.buildPnpmPackage {
+{ nakoNpmLib, generatedIcons, ... }:
+nakoNpmLib.buildPnpmPackage {
   dirs = [
     "web"
     "apps/shared"

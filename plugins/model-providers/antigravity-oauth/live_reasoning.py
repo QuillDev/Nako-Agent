@@ -1,4 +1,4 @@
-"""Optional, request-fenced presentation for Hermes' external-process nonstream path.
+"""Optional, request-fenced presentation for Nako' external-process nonstream path.
 
 Never changes host dispatch, callbacks, or authentication. Only the nonstream
 collector uses this bridge; the normal response retains all reasoning and usage.
@@ -21,8 +21,8 @@ _registrations = weakref.WeakKeyDictionary()
 
 
 def _home():
-    from hermes_constants import get_hermes_home
-    return str(get_hermes_home().resolve())
+    from nako_constants import get_nako_home
+    return str(get_nako_home().resolve())
 
 
 def _live_session(session_id, home) -> Any:
@@ -184,7 +184,7 @@ def ensure_registered():
     request projection. No auxiliary projection calls this function.
     """
     try:
-        from hermes_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
+        from nako_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
         manager = get_plugin_manager()
         with _registration_lock:
             handle = _registrations.get(manager)

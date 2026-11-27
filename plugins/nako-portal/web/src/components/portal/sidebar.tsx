@@ -13,9 +13,9 @@ import { useGroupPicker, useGroupRename } from "./groups";
 import { useRenameDialog } from "./session-actions";
 import { CHAT_DRAG, canDrag, type ChatDrag, sections, useFolded } from "./sidebar-utils";
 import { ChannelRow, ChatRow, DOT, GroupBlock } from "./sidebar-rows";
-import { AppVersion, ConnectionDot, HermesVersion } from "./sidebar-footer";
+import { AppVersion, ConnectionDot, NakoVersion } from "./sidebar-footer";
 
-type SidebarProps = Pick<Portal, "sessions" | "sessionsState" | "pin" | "archive" | "prefetch" | "setGroup" | "createGroup" | "updateGroup" | "deleteGroup" | "setError" | "rename" | "route" | "outside" | "connected" | "linked" | "hermes" | "me"> & {
+type SidebarProps = Pick<Portal, "sessions" | "sessionsState" | "pin" | "archive" | "prefetch" | "setGroup" | "createGroup" | "updateGroup" | "deleteGroup" | "setError" | "rename" | "route" | "outside" | "connected" | "linked" | "nako" | "me"> & {
   currentSession?: string;
   currentTitle?: string;
   currentSource?: string;
@@ -232,7 +232,7 @@ export const Sidebar = memo(function Sidebar({ className, currentSession, curren
           {portal.connected ? (
             <>
               <AppVersion />
-              {portal.linked && portal.hermes && <HermesVersion version={portal.hermes} />}
+              {portal.linked && portal.nako && <NakoVersion version={portal.nako} />}
             </>
           ) : (
             <span className="px-2 text-muted-foreground text-xs">

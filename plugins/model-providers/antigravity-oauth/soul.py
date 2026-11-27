@@ -1,8 +1,8 @@
-"""Hand Hermes' persona (SOUL.md + system prompt) to agy as its own workspace rules.
+"""Hand Nako' persona (SOUL.md + system prompt) to agy as its own workspace rules.
 
 agy loads ``GEMINI.md`` from its workspace root as first-class rules, exactly as it does for a user
-running ``agy`` in a project. The plugin writes the Hermes system prompt there, which Hermes already
-builds with ``$HERMES_HOME/SOUL.md`` at its head, together with the tool-bridge contract. The per-turn
+running ``agy`` in a project. The plugin writes the Nako system prompt there, which Nako already
+builds with ``$NAKO_HOME/SOUL.md`` at its head, together with the tool-bridge contract. The per-turn
 stdin message then carries only tools and conversation, so every call looks like an ordinary agy
 session in a project that has rules.
 
@@ -31,19 +31,19 @@ def rules_enabled() -> bool:
     return os.getenv("ANTIGRAVITY_WORKSPACE_RULES", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
-def hermes_soul_path() -> Path:
+def nako_soul_path() -> Path:
     try:
-        from hermes_constants import get_hermes_home
+        from nako_constants import get_nako_home
 
-        home = Path(get_hermes_home())
+        home = Path(get_nako_home())
     except Exception:
-        home = Path(os.getenv("HERMES_HOME") or Path.home() / ".hermes")
+        home = Path(os.getenv("NAKO_HOME") or Path.home() / ".nako")
     return home / "SOUL.md"
 
 
 def read_soul() -> str:
     try:
-        return hermes_soul_path().read_text(encoding="utf-8-sig").strip()
+        return nako_soul_path().read_text(encoding="utf-8-sig").strip()
     except (OSError, UnicodeDecodeError):
         return ""
 

@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 # agy reports a reply cut off at the model's output cap as a result "error".
 # That is an output truncation, not a failed request: surfacing it as a
-# RuntimeError made Hermes read "token limit" as a context overflow and print
-# the wrong recovery advice. It is mapped to finish_reason="length" so Hermes'
+# RuntimeError made Nako read "token limit" as a context overflow and print
+# the wrong recovery advice. It is mapped to finish_reason="length" so Nako'
 # truncation recovery handles it.
 #
 # Detection order: a structured finish/stop reason on the result event when
@@ -162,8 +162,8 @@ async def _ready(value: Any) -> Any:
 class _AwaitableCompletion(SimpleNamespace):
     """A completed ChatCompletion that is also awaitable, yielding itself.
 
-    Hermes' async auxiliary path awaits ``create()`` even for clients that
-    declare ``HERMES_SKIP_ASYNC_WRAP`` ("already async-safe"): the plugin is
+    Nako' async auxiliary path awaits ``create()`` even for clients that
+    declare ``NAKO_SKIP_ASYNC_WRAP`` ("already async-safe"): the plugin is
     expected to return something legal to ``await`` from its synchronous,
     already-finished round-trip. A plain ``SimpleNamespace`` is not awaitable,
     which surfaced as ``TypeError: object SimpleNamespace can't be used in
@@ -184,7 +184,7 @@ class _AwaitableCompletion(SimpleNamespace):
 class AntigravityStream(Iterator[Any]):
     """Streaming iterator yielding OpenAI ChatCompletionChunk objects from CLI stream-json."""
 
-    response: Any = None  # Mock response attribute for Hermes Relay compatibility
+    response: Any = None  # Mock response attribute for Nako Relay compatibility
 
     def __init__(
         self,
@@ -381,7 +381,7 @@ class AntigravityStream(Iterator[Any]):
         stream object itself only yields the stream, so a consumer still
         drives the subprocess chunk by chunk from worker threads. Per-chunk,
         not per-request, non-blocking is the best a plugin can do without a
-        Hermes hook that would hand out a coroutine from create().
+        Nako hook that would hand out a coroutine from create().
 
         Cancelling an in-flight ``__anext__`` closes the stream, terminates
         its worker, and releases its request lock. The DB timer stops and the
@@ -409,10 +409,10 @@ class AntigravityStream(Iterator[Any]):
     async def aclose(self) -> None:
         """Async close for ``async with contextlib.aclosing(stream)`` consumers.
 
-        Deliberately synchronous inside (``self.close()``). Reasons: Hermes'
+        Deliberately synchronous inside (``self.close()``). Reasons: Nako'
         own ``_close_chunk_stream(chunks, allow_aclose=True)`` prefers the
         plain ``close`` attribute anyway, so this exists for direct-await
-        consumers and ``aclosing``, not for the Hermes wire; close() is
+        consumers and ``aclosing``, not for the Nako wire; close() is
         bounded (process terminate + ``wait(2)`` + kill fallback); routing it
         through the DEFAULT executor would re-introduce the shared-executor
         occupancy that ``__anext__`` avoids, and routing it through THIS
@@ -584,7 +584,7 @@ class AntigravityStream(Iterator[Any]):
         """Detail for a turn that ended without proving success.
 
         One formatter for both branches so the oneshot and worker paths raise
-        the same style of message: Hermes' retry/fallback logic treats these
+        the same style of message: Nako' retry/fallback logic treats these
         like the other transient ``Antigravity execution failed: ...``
         failures. ``process_exit`` is ``None`` when the process is still
         alive (a worker that outlived the broken turn).
@@ -712,7 +712,7 @@ class AntigravityStream(Iterator[Any]):
                         call = _native_tools.translate(step, self.tool_names, index=0,
                                                        resolve=self._resolve_truncated) if not has_tool_calls else None
                         if call is not None:
-                            logger.info("Antigravity native tool '%s' re-issued as Hermes tool '%s'.",
+                            logger.info("Antigravity native tool '%s' re-issued as Nako tool '%s'.",
                                         step.get("tool_name"), call.function.name)
                             has_tool_calls = True
                             text_buffer = ""
@@ -888,7 +888,7 @@ class AntigravityStream(Iterator[Any]):
                 # effect of that termination, not evidence of a crash. Without
                 # this guard every neutralization was misreported as
                 # "Antigravity execution failed: ... exited with return code
-                # N", Hermes retried the turn up to 3 times (each retry
+                # N", Nako retried the turn up to 3 times (each retry
                 # re-triggered the same neutralization), and the turn failed
                 # with "didn't answer after 3 attempts" -- confirmed by
                 # errors.log/agent.log correlation: 100% of these exit-code
@@ -909,7 +909,7 @@ class AntigravityStream(Iterator[Any]):
                 # for its user-visible wording (a bare
                 # "Antigravity model error: "). Wording, not routing: that
                 # message and the generic empty-result raise below classify
-                # identically for Hermes (FailoverReason.unknown, retryable,
+                # identically for Nako (FailoverReason.unknown, retryable,
                 # no fallback), so the user-visible text is what is pinned.
                 # Checked before the quota and exit-code raises below, where
                 # the pre-PR status check sat. Fail-closed on the field's
@@ -936,7 +936,7 @@ class AntigravityStream(Iterator[Any]):
                 # quota and exit-code checks above because those are the more
                 # specific failure signals. The old code fell through here
                 # when returncode == 0 and no result event had been seen,
-                # emitting a finish chunk and Hermes then recorded an empty
+                # emitting a finish chunk and Nako then recorded an empty
                 # assistant turn as a legitimate response.
                 #
                 # Success is now REQUIRED to emit finish/usage, the security
@@ -947,7 +947,7 @@ class AntigravityStream(Iterator[Any]):
                 # True) and was delivered as a complete stop turn while the
                 # broken worker lived on. No result event is never a
                 # legitimate conclusion, and the deltas already yielded
-                # cannot be retracted -- Hermes aggregates a stream that
+                # cannot be retracted -- Nako aggregates a stream that
                 # raises mid-way, so failing the turn is the only honest
                 # outcome.
                 if not neutralized_tool_step and not success and not output_truncated:
@@ -973,11 +973,11 @@ class AntigravityStream(Iterator[Any]):
                 # `if status == "ERROR"` route, restored for its user-visible
                 # wording (bare "Antigravity model error: "); wording, not
                 # routing, because both messages classify identically for
-                # Hermes (FailoverReason.unknown, retryable, no fallback).
+                # Nako (FailoverReason.unknown, retryable, no fallback).
                 # Either way success is False (the verdict demands SUCCESS),
                 # so this failed turn can never reach the worker-history
                 # update; the deltas already yielded cannot be retracted --
-                # Hermes aggregates a stream that raises mid-way.
+                # Nako aggregates a stream that raises mid-way.
                 if not output_truncated and (error_msg or status == "ERROR"):
                     raise RuntimeError(f"Antigravity model error: {error_msg}")
 
@@ -995,7 +995,7 @@ class AntigravityStream(Iterator[Any]):
                     if quota_err:
                         raise RuntimeError(f"Antigravity model error: {quota_err}")
                     # Surface whatever agy wrote to stderr before this crash:
-                    # without it, Hermes could not tell "agy answered
+                    # without it, Nako could not tell "agy answered
                     # nothing" from "agy printed its own error and this
                     # raise threw it away" (task t_004f4153 finding -- this
                     # message used to carry zero diagnostic detail, unlike
@@ -1040,7 +1040,7 @@ class AntigravityStream(Iterator[Any]):
                 # leaving the broken worker alive because _finished was
                 # already True when close() ran. No result event is never a
                 # legitimate conclusion, and the deltas already yielded
-                # cannot be retracted -- Hermes aggregates a stream that
+                # cannot be retracted -- Nako aggregates a stream that
                 # raises mid-way -- so the turn fails, and the finally's
                 # close() terminates the worker that broke it.
                 if not neutralized_tool_step and not success and not output_truncated:
@@ -1126,7 +1126,7 @@ class AntigravityStream(Iterator[Any]):
                     # The truncated reply is not a usable exchange to resume
                     # from, and close() leaves a _finished worker alive:
                     # retire it explicitly so the next turn respawns with the
-                    # full history Hermes sends.
+                    # full history Nako sends.
                     self.client._terminate_worker()
                 if success and not self._interrupted:
                     if self.proc is self.client._worker_proc:

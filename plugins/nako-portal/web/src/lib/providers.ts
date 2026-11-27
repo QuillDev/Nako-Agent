@@ -1,4 +1,4 @@
-// Providers: the accounts and API keys Hermes can run on, as `hermes model` lists them. The
+// Providers: the accounts and API keys Nako can run on, as `nako model` lists them. The
 // gateway reads and writes them; the portal only shows the list and takes a key. A saved key
 // never comes back, so this file has no way to read one.
 import { useSyncExternalStore } from "react"

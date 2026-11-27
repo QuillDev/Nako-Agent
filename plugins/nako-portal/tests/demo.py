@@ -160,17 +160,17 @@ class DemoGateway(FakeGateway):
 
 
 async def main(port):
-    hermes = DemoGateway()
+    nako = DemoGateway()
     # Seconds per step of a demo turn; long enough to watch each state.
-    hermes.sign_off_route = {"provider": "anthropic", "model": "claude-sonnet-5-5"}
-    hermes.pause = float(os.environ.get("DEMO_PAUSE", "1"))
-    hermes.reply = "Here's the plan:\n\n1. **Rebase** onto `main`\n2. Re-run CI\n\n```bash\ngit rebase origin/main\n```"
-    hermes.add_session("20261024_090000_aaaaaa", "Fix the flaky CI shard", messages=[("user", "why is shard 3 failing?")])
-    hermes.sessions["20261024_090000_aaaaaa"]["model_options"] = {"provider": "openai-codex", "model": "codex"}
-    hermes._row("20261024_090000_aaaaaa", "tool", "", name="terminal", context="gh run view 123 --log-failed", tool_call_id="h1")
-    hermes._row("20261024_090000_aaaaaa", "user", "check shard 1 too while you're in there", display_kind="steer")
-    hermes._row("20261024_090000_aaaaaa", "tool", "", name="search_files", context="seed.ts", tool_call_id="h2")
-    hermes._row("20261024_090000_aaaaaa", "assistant", "The `orders` e2e test races the seed script. I'd add a wait on the seed job:\n\n| shard | status |\n| --- | --- |\n| 1 | passing |\n| 3 | flaky |", reasoning="Shard 3 runs orders.spec.ts, which reads seeded rows.")
+    nako.sign_off_route = {"provider": "anthropic", "model": "claude-sonnet-5-5"}
+    nako.pause = float(os.environ.get("DEMO_PAUSE", "1"))
+    nako.reply = "Here's the plan:\n\n1. **Rebase** onto `main`\n2. Re-run CI\n\n```bash\ngit rebase origin/main\n```"
+    nako.add_session("20261024_090000_aaaaaa", "Fix the flaky CI shard", messages=[("user", "why is shard 3 failing?")])
+    nako.sessions["20261024_090000_aaaaaa"]["model_options"] = {"provider": "openai-codex", "model": "codex"}
+    nako._row("20261024_090000_aaaaaa", "tool", "", name="terminal", context="gh run view 123 --log-failed", tool_call_id="h1")
+    nako._row("20261024_090000_aaaaaa", "user", "check shard 1 too while you're in there", display_kind="steer")
+    nako._row("20261024_090000_aaaaaa", "tool", "", name="search_files", context="seed.ts", tool_call_id="h2")
+    nako._row("20261024_090000_aaaaaa", "assistant", "The `orders` e2e test races the seed script. I'd add a wait on the seed job:\n\n| shard | status |\n| --- | --- |\n| 1 | passing |\n| 3 | flaky |", reasoning="Shard 3 runs orders.spec.ts, which reads seeded rows.")
     shots = Path(tempfile.mkdtemp())
     for name in ("layout.png", "error.png"):
         (shots / name).write_bytes((ROOT / "web" / "public" / "icon-512.png").read_bytes())
@@ -244,7 +244,7 @@ async def main(port):
 """,
         encoding="utf-8",
     )
-    hermes.add_session(
+    nako.add_session(
         "20261024_085500_h7a100",
         "Email preview",
         messages=[
@@ -252,7 +252,7 @@ async def main(port):
             ("assistant", f"here's the rendered email:\n\nMEDIA:{shots / 'order-email.html'}\nMEDIA:{shots / 'missing-draft.html'}"),
         ],
     )
-    hermes.add_session(
+    nako.add_session(
         "20261024_085000_dddddd",
         "Label layout",
         messages=[
@@ -261,7 +261,7 @@ async def main(port):
         ],
     )
     # A reply citing another chat the way session search does, which renders as a link to it.
-    hermes.add_session(
+    nako.add_session(
         "20261024_080000_bbbbbb",
         "Plan next week",
         messages=[
@@ -271,22 +271,22 @@ async def main(port):
     )
     # Background processes the CI chat's turns left running, as the gateway's process registry lists them.
     now = time.time()
-    hermes.procs["20261024_090000_aaaaaa"] = [
+    nako.procs["20261024_090000_aaaaaa"] = [
         {"id": "proc_1a2b3c4d5e6f", "command": "W=scripts/wait-for-ci.sh; bash $W acme/shop 412 60", "cwd": "/srv/shop", "running": True, "started_at": now - 14 * 60, "exited_at": None, "exit_code": None, "notify": True},
         {"id": "proc_2b3c4d5e6f7a", "command": "cd web && npm run dev -- --port 5174", "cwd": "/srv/shop", "running": True, "started_at": now - 72 * 60, "exited_at": None, "exit_code": None, "notify": False},
         {"id": "proc_3c4d5e6f7a8b", "command": "npx playwright test orders.spec.ts --repeat-each 50", "cwd": "/srv/shop", "running": False, "started_at": now - 30 * 60, "exited_at": now - 21 * 60, "exit_code": 0, "ended": "exited", "notify": True},
     ]
-    hermes.proc_logs["proc_1a2b3c4d5e6f"] = [
+    nako.proc_logs["proc_1a2b3c4d5e6f"] = [
         line
         for n in range(1, 15)
         for line in (f"[{n:02d}:00] pr #412 @ 9f3c2e1: {min(n // 2 + 2, 7)}/7 checks done", f"[{n:02d}:00]   pending: {'e2e (shard 3), ' if n < 13 else ''}deploy-preview")
     ]
-    hermes.proc_logs["proc_2b3c4d5e6f7a"] = [
+    nako.proc_logs["proc_2b3c4d5e6f7a"] = [
         "> shop-web@2.4.0 dev", "> vite --port 5174", "", "  VITE v7.1.3  ready in 412 ms", "", "  ➜  Local:   http://localhost:5174/", "  ➜  Network: use --host to expose",
         "10:02:11 [vite] hmr update /src/routes/orders.tsx", "10:14:40 [vite] hmr update /src/routes/orders.tsx, /src/index.css", "10:31:05 [vite] page reload src/lib/seed.ts",
     ]
-    hermes.proc_logs["proc_3c4d5e6f7a8b"] = ["Running 50 tests using 4 workers", *[f"  ✓  {n} orders.spec.ts:14:3 › lists seeded orders (1.{n % 9}s)" for n in range(1, 51)], "", "  50 passed (1.4m)"]
-    hermes.add_session(
+    nako.proc_logs["proc_3c4d5e6f7a8b"] = ["Running 50 tests using 4 workers", *[f"  ✓  {n} orders.spec.ts:14:3 › lists seeded orders (1.{n % 9}s)" for n in range(1, 51)], "", "  50 passed (1.4m)"]
+    nako.add_session(
         "20261024_093000_d00001",
         "Notifications",
         chat="inbox",
@@ -300,9 +300,9 @@ async def main(port):
     )
     # Review threads run archived and post their status to Reviews.
     for sid, title in (("20261024_091500_r00001", "Review shop#412"), ("20261024_092000_r00002", "Review shop#415")):
-        hermes.add_session(sid, title, messages=[("user", f"review {title.split()[-1]} for sam"), ("assistant", "reviewed, posted to Reviews.")])
-        hermes.sessions[sid]["archived"] = True
-    hermes.add_session(
+        nako.add_session(sid, title, messages=[("user", f"review {title.split()[-1]} for sam"), ("assistant", "reviewed, posted to Reviews.")])
+        nako.sessions[sid]["archived"] = True
+    nako.add_session(
         "20261024_092500_v00001",
         "Reviews",
         chat="reviews",
@@ -314,7 +314,7 @@ async def main(port):
     # A thread that started a review, and the review's report handed back to it (`nako-spawn --to`).
     from portal.hub import from_thread_line
 
-    hermes.add_session(
+    nako.add_session(
         "20261024_094000_f00001",
         "Shop refunds",
         messages=[
@@ -326,23 +326,23 @@ async def main(port):
     )
     # Times as a real chat has them: it started yesterday evening and picked back up this morning.
     now = time.time()
-    for n, row in enumerate(hermes.sessions["20261024_094000_f00001"]["rows"]):
+    for n, row in enumerate(nako.sessions["20261024_094000_f00001"]["rows"]):
         row["timestamp"] = now - 20 * 3600 + n * 240 if n < 2 else now - 600 + n * 120
-    hermes._row("20261024_091500_r00001", "user", from_thread_line("20261024_094000_f00001", "Shop refunds") + "when you're done, also hand the report back to me.", display_kind="steer")
-    hermes._row("20261024_091500_r00001", "assistant", "will do.")
-    hermes.add_session("20261023_070000_cccccc", "Write the release notes")
+    nako._row("20261024_091500_r00001", "user", from_thread_line("20261024_094000_f00001", "Shop refunds") + "when you're done, also hand the report back to me.", display_kind="steer")
+    nako._row("20261024_091500_r00001", "assistant", "will do.")
+    nako.add_session("20261023_070000_cccccc", "Write the release notes")
     # Archived chats: Cmd+K finds them and picking one brings it back.
     for sid, title in (("20261019_080000_a00001", "Plan the garden beds"), ("20261018_080000_a00002", "Compare release note formats")):
-        hermes.add_session(sid, title, messages=[("user", title.lower())])
-        hermes.sessions[sid]["archived"] = True
-    long = hermes.add_session("20261023_060000_eeeeee", "Untangle the importer")
+        nako.add_session(sid, title, messages=[("user", title.lower())])
+        nako.sessions[sid]["archived"] = True
+    long = nako.add_session("20261023_060000_eeeeee", "Untangle the importer")
     for turn in range(1, 81):
-        hermes._row(long, "user", f"step {turn}: what's next for the importer?")
-        hermes._row(long, "tool", "", name="read_file", context=f"src/importer/stage_{turn}.ts", tool_call_id=f"l{turn}")
+        nako._row(long, "user", f"step {turn}: what's next for the importer?")
+        nako._row(long, "tool", "", name="read_file", context=f"src/importer/stage_{turn}.ts", tool_call_id=f"l{turn}")
         body = " ".join(["The row parser and the batch writer disagree about blank lines, so this pass makes them share one reader."] * (1 + turn % 3))
-        hermes._row(long, "assistant", f"**Step {turn}.** {body}")
+        nako._row(long, "assistant", f"**Step {turn}.** {body}")
     # A password Nako made and shared: the reply names it and the portal shows it behind a button.
-    hermes.add_session(
+    nako.add_session(
         "20261024_083000_5ec7e7",
         "Rotate the staging db password",
         messages=[
@@ -351,21 +351,21 @@ async def main(port):
         ],
     )
     # Another profile's own chats, shown after switching profiles in Settings.
-    hermes.add_session("20261024_100000_p00001", "Draft the onboarding email", messages=[("user", "write a short welcome email for new users")], profile="work")
-    hermes.add_session("20261024_093000_p00002", "Notifications", chat="inbox", profile="work")
-    hermes.add_session("20261023_100000_p00003", "Compare vector databases", profile="work")
+    nako.add_session("20261024_100000_p00001", "Draft the onboarding email", messages=[("user", "write a short welcome email for new users")], profile="work")
+    nako.add_session("20261024_093000_p00002", "Notifications", chat="inbox", profile="work")
+    nako.add_session("20261023_100000_p00003", "Compare vector databases", profile="work")
     # What the agent-secrets plugin would hold.
     day = 86400
     now = time.time()
     # MCP servers as a profile might have them: one failing sign-in, one switched off, one a plugin brings.
     # Settings > Providers: two subscriptions with several accounts each, and one API key.
-    hermes.provider_list = [
+    nako.provider_list = [
         {"slug": "claude-subscription-directsdk-experimental", "label": "Claude Subscription", "description": "", "kind": "cli", "command": "", "env_var": "", "env_vars": [], "signup_url": ""},
         {"slug": "openai-codex", "label": "ChatGPT or Codex Subscription", "description": "", "kind": "signin", "command": "", "env_var": "", "env_vars": [], "signup_url": ""},
         {"slug": "openrouter", "label": "OpenRouter", "description": "", "kind": "key", "command": "", "env_var": "OPENROUTER_API_KEY", "env_vars": ["OPENROUTER_API_KEY"], "signup_url": "https://openrouter.ai/keys"},
     ]
-    hermes.provider_keys = {"openrouter": "demo"}
-    hermes.account_logins = {
+    nako.provider_keys = {"openrouter": "demo"}
+    nako.account_logins = {
         "claude-subscription-directsdk-experimental": {"mode": "paste", "accounts": [
             {"id": "primary", "label": "alex@example.test", "email": "alex@example.test", "plan": "Claude Max", "signed_in": True, "removable": True},
             {"id": "sam@example.test", "label": "sam@example.test", "email": "sam@example.test", "plan": "Claude Pro", "signed_in": True, "removable": True},
@@ -373,21 +373,21 @@ async def main(port):
         "openai-codex": {"mode": "code", "accounts": [
             {"id": "a1b2c3", "label": "alex@example.test", "email": "alex@example.test", "plan": "", "signed_in": True, "removable": True}]},
     }
-    hermes.mcp = {
+    nako.mcp = {
         "deepwiki": {"url": "https://mcp.deepwiki.example.test/mcp"},
         "linear": {"url": "https://mcp.linear.example.test/mcp", "auth": "oauth"},
         "local-files": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/srv/notes"], "env": {"LOG_LEVEL": "info"}},
         "notion": {"url": "https://mcp.notion.example.test/mcp", "auth": "oauth", "tools": {"include": ["search", "fetch", "create-pages", "update-page", "get-comments"]}},
         "weather": {"command": "uvx", "args": ["weather-mcp"], "enabled": False},
     }
-    hermes.mcp_tokens = {"notion"}
-    hermes.mcp_plugins = {"tracker": ({"url": "https://tracker.example.test/mcp"}, "tracker-tools")}
-    hermes.mcp_tools = {
+    nako.mcp_tokens = {"notion"}
+    nako.mcp_plugins = {"tracker": ({"url": "https://tracker.example.test/mcp"}, "tracker-tools")}
+    nako.mcp_tools = {
         "notion": [("search", "Search pages and databases"), ("fetch", "Read a page or database"), ("create-pages", "Create pages"),
                    ("update-page", "Edit a page's content or properties"), ("move-pages", "Move pages to a new parent"), ("get-comments", "List comments on a page")],
         "deepwiki": [("ask_question", "Ask about a public GitHub repo"), ("read_wiki_structure", "List a repo's wiki topics"), ("read_wiki_contents", "Read a repo's wiki")],
     }
-    hermes.mcp_catalog_list = [
+    nako.mcp_catalog_list = [
         {"name": n, "description": d, "transport": "http" if u else "stdio", "url": u, "command": c, "args": a, "auth": au, "env": e, "source": "", "post_install": p}
         for n, d, u, c, a, au, e, p in [
             ("airtable", "Bases, tables, and records from your Airtable workspace.", "", "npx", ["-y", "airtable-mcp-server"], "none",
@@ -400,7 +400,7 @@ async def main(port):
              [{"name": "GITHUB_TOKEN", "prompt": "GitHub token", "required": True, "secret": True, "saved": False}], ""),
         ]
     ]
-    hermes.vault = {
+    nako.vault = {
         "STAGING_DB_ADMIN": {"value": "q7Rz-Lw2v-9KpT-x4Hn", "note": "staging postgres admin", "origin": "agent", "updated_at": now - 2 * day},
         "OPENAI_API_KEY": {"value": "sk-dem...0000", "note": "personal key for the eval scripts", "origin": "you", "updated_at": now - 29 * day},
         "GITHUB_TOKEN": {"value": "ghp_de...0000", "note": "repo access for release.sh", "origin": "you", "updated_at": now - 38 * day},
@@ -420,7 +420,7 @@ async def main(port):
     ):
         group = store.create_group(name, color)
         for sid in sids:
-            store.set_chat_group(hermes.sessions[sid]["chat"], group["id"])
+            store.set_chat_group(nako.sessions[sid]["chat"], group["id"])
     store.create_group("Garden", "orange")
     # Sessions that came in other ways (Slack, Discord, cron, the CLI): Elsewhere lists them and opens them read-only.
     hour = 3600
@@ -440,15 +440,15 @@ async def main(port):
         ("local-c00000000000000000000003", "Morning digest", "cron", 25.5, [("user", "[cron] morning digest"), ("assistant", "three links today.")]),
         ("20261021_190000_d00002", "Book club picks", "discord", 74, [("user", "pick three books for next month"), ("assistant", "three picks, all under 300 pages.")]),
     ):
-        hermes.add_session(sid, title, source=source, last_active=now - ago * hour)
+        nako.add_session(sid, title, source=source, last_active=now - ago * hour)
         for n, (role, text) in enumerate(rows):
             stamp = now - ago * hour - (len(rows) - n) * 90
             if role == "tool":
-                hermes._row(sid, "tool", "", name=text, context="python3 export_check.py --since yesterday", tool_call_id=f"o{sid[-3:]}{n}", timestamp=stamp)
+                nako._row(sid, "tool", "", name=text, context="python3 export_check.py --since yesterday", tool_call_id=f"o{sid[-3:]}{n}", timestamp=stamp)
             else:
-                hermes._row(sid, role, text, timestamp=stamp)
-    hub = Hub(Backend(hermes))
-    hermes.hub = hub
+                nako._row(sid, role, text, timestamp=stamp)
+    hub = Hub(Backend(nako))
+    nako.hub = hub
     # The Slack session is mid-turn; DEMO_OUTSIDE_IDLE=1 shows Elsewhere with nothing running.
     hub.outside_now = {"sources": ["cli", "cron", "discord", "slack"], "running": [] if os.environ.get("DEMO_OUTSIDE_IDLE") else ["20261024_094100_s00001"]}
     # Turns that ended while nobody was looking: the sidebar marks them until they're opened.

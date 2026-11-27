@@ -1,4 +1,4 @@
-"""`/usage` hook tests: agy's quota readout mapped onto Hermes' account-usage snapshot.
+"""`/usage` hook tests: agy's quota readout mapped onto Nako' account-usage snapshot.
 
 agy is replaced by a fake executable script, so the real Google session is never touched.
 """
@@ -398,7 +398,7 @@ class FakeAgyTests(unittest.TestCase):
         for line in (version_line, usage_line):
             self.assertIn("update=true", line)
             cwd = self.invocation_cwd(line)
-            self.assertTrue(cwd.name.startswith("hermes-agy-usage-"))
+            self.assertTrue(cwd.name.startswith("nako-agy-usage-"))
             self.assertNotEqual(cwd.resolve(), Path.cwd().resolve())
             self.assertFalse(cwd.exists(), "private cwd must be removed after the run")
 
@@ -432,7 +432,7 @@ class FakeAgyTests(unittest.TestCase):
     def test_exited_leader_with_child_holding_pipe_is_killed(self):
         # The case taskkill /T cannot reach; on Windows only the Job Object runner handles it.
         if os.name == "nt" and usage._windows_job_runner() is None:
-            self.skipTest("needs Hermes' Job Object runner (hermes_cli._subprocess_compat)")
+            self.skipTest("needs Nako' Job Object runner (nako_cli._subprocess_compat)")
         os.environ["FAKE_AGY_MODE"] = "orphan-pipe"
         self.addCleanup(self.kill_recorded_pids)
         started = time.monotonic()
@@ -443,7 +443,7 @@ class FakeAgyTests(unittest.TestCase):
 
 
 class WindowsJobRunnerTests(unittest.TestCase):
-    """Which runner run_agy picks, and what it hands Hermes' Job Object runner."""
+    """Which runner run_agy picks, and what it hands Nako' Job Object runner."""
 
     def test_posix_never_uses_job_runner(self):
         with patch.object(usage.os, "name", "posix"):
@@ -451,41 +451,41 @@ class WindowsJobRunnerTests(unittest.TestCase):
 
     @staticmethod
     def current_runner(argv, *, timeout, errors="replace", env=None, cwd=None, raise_on_spawn_failure=False):
-        """Signature of Hermes' bounded_probe_run from 0.21.4 on."""
+        """Signature of Nako' bounded_probe_run from 0.21.4 on."""
 
     @staticmethod
     def pre_0214_runner(argv, *, timeout, errors="replace", env=None):
-        """Signature of bounded_probe_run up to Hermes 0.21.3: no cwd."""
+        """Signature of bounded_probe_run up to Nako 0.21.3: no cwd."""
 
-    def hermes_modules(self, runner=current_runner, *, compat=True, backend=True):
-        module = ModuleType("hermes_cli._subprocess_compat")
+    def nako_modules(self, runner=current_runner, *, compat=True, backend=True):
+        module = ModuleType("nako_cli._subprocess_compat")
         module.bounded_probe_run = runner
         return {
-            "hermes_cli._subprocess_compat": module if compat else None,
-            "hermes_cli.local_runtime.processes": ModuleType("hermes_cli.local_runtime.processes") if backend else None,
+            "nako_cli._subprocess_compat": module if compat else None,
+            "nako_cli.local_runtime.processes": ModuleType("nako_cli.local_runtime.processes") if backend else None,
         }
 
-    def test_windows_uses_hermes_runner_when_available(self):
-        modules = self.hermes_modules()
+    def test_windows_uses_nako_runner_when_available(self):
+        modules = self.nako_modules()
         with patch.object(usage.os, "name", "nt"), patch.dict(sys.modules, modules):
-            self.assertIs(usage._windows_job_runner(), modules["hermes_cli._subprocess_compat"].bounded_probe_run)
+            self.assertIs(usage._windows_job_runner(), modules["nako_cli._subprocess_compat"].bounded_probe_run)
 
-    def test_windows_without_hermes_runner_falls_back(self):
-        with patch.object(usage.os, "name", "nt"), patch.dict(sys.modules, self.hermes_modules(compat=False)):
+    def test_windows_without_nako_runner_falls_back(self):
+        with patch.object(usage.os, "name", "nt"), patch.dict(sys.modules, self.nako_modules(compat=False)):
             self.assertIsNone(usage._windows_job_runner())
 
     def test_windows_runner_without_job_backend_falls_back(self):
         # e.g. psutil missing: the runner would import fine but fail every spawn.
-        with patch.object(usage.os, "name", "nt"), patch.dict(sys.modules, self.hermes_modules(backend=False)):
+        with patch.object(usage.os, "name", "nt"), patch.dict(sys.modules, self.nako_modules(backend=False)):
             self.assertIsNone(usage._windows_job_runner())
 
     def test_windows_runner_with_incompatible_signature_falls_back(self):
-        modules = self.hermes_modules(self.pre_0214_runner)
+        modules = self.nako_modules(self.pre_0214_runner)
         with patch.object(usage.os, "name", "nt"), patch.dict(sys.modules, modules):
             self.assertIsNone(usage._windows_job_runner())
 
     def test_windows_backend_import_crash_falls_back(self):
-        compat = self.hermes_modules()["hermes_cli._subprocess_compat"]
+        compat = self.nako_modules()["nako_cli._subprocess_compat"]
         with patch.object(usage.os, "name", "nt"), \
              patch("usage.importlib.import_module", side_effect=[compat, OSError("ctypes load failed")]):
             self.assertIsNone(usage._windows_job_runner())
@@ -505,7 +505,7 @@ class WindowsJobRunnerTests(unittest.TestCase):
         self.assertTrue(0 < call["timeout"] <= 5)
         self.assertEqual(call["env"]["AGY_CLI_DISABLE_AUTO_UPDATE"], "true")
         self.assertTrue(call["cwd_existed"])
-        self.assertTrue(call["cwd"].name.startswith("hermes-agy-usage-"))
+        self.assertTrue(call["cwd"].name.startswith("nako-agy-usage-"))
         self.assertFalse(call["cwd"].exists(), "private cwd must be removed after the run")
 
     def test_run_agy_rejects_job_runner_timeout_and_failure(self):
@@ -613,8 +613,8 @@ def _windows_pid_alive(pid):
         kernel32.CloseHandle(handle)
 
 
-def _hermes_account_usage():
-    """Hermes' real account-usage module, or None where its runtime deps are absent (plugin CI)."""
+def _nako_account_usage():
+    """Nako' real account-usage module, or None where its runtime deps are absent (plugin CI)."""
     try:
         import agent.account_usage as module
     except ImportError:
@@ -622,13 +622,13 @@ def _hermes_account_usage():
     return module
 
 
-def _hermes_hook_deadline_s():
-    """PLUGIN_USAGE_HOOK_DEADLINE_S read from Hermes' source, so plugin CI needs no Hermes deps."""
+def _nako_hook_deadline_s():
+    """PLUGIN_USAGE_HOOK_DEADLINE_S read from Nako' source, so plugin CI needs no Nako deps."""
     import ast
     import importlib.util
 
     spec = importlib.util.find_spec("agent")
-    assert spec and spec.submodule_search_locations  # noqa: S101 — Hermes must be on sys.path
+    assert spec and spec.submodule_search_locations  # noqa: S101 — Nako must be on sys.path
     source = Path(next(iter(spec.submodule_search_locations)), "account_usage.py").read_text(encoding="utf-8-sig")
     for node in ast.parse(source).body:
         if isinstance(node, ast.Assign) and any(
@@ -640,7 +640,7 @@ def _hermes_hook_deadline_s():
 
 def _stub_account_usage():
     # Mirrors the two dataclasses the hook constructs, so the adapter is still exercised when
-    # Hermes' runtime deps (httpx, ruamel.yaml) are not installed.
+    # Nako' runtime deps (httpx, ruamel.yaml) are not installed.
     @dataclasses.dataclass(frozen=True)
     class AccountUsageWindow:
         label: str
@@ -667,7 +667,7 @@ class ProfileHookTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # Load the package entry the way Hermes does, so `from .usage import ...` resolves.
+        # Load the package entry the way Nako does, so `from .usage import ...` resolves.
         import importlib
         import importlib.util
 
@@ -688,12 +688,12 @@ class ProfileHookTests(unittest.TestCase):
             del sys.modules[name]
 
     def setUp(self):
-        if _hermes_account_usage() is None:
+        if _nako_account_usage() is None:
             patcher = patch.dict(sys.modules, {"agent.account_usage": _stub_account_usage()})
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_hook_maps_report_onto_hermes_snapshot(self):
+    def test_hook_maps_report_onto_nako_snapshot(self):
         report = live_report()
         with patch.object(self.package_usage, "fetch_usage_report", return_value=report):
             snapshot = self.profile.fetch_account_usage()
@@ -714,8 +714,8 @@ class ProfileHookTests(unittest.TestCase):
         with patch.object(self.package_usage, "fetch_usage_report", return_value=None):
             self.assertIsNone(self.profile.fetch_account_usage())
 
-    @unittest.skipIf(_hermes_account_usage() is None, "needs Hermes runtime deps (httpx, ruamel.yaml)")
-    def test_hermes_dispatcher_reaches_hook(self):
+    @unittest.skipIf(_nako_account_usage() is None, "needs Nako runtime deps (httpx, ruamel.yaml)")
+    def test_nako_dispatcher_reaches_hook(self):
         from agent.account_usage import fetch_account_usage
 
         with patch("providers.get_provider_profile", return_value=self.profile), \
@@ -725,9 +725,9 @@ class ProfileHookTests(unittest.TestCase):
         self.assertTrue(result.available)
         self.assertEqual([w.label for w in result.windows], ["Gemini 7d", "Claude/GPT 7d"])
 
-    def test_budget_kill_and_drain_end_before_hermes_hook_deadline(self):
+    def test_budget_kill_and_drain_end_before_nako_hook_deadline(self):
         worst_case_s = usage.USAGE_BUDGET_S + 2 * usage.DRAIN_TIMEOUT_S  # taskkill, then drain
-        self.assertLess(worst_case_s, _hermes_hook_deadline_s())
+        self.assertLess(worst_case_s, _nako_hook_deadline_s())
 
 
 def live_report():

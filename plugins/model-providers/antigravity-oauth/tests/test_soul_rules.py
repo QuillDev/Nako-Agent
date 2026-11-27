@@ -22,10 +22,10 @@ class SoulRulesTests(unittest.TestCase):
         self.home = tempfile.mkdtemp()
         self.ws = tempfile.mkdtemp()
         Path(self.home, "SOUL.md").write_text(SOUL_TEXT, encoding="utf-8")
-        p = patch.dict(os.environ, {"HERMES_HOME": self.home})
+        p = patch.dict(os.environ, {"NAKO_HOME": self.home})
         p.start()
         self.addCleanup(p.stop)
-        q = patch("soul.hermes_soul_path", return_value=Path(self.home) / "SOUL.md")
+        q = patch("soul.nako_soul_path", return_value=Path(self.home) / "SOUL.md")
         q.start()
         self.addCleanup(q.stop)
 
@@ -35,8 +35,8 @@ class SoulRulesTests(unittest.TestCase):
         self.assertLess(rules.index("MANGO-31"), rules.index("helpful assistant"))
         self.assertIn("<tool_call>", rules)
 
-    def test_soul_not_duplicated_when_hermes_already_injected_it(self):
-        rules = soul.build_rules([SOUL_TEXT + "\n\nMore Hermes instructions."], _PROMPT_PREAMBLE)
+    def test_soul_not_duplicated_when_nako_already_injected_it(self):
+        rules = soul.build_rules([SOUL_TEXT + "\n\nMore Nako instructions."], _PROMPT_PREAMBLE)
         self.assertEqual(rules.count("MANGO-31"), 1)
         self.assertNotIn("## Persona (SOUL.md)", rules)
 

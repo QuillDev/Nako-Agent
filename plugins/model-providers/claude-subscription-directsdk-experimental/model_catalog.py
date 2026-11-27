@@ -17,7 +17,7 @@ CONTEXT_WINDOWS = {
 # thinking policy and capabilities like any route, but the picker lists one only when the account's
 # own picker offers it: never appended from this table, never in the static fallback list.
 ACCESS_GATED = frozenset({'claude-mythos-5-1', 'claude-mythos-5-2'})
-# Families that 400 on ``thinking: {"type": "disabled"}`` (the same contract Hermes core keeps
+# Families that 400 on ``thinking: {"type": "disabled"}`` (the same contract Nako core keeps
 # in agent/anthropic_adapter.py). A caller's disable is omitted for them, which beats a dead
 # request. That does not turn thinking off, so request_body asks for the lowest effort instead
 # (`output_config.effort: low`, then `--effort low`): without it a reasoning-off request carries no
@@ -65,7 +65,7 @@ def native_model(model):
     base = model.removesuffix('[1m]')
     # A short name that names a pinned route must land on it. `sonnet` does, but `sonnet-5-5` and
     # `sonnet-5.5` do not: they miss ALIASES, so the route is sent to the CLI verbatim and the CLI
-    # answers 404. A 404 is a hard failure, so Hermes abandons the provider and falls back.
+    # answers 404. A 404 is a hard failure, so Nako abandons the provider and falls back.
     base = _route_base(base)
     canonical = ALIASES.get(base, base)
     window = CONTEXT_WINDOWS.get(canonical)

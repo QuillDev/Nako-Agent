@@ -46,7 +46,7 @@ class _Client:
 
 @pytest.fixture(autouse=True)
 def _setup(monkeypatch):
-    for key in ("HERMES_SESSION_SOURCE", "HERMES_SESSION_SOURCE_EXPLICIT", "HERMES_SINGLE_QUERY_SESSION"):
+    for key in ("NAKO_SESSION_SOURCE", "NAKO_SESSION_SOURCE_EXPLICIT", "NAKO_SINGLE_QUERY_SESSION"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr("agent.usage_pricing.get_pricing_entry", lambda *a, **k: _CHEAP)
     monkeypatch.setattr(pcl.warmer.threading, "Timer", _Timer)

@@ -18,19 +18,19 @@ plugin_dir = Path(__file__).resolve().parent.parent
 if str(plugin_dir) not in sys.path:
     sys.path.insert(0, str(plugin_dir))
 
-# Hermetic: provider discovery scans $HERMES_HOME/plugins. On a host where this
+# Hermetic: provider discovery scans $NAKO_HOME/plugins. On a host where this
 # plugin is also installed, discovery would register that copy under another
 # package name and get_provider_profile() would return it, so patches against
 # `antigravity_plugin_entry` miss and the real agy binary runs.
-os.environ["HERMES_HOME"] = tempfile.mkdtemp(prefix="agy_test_home_")
+os.environ["NAKO_HOME"] = tempfile.mkdtemp(prefix="agy_test_home_")
 # This suite mocks stream-json stdout; ACP has its own suite in tests/test_acp_vision.py.
 os.environ["ANTIGRAVITY_TRANSPORT"] = "stream-json"
 
 try:
     from providers import get_provider_profile
 except ImportError:
-    # Skip tests if Hermes Agent checkout is not in PYTHONPATH
-    raise unittest.SkipTest("Skipping test_antigravity_plugin.py: 'providers' module from Hermes Agent not found in PYTHONPATH.")
+    # Skip tests if Nako Agent checkout is not in PYTHONPATH
+    raise unittest.SkipTest("Skipping test_antigravity_plugin.py: 'providers' module from Nako Agent not found in PYTHONPATH.")
 
 from client import (
     AntigravityClient,
@@ -44,8 +44,8 @@ from process import _check_early_quota_error
 from stream import _is_output_limit_error, _result_reports_output_limit
 
 # Load the plugin's package entry as a real package (not a plain module) so its
-# `from .client import ...` relative imports resolve. Hermes itself discovers a
-# provider plugin only via $HERMES_HOME/plugins/model-providers/, so a suite
+# `from .client import ...` relative imports resolve. Nako itself discovers a
+# provider plugin only via $NAKO_HOME/plugins/model-providers/, so a suite
 # run against a bare source tree would otherwise never call register_provider()
 # and every get_provider_profile() lookup would return None.
 import importlib.util as _ilu
@@ -69,11 +69,11 @@ _CLOCK_JUMP_SECONDS = 10 ** 6
 
 @contextlib.contextmanager
 def _mock_inherited_config(effort):
-    # Keep offline provider tests independent of Hermes runtime dependencies.
-    config = ModuleType("hermes_cli.config")
+    # Keep offline provider tests independent of Nako runtime dependencies.
+    config = ModuleType("nako_cli.config")
     load_config = MagicMock(return_value={"agent": {"reasoning_effort": effort}})
     setattr(config, "load_config_readonly", load_config)
-    with patch.dict(sys.modules, {"hermes_cli.config": config}):
+    with patch.dict(sys.modules, {"nako_cli.config": config}):
         yield load_config
 
 
@@ -835,11 +835,11 @@ class AntigravityPluginTests(unittest.TestCase):
         verdict4 = hook(RuntimeError("Invalid API key or unauthorized"))
         self.assertIsNone(verdict4)
 
-    def test_hermes_error_classifier_integration(self):
+    def test_nako_error_classifier_integration(self):
         try:
             from agent.error_classifier import classify_api_error, FailoverReason
         except ImportError:
-            self.skipTest("Hermes agent not installed in test environment")
+            self.skipTest("Nako agent not installed in test environment")
 
         err = RuntimeError("Antigravity model error: subscriber fell behind updates, stalled for 5s")
         classified = classify_api_error(err, provider="antigravity-oauth")
@@ -892,7 +892,7 @@ class AntigravityPluginTests(unittest.TestCase):
         client = AntigravityClient()
         temp_dir = client._cwd
         self.assertTrue(Path(temp_dir).is_dir())
-        self.assertIn("hermes_agy_", temp_dir)
+        self.assertIn("nako_agy_", temp_dir)
         client.close()
         self.assertFalse(Path(temp_dir).exists())
 
@@ -900,7 +900,7 @@ class AntigravityPluginTests(unittest.TestCase):
         from client import _messages_match_prefix, _format_delta_prompt
 
         history = [
-            {"role": "system", "content": "You are Hermes"},
+            {"role": "system", "content": "You are Nako"},
             {"role": "user", "content": "Run command"},
         ]
         incoming_same = list(history)
@@ -1043,7 +1043,7 @@ class AntigravityPluginTests(unittest.TestCase):
         # Incident shape: agy's pubsub channel was killed mid-turn, the worker
         # survived (poll() -> None), and the result event carried no response
         # with a non-ERROR status. The turn must raise instead of emitting
-        # finish_reason="stop" plus an empty response (which Hermes would
+        # finish_reason="stop" plus an empty response (which Nako would
         # record as a legitimate answer), and the failed turn must NOT be
         # appended to the worker's conversation history.
         tmp_dir = tempfile.TemporaryDirectory()
@@ -1079,7 +1079,7 @@ class AntigravityPluginTests(unittest.TestCase):
         # Same incident shape WITH partial output: the pubsub channel died
         # mid-turn, so 'partial' streamed as deltas and the result arrived
         # CANCELLED carrying the same partial response. The turn must still
-        # fail -- partial text is not a conclusion, and Hermes cannot unsee
+        # fail -- partial text is not a conclusion, and Nako cannot unsee
         # deltas a stream already yielded -- and the message must not call
         # that output-empty: the status is simply not a success one.
         tmp_dir = tempfile.TemporaryDirectory()
@@ -1334,8 +1334,8 @@ class AntigravityPluginTests(unittest.TestCase):
 
     def test_worker_output_token_limit_error_is_length_finish(self):
         # agy reports a reply cut at the output cap as a result "error".
-        # It must reach Hermes as finish_reason="length" (truncation
-        # recovery), not as a RuntimeError that Hermes misreads as a
+        # It must reach Nako as finish_reason="length" (truncation
+        # recovery), not as a RuntimeError that Nako misreads as a
         # context overflow. The cut reply is not a resumable exchange: no
         # history update, and the worker is retired.
         tmp_dir = tempfile.TemporaryDirectory()
@@ -1528,7 +1528,7 @@ class AntigravityPluginTests(unittest.TestCase):
                     for chunk in stream:
                         chunks.append(chunk)
 
-        # The partial text WAS delivered before the raise (Hermes aggregates
+        # The partial text WAS delivered before the raise (Nako aggregates
         # a stream that fails mid-way; delivered deltas cannot be retracted).
         # What must never happen is the finish chunk that would seal the
         # turn as complete.

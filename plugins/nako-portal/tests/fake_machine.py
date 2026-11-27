@@ -1,12 +1,12 @@
-"""A stand-in for a machine's Hermes in mesh tests: the `hermes` command, `schtasks`, and the
+"""A stand-in for a machine's Nako in mesh tests: the `nako` command, `schtasks`, and the
 gateway process they start, which dials the machine's portal server over the real link.
 
-  python fake_machine.py hermes <args...>     the hermes CLI (--version, update, gateway ...)
+  python fake_machine.py nako <args...>     the nako CLI (--version, update, gateway ...)
   python fake_machine.py schtasks <args...>   Windows' task scheduler (/Query, /Run)
   python fake_machine.py gateway              a gateway process: connects and stays connected
 
-Everything it knows comes from the environment (FAKE_HERMES_*), and everything it does lands in
-FAKE_HERMES_DIR: `version` (the installed version line's parts), `next` (what an update installs),
+Everything it knows comes from the environment (FAKE_NAKO_*), and everything it does lands in
+FAKE_NAKO_DIR: `version` (the installed version line's parts), `next` (what an update installs),
 `gateway.pid`, `task` (the scheduled task is registered) and `calls.log`.
 """
 
@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-STATE = Path(os.environ.get("FAKE_HERMES_DIR", "."))
+STATE = Path(os.environ.get("FAKE_NAKO_DIR", "."))
 
 
 def _say(line):
@@ -64,17 +64,17 @@ def _start_gateway():
     (STATE / "gateway.pid").write_text(str(process.pid), encoding="utf-8")
 
 
-def hermes(args):
-    _say("hermes " + " ".join(args))
+def nako(args):
+    _say("nako " + " ".join(args))
     if args[:1] == ["--version"]:
         v = _version()
-        print(f"Hermes Agent {v['version']} ({v['date']}) · {v['channel']} · local {v['commit']}")
-        print("Install directory: /opt/hermes")
+        print(f"Nako Agent {v['version']} ({v['date']}) · {v['channel']} · local {v['commit']}")
+        print("Install directory: /opt/nako")
         return 0
     if args[:1] == ["update"]:
         print("→ Update channel: stable")
         nxt = json.loads((STATE / "next").read_text(encoding="utf-8-sig"))
-        print(f"Updating Hermes Agent {_version()['version']} -> {nxt['version']}")
+        print(f"Updating Nako Agent {_version()['version']} -> {nxt['version']}")
         # Like the real thing: the update stops the gateway on its way.
         _stop_gateway()
         (STATE / "version").write_text(json.dumps(nxt), encoding="utf-8")
@@ -87,7 +87,7 @@ def hermes(args):
         (STATE / "task").touch()
         return 0
     if args[:2] in (["gateway", "restart"], ["gateway", "start"]):
-        if os.environ.get("FAKE_HERMES_NO_DIRECT"):
+        if os.environ.get("FAKE_NAKO_NO_DIRECT"):
             # Windows with a task: starting the gateway outside it is what must not happen.
             print("refusing to start the gateway outside its scheduled task", file=sys.stderr)
             return 1
@@ -128,7 +128,7 @@ def gateway():
 
     async def run():
         async with aiohttp.ClientSession() as http:
-            client = GatewayClient(os.environ["FAKE_HERMES_LINK"], os.environ["FAKE_HERMES_TOKEN"], os.environ["FAKE_HERMES_CODE"], Quiet())
+            client = GatewayClient(os.environ["FAKE_NAKO_LINK"], os.environ["FAKE_NAKO_TOKEN"], os.environ["FAKE_NAKO_CODE"], Quiet())
             await client.run(http)
 
     asyncio.run(run())
@@ -139,4 +139,4 @@ if __name__ == "__main__":
     if kind == "gateway":
         gateway()
     else:
-        raise SystemExit(hermes(rest) if kind == "hermes" else schtasks(rest))
+        raise SystemExit(nako(rest) if kind == "nako" else schtasks(rest))

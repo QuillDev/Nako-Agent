@@ -141,7 +141,7 @@ class FakeGateway:
         self.yolo = set()
         self.elsewhere = {}
         self.next_row = 1
-        self.reply = "hello from hermes"
+        self.reply = "hello from nako"
         # A turn that starts and keeps running (until the gateway goes away).
         self.hold = False
         self.ask_approval = False
@@ -152,7 +152,7 @@ class FakeGateway:
         self.sign_off_route = {"provider": "auto", "model": ""}
         self.image_dir = Path(tempfile.mkdtemp())
         self.hub = None
-        # Hermes profiles the gateway serves; the portal shows one at a time.
+        # Nako profiles the gateway serves; the portal shows one at a time.
         self.profile_names = ["default", "work", "research"]
         self.profile = "default"
         self.profile_models = {}
@@ -164,7 +164,7 @@ class FakeGateway:
         self.proc_logs = {}
         # What the agent-secrets plugin keeps, as the adapter reaches it; None: plugin not installed.
         self.vault = {}
-        # Providers `hermes model` offers, as the backend lists them; None: too old to offer any.
+        # Providers `nako model` offers, as the backend lists them; None: too old to offer any.
         self.provider_list = None
         self.provider_keys = {}
         self.provider_accounts = {}
@@ -174,7 +174,7 @@ class FakeGateway:
         # A sign-in's code (or, for "code", the email passed to approve_account) names who signed in.
         self.account_logins = {}
         self.account_attempts = {}
-        # MCP servers as `hermes mcp` keeps them (name -> config); None: a Hermes without MCP.
+        # MCP servers as `nako mcp` keeps them (name -> config); None: a Nako without MCP.
         self.mcp = {}
         self.mcp_plugins = {}
         self.mcp_live = {}
@@ -203,7 +203,7 @@ class FakeGateway:
         return sid
 
     def _row(self, sid, role, text, **extra):
-        # Hermes stamps each row with its authoring time; a counter keeps the fake's order exact.
+        # Nako stamps each row with its authoring time; a counter keeps the fake's order exact.
         row = {"role": role, "text": text, "row_id": self.next_row, "timestamp": 1_700_000_000 + self.next_row, **extra}
         self.next_row += 1
         self.sessions[sid]["rows"].append(row)
@@ -700,16 +700,16 @@ class HubOverLink:
 class Gateway:
     """The gateway's end of the link, dialled in from the same loop the way the adapter does."""
 
-    def __init__(self, hermes, local_server, http):
-        self.hermes = hermes
+    def __init__(self, nako, local_server, http):
+        self.nako = nako
         self.url = str(local_server.make_url("/gateway"))
         self.http = http
         self.client = None
         self.task = None
 
     async def start(self, hub, code=SERVER_CODE):
-        self.client = GatewayClient(self.url, LOCAL_TOKEN, code, Backend(self.hermes))
-        self.hermes.hub = HubOverLink(self.client)
+        self.client = GatewayClient(self.url, LOCAL_TOKEN, code, Backend(self.nako))
+        self.nako.hub = HubOverLink(self.client)
         self.task = asyncio.get_running_loop().create_task(self.client.run(self.http))
         await until(lambda: hub.connected)
 
@@ -728,8 +728,8 @@ async def until(check, timeout=5):
 
 
 class World:
-    def __init__(self, hermes, store, portal_server, http, hub):
-        self.hermes = hermes
+    def __init__(self, nako, store, portal_server, http, hub):
+        self.nako = nako
         self.store = store
         self.server = portal_server
         self.http = http
@@ -760,7 +760,7 @@ class World:
 @pytest_asyncio.fixture
 async def world(tmp_path, monkeypatch):
     monkeypatch.setattr(hub_module, "MIRROR_SETTLE", 0)
-    hermes = FakeGateway()
+    nako = FakeGateway()
     store = Store(tmp_path / "portal" / "portal.db")
     alerts = []
     # The portal server as it runs on its own, with the fake gateway dialled in over the link.
@@ -775,12 +775,12 @@ async def world(tmp_path, monkeypatch):
     await local_server.start_server()
     jar = aiohttp.CookieJar(unsafe=True)
     async with aiohttp.ClientSession(cookie_jar=jar) as http, aiohttp.ClientSession() as gateway_http:
-        w = World(hermes, store, portal_server, http, hub)
+        w = World(nako, store, portal_server, http, hub)
         w.alerts = alerts
         w.portal = portal
         w.local = local_server
         w.link = link
-        w.gateway = Gateway(hermes, local_server, gateway_http)
+        w.gateway = Gateway(nako, local_server, gateway_http)
         await w.gateway.start(hub)
         yield w
         if w.gateway.task is not None:
@@ -801,7 +801,7 @@ async def next_message(ws, predicate, timeout=5):
 
 
 def _preview(session):
-    """Hermes's list preview: the first user message on one line, cut at 60 characters."""
+    """Nako's list preview: the first user message on one line, cut at 60 characters."""
     first = next((row["text"] for row in session["rows"] if row["role"] == "user"), "")
     text = first.strip().replace("\n", " ")
     return text[:60] + "..." if len(text) > 60 else text

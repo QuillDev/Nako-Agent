@@ -42,14 +42,14 @@ except ImportError:
         drop_api_credentials)
 
 
-# Hermes picks retry vs fallback from an error's status_code (main loop and auxiliary ladder alike).
+# Nako picks retry vs fallback from an error's status_code (main loop and auxiliary ladder alike).
 class ClaudeCodeMissing(RuntimeError):
     """The official Claude Code CLI this transport drives is not installed (or not on PATH)."""
     status_code = 503
 
 
 class ClaudeCodeLoggedOut(RuntimeError):
-    """Claude Code refused before any upstream request because it has no usable login where Hermes runs it."""
+    """Claude Code refused before any upstream request because it has no usable login where Nako runs it."""
     status_code = 401
 
 
@@ -173,7 +173,7 @@ def prepare_history(messages, names=None):
                         native = copy.deepcopy(native)
                         # Native sizes its local "Prompt is too long" gate from the newest assistant
                         # message's `usage`. A replayed frame keeps the usage of the request that made it,
-                        # so after Hermes compresses the history it still reports the old size and native
+                        # so after Nako compresses the history it still reports the old size and native
                         # refuses locally without sending (#92). `usage` is local metadata, never on the wire.
                         native.pop('usage', None)
                         frames.append({'type': 'assistant', 'message': native})
@@ -227,7 +227,7 @@ def normalize_input_schema(schema):
 # Native structured output (`output_config.format`) 400s on these keywords (live-probed): numeric
 # bounds on integer/number, size bounds on object, array bounds other than `minItems` 0/1, and an
 # `enum` beside a `type` list (a nullable enum, whose members are checked against the whole list).
-# The reply is validated against the caller's full schema by Hermes (agent/plugin_llm.py), so
+# The reply is validated against the caller's full schema by Nako (agent/plugin_llm.py), so
 # dropping them from the wire keeps them enforced, and the enum or the remaining keywords still
 # steer the model. Without this, core retries the request without a schema and every structured
 # call is paid twice.
@@ -261,11 +261,11 @@ def native_format_schema(node):
 def request_body(kwargs):
     allowed = {'model', 'messages', 'tools', 'stream', 'stream_options', 'max_tokens', 'max_completion_tokens',
                'temperature', 'top_p', 'stop', 'extra_body', 'extra_headers', 'timeout', 'tool_choice', 'parallel_tool_calls', 'n', 'response_format',
-               'hermes_auxiliary'}
+               'nako_auxiliary'}
     unknown = set(kwargs) - allowed
     if unknown:
         raise ValueError('Unsupported request parameters: ' + ', '.join(sorted(unknown)))
-    # Hermes Relay attaches host tracing to chat-completions clients. Keep it host-local:
+    # Nako Relay attaches host tracing to chat-completions clients. Keep it host-local:
     # never project it into generation fields or override the official CLI's identity.
     headers = kwargs.get('extra_headers')
     if headers is not None and (not isinstance(headers, dict) or any(
@@ -312,7 +312,7 @@ def request_body(kwargs):
             # default thinking plus the effort signal below stand in for it.
             if reasoning.get('enabled') is True and supports_adaptive_thinking(kwargs.get('model')):
                 # 4.7+ defaults thinking.display to "omitted" (empty thinking + signature only),
-                # which leaves Hermes' reasoning panel blank. Mirror core's anthropic_adapter.
+                # which leaves Nako' reasoning panel blank. Mirror core's anthropic_adapter.
                 body['thinking'] = {'type': 'adaptive', 'display': 'summarized'}
             if effort:
                 body['output_config'] = {'effort': effort}
@@ -337,7 +337,7 @@ def request_body(kwargs):
     for key in ('temperature', 'top_p'):
         if key in body and (isinstance(body[key], bool) or not isinstance(body[key], (int, float)) or not math.isfinite(body[key]) or not 0 <= body[key] <= 1):
             raise ValueError(f'{key} must be finite and between zero and one')
-        # Subscription models reject sampling controls, including Hermes' title
+        # Subscription models reject sampling controls, including Nako' title
         # generator default. Match the host's sampling-forbidden model behavior.
         body.pop(key, None)
     if 'max_tokens' in body and (type(body['max_tokens']) is not int or body['max_tokens'] < 1):
@@ -639,9 +639,9 @@ def shared_workdir():
     """One native cwd for every client of this OS user, or None to fall back to a private one.
 
     Native writes its cwd into the environment block of every request (message 1 on Opus 5.5), so a
-    per-client directory moved the prompt-cache prefix whenever Hermes built a new client (#14, #43).
+    per-client directory moved the prompt-cache prefix whenever Nako built a new client (#14, #43).
     The path sits in a tempdir others may share: it must be our own real directory, closed to others,
-    in a parent nobody else can rename it out of. The utime keeps Hermes' 24h scratch prune off it.
+    in a parent nobody else can rename it out of. The utime keeps Nako' 24h scratch prune off it.
     """
     if not hasattr(os, 'getuid'):
         return None
@@ -666,7 +666,7 @@ _process_cwd_lock = threading.Lock()
 def process_workdir():
     """One private cwd for every client in this process when the shared one is refused.
 
-    Hermes builds new clients for new chats, auxiliary calls and background review; a cwd per client
+    Nako builds new clients for new chats, auxiliary calls and background review; a cwd per client
     moved message 1 for each of them, so none could reuse the conversation's cached prefix. The
     directory is as private as a per-client one (our mkdtemp, checked on every use); it only lives as
     long as the process. Recreated at the same path after a prune, never adopted when someone else
@@ -690,11 +690,11 @@ def process_workdir():
 
 
 class Client:
-    HERMES_SKIP_TRANSPORT_WRAP = True
-    HERMES_SKIP_ASYNC_WRAP = True
+    NAKO_SKIP_TRANSPORT_WRAP = True
+    NAKO_SKIP_ASYNC_WRAP = True
 
     def __init__(self, command=None, args=None, env=None, timeout=180, **_):
-        # Hermes snapshots routing metadata from client-shaped objects; this is not a credential.
+        # Nako snapshots routing metadata from client-shaped objects; this is not a credential.
         self.api_key = 'external-process'
         self.base_url = 'process://claude-subscription-directsdk-experimental'
         self.env = dict(env) if env is not None else None
@@ -728,8 +728,8 @@ class Client:
         return shared_workdir() or process_workdir()
 
     def create(self, **kwargs):
-        # Hermes' auxiliary seam returns this same object and awaits create. A running loop alone
-        # does not mean the caller awaits: Hermes' NeMo Relay managed execution runs the agent's
+        # Nako' auxiliary seam returns this same object and awaits create. A running loop alone
+        # does not mean the caller awaits: Nako' NeMo Relay managed execution runs the agent's
         # *sync* provider callback inside asyncio.run, and a coroutine handed back there is never
         # awaited (TypeError in relay_llm._jsonable). Go async only for a coroutine caller.
         try:
@@ -788,7 +788,7 @@ class Client:
     def _native_env(self):
         env = _with_login_identity(_with_windows_essentials(dict(self.env if self.env is not None else os.environ)))
         if self.env is None:
-            # Explicit env= is a controlled fixture and keeps its login; only Hermes' own env is filtered.
+            # Explicit env= is a controlled fixture and keeps its login; only Nako' own env is filtered.
             drop_api_credentials(env)
             conflicts = [key for key in ('ANTHROPIC_BASE_URL',) if env.get(key)]
             conflicts += [key for key in ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY') if env.get(key, '').lower() not in ('', '0', 'false', 'no', 'off')]
@@ -831,7 +831,7 @@ class Client:
                 self._requests.discard(request)
 
     def _run_account(self, request, kwargs, body, manifest, names, system, frames, account=None):
-        hermes_names = {native: hermes for hermes, native in names.items()}
+        nako_names = {native: nako for nako, native in names.items()}
         p = None
         reader = None
         err_drain = None
@@ -860,26 +860,26 @@ class Client:
                 if account is not None:
                     env['CLAUDE_CONFIG_DIR'] = account.config_dir
                     env.pop('CLAUDE_CODE_OAUTH_TOKEN', None)  # Directory, not an inherited token, owns this login.
-                # An inherited effort level would override the --effort Hermes passes below.
+                # An inherited effort level would override the --effort Nako passes below.
                 for key in ('CLAUDE_CODE_EXTRA_BODY', 'CLAUDE_CODE_EFFORT_LEVEL'):
                     env.pop(key, None)
                 env.update(ENABLE_TOOL_SEARCH='false', CLAUDE_CODE_MAX_RETRIES='0', DISABLE_AUTO_COMPACT='1', DISABLE_COMPACT='1')
                 # Telemetry and feature flags follow the user's claude_code_telemetry setting, read per spawn.
                 apply_traffic_policy(env)
-                # Hermes owns budgets; native's replayed reminder invalidates cached history.
+                # Nako owns budgets; native's replayed reminder invalidates cached history.
                 env['CLAUDE_CODE_TOTAL_TOKENS_REMINDER'] = 'off'
-                # Hermes owns memory and instructions. --setting-sources '' leaves auto memory and the managed
+                # Nako owns memory and instructions. --setting-sources '' leaves auto memory and the managed
                 # CLAUDE.md loading, and native would put them in the conversation as a reminder on the user's
                 # turn, where Claude reads Claude Code's notes as text smuggled into the user's message (#195).
                 env.update(CLAUDE_CODE_DISABLE_AUTO_MEMORY='1', CLAUDE_CODE_DISABLE_CLAUDE_MDS='1')
                 # The queried frame lets the relay keep the cache breakpoint off native's per-request context.
                 request.admission = Admission(env.get('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'), timeout, queried=frames[-1]['message']['content'])
-                # A Hermes auxiliary one-shot (summary, title: marked by the profile hook, one turn, no tools) is
+                # A Nako auxiliary one-shot (summary, title: marked by the profile hook, one turn, no tools) is
                 # never replayed, so the relay drops its message cache marks instead of moving them.
-                request.admission.one_shot = kwargs.get('hermes_auxiliary') is True and not manifest and len(frames) == 1
+                request.admission.one_shot = kwargs.get('nako_auxiliary') is True and not manifest and len(frames) == 1
                 env['ANTHROPIC_BASE_URL'] = request.admission.url
                 # Native settings apply env inside the process, avoiding execve's
-                # per-argument/environment-string limit for full Hermes schemas.
+                # per-argument/environment-string limit for full Nako schemas.
                 (root / 'settings.json').write_text(json.dumps({'env': {'CLAUDE_CODE_EXTRA_BODY': body}}), encoding='utf-8')
                 (root / 'system.md').write_text(system, encoding='utf-8')
                 parsed = json.loads(body)
@@ -1021,7 +1021,7 @@ class Client:
                             yield self._chunk(kwargs['model'], {'reasoning_content': delta['thinking']})
                         elif native['type'] not in ('message_stop', 'ping'):
                             # The model is working but has nothing to show: tool-call arguments (input_json_delta),
-                            # thinking signatures, block boundaries. Hermes' stale detector only sees chunks, so
+                            # thinking signatures, block boundaries. Nako' stale detector only sees chunks, so
                             # without this a long tool call looks like a stall and the host kills a healthy request.
                             # A ping stays silent: it proves the connection is open, not that the model is working.
                             yield self._chunk(kwargs['model'], {})
@@ -1055,9 +1055,9 @@ class Client:
                 native_failure_handled = admission.denied or (admission.used and assistants[0].get('stop_reason') == 'refusal')
                 if native_error and not native_failure_handled:
                     if native_error_code == 'authentication_failed' and not admission.used:
-                        # No usable login where Hermes runs native: it refuses before any upstream request; only its /api/hello pre-flight reaches the relay.
+                        # No usable login where Nako runs native: it refuses before any upstream request; only its /api/hello pre-flight reaches the relay.
                         # Name what was tried: bot surfaces resolve a different environment than the user's shell (#47).
-                        # The child's own HOME, not Hermes': that is where native looked for ~/.claude.
+                        # The child's own HOME, not Nako': that is where native looked for ~/.claude.
                         home = env.get('HOME') or env.get('USERPROFILE')
                         login = env.get('CLAUDE_CONFIG_DIR') or str((Path(home) if home else Path.home()) / '.claude')
                         raise ClaudeCodeLoggedOut(f'{LOGGED_OUT_HINT} (native: {native_error}; cli: {resolved[0]}; login: {login}){_stderr_tail(native_stderr)}')
@@ -1070,14 +1070,14 @@ class Client:
                 for block in blocks:
                     if block.get('type') == 'tool_use':
                         # Native built-ins are off (--tools '', inert MCP, dontAsk), so any other name is
-                        # the model's, e.g. a Tool Search-deferred tool called directly (#39). Hermes owns
+                        # the model's, e.g. a Tool Search-deferred tool called directly (#39). Nako owns
                         # validation and answers an unknown name with a recoverable error.
-                        if block['name'] in hermes_names:
+                        if block['name'] in nako_names:
                             # Native sometimes drops the prefix on a tool it was offered (#62); carry the
                             # offered name so replayed history does not teach the slip back to the model.
                             block['name'] = PREFIX + block['name']
                         name = block['name'].removeprefix(PREFIX)
-                        name = hermes_names.get(name, name)
+                        name = nako_names.get(name, name)
                         calls.append({'id': block['id'], 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(block['input'], separators=(',', ':'), allow_nan=False)}})
                 boundary = bool(calls) and final.get('subtype') == 'error_max_turns' and (fast or proc_returncode == 1)
                 if not boundary and not native_failure_handled and ((not fast and proc_returncode != 0) or final.get('is_error') or final.get('subtype') != 'success'):
@@ -1092,14 +1092,14 @@ class Client:
                     else:
                         raise RuntimeError('Native final text differs from incremental stream')
                 thinking = ''.join(b.get('thinking', '') for b in blocks if b.get('type') == 'thinking') or None
-                # A turn of thinking alone (no text, no tool call) is Claude stalling, not answering. Hermes promotes a
+                # A turn of thinking alone (no text, no tool call) is Claude stalling, not answering. Nako promotes a
                 # reasoning-only `stop` to the final answer, which ends the tool loop; left empty, its empty-response
                 # recovery nudges the model on, as before summarized display. The signed thinking still replays.
                 message = {'role': 'assistant', 'content': text or None, 'tool_calls': calls or None,
                            'reasoning_content': thinking if text or calls else None}
                 carrier = {'type': CARRIER, 'version': 1, 'messages': assistants, 'projection': projection(message)}
                 message['reasoning_details'] = [carrier]
-                # An upstream refusal is Hermes' content_filter, as core's Anthropic transport maps it (even with a tool
+                # An upstream refusal is Nako' content_filter, as core's Anthropic transport maps it (even with a tool
                 # call cut off by the classifier, which must not run): terminal, one fallback try, never retried as an
                 # empty reply. Its reason rides stop_details, not a content block.
                 refused = any(a.get('stop_reason') == 'refusal' for a in assistants)
@@ -1108,7 +1108,7 @@ class Client:
                     explanation, category = details.get('explanation'), details.get('category')
                     message['refusal'] = (explanation.strip() if isinstance(explanation, str) and explanation.strip() else
                                           f'provider refusal category: {category}' if isinstance(category, str) and category else None)
-                    # The cut-off call stays out of what Hermes acts on: Hermes promotes a refusal to the text it shows
+                    # The cut-off call stays out of what Nako acts on: Nako promotes a refusal to the text it shows
                     # only when nothing else is in the message, so with the call kept the user read "no explanation".
                     # The carrier above still holds native's turn as sent, refused tool_use included.
                     message['tool_calls'], calls = None, []

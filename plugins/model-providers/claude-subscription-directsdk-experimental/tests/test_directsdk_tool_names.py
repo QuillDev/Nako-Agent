@@ -1,4 +1,4 @@
-"""Hermes tool names round-trip through native's shorter MCP namespace."""
+"""Nako tool names round-trip through native's shorter MCP namespace."""
 import copy
 import hashlib
 import json
@@ -42,9 +42,9 @@ def test_short_names_preserve_literal_wire_manifest_and_history():
     encoded, manifest, names = directsdk.request_body(request)
     assert encoded == (
         '{"max_tokens":17,"tools":['
-        '{"name":"mcp__hermes__probe","description":"","input_schema":{"type":"object","properties":{}}},'
-        '{"name":"mcp__hermes__A_1-z","description":"","input_schema":{"type":"object","properties":{}}},'
-        '{"name":"mcp__hermes__xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","description":"","input_schema":{"type":"object","properties":{}}}]}'
+        '{"name":"mcp__nako__probe","description":"","input_schema":{"type":"object","properties":{}}},'
+        '{"name":"mcp__nako__A_1-z","description":"","input_schema":{"type":"object","properties":{}}},'
+        '{"name":"mcp__nako__xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","description":"","input_schema":{"type":"object","properties":{}}}]}'
     )
     assert json.dumps(manifest) == (
         '[{"name": "probe", "description": "", "inputSchema": {"type": "object", "properties": {}}}, '
@@ -58,7 +58,7 @@ def test_short_names_preserve_literal_wire_manifest_and_history():
     assert json.dumps(directsdk.prepare_history(history, names), separators=(",", ":")) == (
         '["",[{"type":"user","message":{"role":"user","content":[{"type":"text","text":"go"}]}},'
         '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Calling."},'
-        '{"type":"tool_use","id":"t1","name":"mcp__hermes__probe","input":{}}]}},'
+        '{"type":"tool_use","id":"t1","name":"mcp__nako__probe","input":{}}]}},'
         '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}]]'
     )
 

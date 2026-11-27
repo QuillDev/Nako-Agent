@@ -72,7 +72,7 @@ class ThinkingTests(unittest.TestCase):
             self.assertIn("answer", text)
 
     def test_real_agy_capture_usage_passes_through(self):
-        path = Path("/home/koli/.hermes/cache/scratch/agy-thinking-probe.jsonl")
+        path = Path("/home/koli/.nako/cache/scratch/agy-thinking-probe.jsonl")
         if not path.exists():
             self.skipTest("optional live capture is unavailable")
         proc = MagicMock()

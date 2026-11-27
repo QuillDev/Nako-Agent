@@ -20,8 +20,8 @@ plugin_dir = Path(__file__).resolve().parent.parent
 if str(plugin_dir) not in sys.path:
     sys.path.insert(0, str(plugin_dir))
 
-# Hermetic: keep provider discovery from loading an older installed copy from ~/.hermes/plugins
-os.environ["HERMES_HOME"] = tempfile.mkdtemp(prefix="agy_acp_test_home_")
+# Hermetic: keep provider discovery from loading an older installed copy from ~/.nako/plugins
+os.environ["NAKO_HOME"] = tempfile.mkdtemp(prefix="agy_acp_test_home_")
 
 import alias as _alias
 import __init__ as plugin
@@ -345,7 +345,7 @@ class ACPVisionTests(unittest.TestCase):
                     "sessionId": proc.session_id,
                     "update": {
                         "sessionUpdate": "agent_thought_chunk",
-                        "content": {"type": "text", "text": _alias.mask("thinking for hermes")},
+                        "content": {"type": "text", "text": _alias.mask("thinking for nako")},
                     },
                 },
             })
@@ -381,14 +381,14 @@ class ACPVisionTests(unittest.TestCase):
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Ping for hermes"},
+                        {"type": "text", "text": "Ping for nako"},
                         {"type": "image_url", "image_url": {"url": _TINY_PNG_URI}},
                     ],
                 }],
             )
             awaited = asyncio.run(self._await_val(resp))
         self.assertIs(awaited, resp)
-        self.assertEqual(resp.choices[0].message.reasoning_content, "thinking for hermes")
+        self.assertEqual(resp.choices[0].message.reasoning_content, "thinking for nako")
         self.assertEqual(resp.choices[0].finish_reason, "tool_calls")
         self.assertEqual(resp.choices[0].message.tool_calls[0].function.name, "ping")
         self.assertEqual(json.loads(resp.choices[0].message.tool_calls[0].function.arguments), {"host": "1.1.1.1"})

@@ -74,7 +74,7 @@ const SAMPLE_MODEL: ModelChoice = {
 }
 const SAMPLE_PASSKEYS: Passkey[] = [{ id: "sample", label: "MacBook Pro", current: true }]
 
-// Which Hermes profile the portal shows, and the model that profile runs on. Switching
+// Which Nako profile the portal shows, and the model that profile runs on. Switching
 // profiles swaps every chat for that profile's; the model belongs to the profile shown.
 function ProfileRows({ onError }: { onError: (message: string) => void }) {
   const [state, setState] = useState<Profiles | null>(null)

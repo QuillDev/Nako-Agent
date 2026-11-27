@@ -1,4 +1,4 @@
-"""Hermes capabilities and durable per-conversation tuning."""
+"""Nako capabilities and durable per-conversation tuning."""
 import json
 import os
 import sqlite3
@@ -29,7 +29,7 @@ class Store:
 
 def options(config, provider, model, base_url=""):
     from agent.reasoning_effort import route_supported_efforts
-    from hermes_cli.models import resolve_fast_mode_overrides
+    from nako_cli.models import resolve_fast_mode_overrides
 
     efforts = list(route_supported_efforts(provider, model))
     speeds = ["normal"]
@@ -42,7 +42,7 @@ def options(config, provider, model, base_url=""):
 
 def validate(body):
     """Validate every field before any part of a selection is written."""
-    from hermes_constants import parse_reasoning_effort
+    from nako_constants import parse_reasoning_effort
     from agent.fast_mode import parse_exact_service_tier
     if not isinstance(body, dict) or not body or set(body) - {"provider", "model", "effort", "speed", "reset", "confirm"}:
         raise ValueError("Invalid model settings")
@@ -63,7 +63,7 @@ def validate(body):
 
 def apply_tuning(runner, key, saved):
     from agent.fast_mode import parse_service_tier
-    from hermes_constants import parse_reasoning_effort
+    from nako_constants import parse_reasoning_effort
 
     runner._set_session_reasoning_override(key, parse_reasoning_effort(saved["effort"]) if saved.get("effort") else None)
     runner._set_session_service_tier_override(key, parse_service_tier(saved.get("speed")), clear=not bool(saved.get("speed")))

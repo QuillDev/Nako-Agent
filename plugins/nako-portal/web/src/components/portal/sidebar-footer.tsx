@@ -3,7 +3,7 @@ import { Popover } from "radix-ui";
 import { ArrowDownToLineIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { appVersion, canCheck, checkForUpdate, installDesktopUpdate, useDesktopUpdate } from "@/lib/desktop-update";
-import type { HermesBuild } from "@/lib/types";
+import type { NakoBuild } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** Green while the portal and nako are both reachable, amber while this page reconnects to the portal, red while nako is offline. */
@@ -35,7 +35,7 @@ const CHECK_LABEL = {
   error: "couldn't check",
 } as const;
 
-export function HermesVersion({ version }: { version: HermesBuild }) {
+export function NakoVersion({ version }: { version: NakoBuild }) {
   const [open, setOpen] = useState(false);
   const leave = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const enter = () => {
@@ -50,7 +50,7 @@ export function HermesVersion({ version }: { version: HermesBuild }) {
       {appVersion && <span aria-hidden="true" className="text-muted-foreground text-xs">·</span>}
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger
-          aria-label={`Hermes ${version.version} build details`}
+          aria-label={`Nako ${version.version} build details`}
           className="ml-1 inline-flex min-h-9 shrink-0 items-center gap-1 rounded-md px-1.5 text-muted-foreground text-xs tabular-nums hover:bg-accent focus-visible:bg-accent"
           onPointerEnter={(event) => { if (event.pointerType === "mouse") enter(); }}
           onPointerLeave={(event) => { if (event.pointerType === "mouse") exit(); }}
@@ -60,13 +60,13 @@ export function HermesVersion({ version }: { version: HermesBuild }) {
           }}
           onClick={(event) => { if (event.detail === 0 || (event.nativeEvent instanceof PointerEvent && event.nativeEvent.pointerType === "mouse")) { event.preventDefault(); enter(); } }}
         >
-          {/* Nous Research mark, from Hermes Agent's assets/nous-girl-black.svg. */}
+          {/* Quill Dev mark, from Nako Agent's assets/nous-girl-black.svg. */}
           <img alt="" className="size-4 opacity-65 dark:invert" src="/nous-mark.png" />
           {version.version}
         </Popover.Trigger>
         <Popover.Portal>
           <Popover.Content
-            aria-label="Hermes Agent build"
+            aria-label="Nako Agent build"
             className="z-50 max-w-[calc(100vw-1rem)] rounded-lg border bg-popover px-3 py-2 text-xs shadow-md"
             side="top"
             sideOffset={6}
@@ -76,7 +76,7 @@ export function HermesVersion({ version }: { version: HermesBuild }) {
             onPointerEnter={(event) => { if (event.pointerType === "mouse") enter(); }}
             onPointerLeave={(event) => { if (event.pointerType === "mouse") exit(); }}
           >
-            <div className="mb-0.5 font-medium">Hermes Agent</div>
+            <div className="mb-0.5 font-medium">Nako Agent</div>
             <div className="break-all text-muted-foreground">{version.build}</div>
           </Popover.Content>
         </Popover.Portal>

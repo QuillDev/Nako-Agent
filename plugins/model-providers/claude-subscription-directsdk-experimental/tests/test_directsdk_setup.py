@@ -52,7 +52,7 @@ def test_core_finds_a_cli_that_is_only_in_an_install_prefix(tmp_path, monkeypatc
     from pathlib import Path
 
     import providers
-    from hermes_cli.auth import resolve_external_process_provider_credentials
+    from nako_cli.auth import resolve_external_process_provider_credentials
 
     binary = _install(tmp_path / ".local/bin")
     monkeypatch.delenv("CLAUDE_SUBSCRIPTION_DIRECTSDK_COMMAND", raising=False)
@@ -60,7 +60,7 @@ def test_core_finds_a_cli_that_is_only_in_an_install_prefix(tmp_path, monkeypatc
         monkeypatch.setenv(key, value)
     # Install and discover the plugin under the service environment, as such a backend starting up would.
     from conftest import isolate_home
-    home = tmp_path / "hermes-home"
+    home = tmp_path / "nako-home"
     root = Path(__file__).resolve().parents[1]
     shutil.copytree(root, home / "plugins" / "claude-subscription-directsdk-experimental",
                     ignore=shutil.ignore_patterns(".git", "tests", "evals", "__pycache__"))
@@ -111,7 +111,7 @@ PINNED_PICKER = [
     {"value": "haiku", "resolvedModel": "claude-haiku-4-5-20251001", "displayName": "Haiku", "description": "Haiku 4.5 · Fastest for quick answers"},
 ]
 # Models the pinned table has never heard of (fictitious on purpose): a plain + [1m] pair behind the
-# CLI's own `opus` alias, a plain-only id in a family Hermes guesses at 1M, and a [1m]-only id.
+# CLI's own `opus` alias, a plain-only id in a family Nako guesses at 1M, and a [1m]-only id.
 UNPINNED_PICKER = [
     {"value": "opus", "resolvedModel": "claude-opus-9", "displayName": "Opus", "description": "Opus 9 · Best for everyday, complex tasks"},
     {"value": "opus[1m]", "resolvedModel": "claude-opus-9[1m]", "displayName": "Opus (1M context)", "description": "Opus 9 with 1M context · Draws from usage credits · $5/$25 per Mtok"},
@@ -135,7 +135,7 @@ def test_setup_status_reports_login_and_models_from_the_cli(profile, tmp_path):
 
     models = profile.discover_models(command=command, env=env)
     ids = [m["id"] for m in models]
-    # Native picker rows are deduplicated to their Hermes route ids (opus and opus[1m] both -> opus 1M)
+    # Native picker rows are deduplicated to their Nako route ids (opus and opus[1m] both -> opus 1M)
     assert ids[:3] == ["claude-sonnet-5[1m]", "claude-opus-5-5[1m]", "claude-haiku-4-5-20251001"]
     # The label names the model: displayName when it carries the version, else the description before "·"
     assert [m["label"] for m in models[:3]] == ["Sonnet 5 (1M context)", "Opus 5.5", "Haiku 4.5"]
@@ -300,9 +300,9 @@ def test_privacy_flags_shrunk_picker_is_unioned_with_the_pinned_table(profile, t
     assert all(m["upstream_requests"] is None for m in models)
 
 
-def test_hermes_never_budgets_a_discovered_row_past_the_native_window(profile, tmp_path):
+def test_nako_never_budgets_a_discovered_row_past_the_native_window(profile, tmp_path):
     """Behind the relay native Claude Code runs a plain id within its 200K default and a [1m] id
-    within 1M. Left to itself Hermes sizes an id by family substring (claude-sonnet-5-9 -> 1M), so a
+    within 1M. Left to itself Nako sizes an id by family substring (claude-sonnet-5-9 -> 1M), so a
     plain unpinned row would let a conversation outgrow the window the native client enforces."""
     from agent.model_metadata import get_model_context_length
     models = _discover(profile, tmp_path, PINNED_PICKER + UNPINNED_PICKER)

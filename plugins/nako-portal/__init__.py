@@ -1,4 +1,4 @@
-"""The portal is a Hermes messaging platform, like Discord or Slack.
+"""The portal is a Nako messaging platform, like Discord or Slack.
 
 The portal itself (the web app, sign-in, push, and the hub that turns gateway
 traffic into what the chat UI shows) runs as its own process, `dashboard/serve.py`,
@@ -37,7 +37,7 @@ import uuid
 from contextlib import closing
 from pathlib import Path
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 PLUGIN = "nako-portal"
 
 
@@ -98,7 +98,7 @@ OWNER = "owner"
 # Notifications thread) must carry it too: a background process's wake is checked against it.
 PERSON = {"chat_name": "Nako", "user_id": OWNER, "user_name": "you"}
 INBOX_POLL = 2
-# How often the gateway half looks for turns Hermes runs without telling the adapter.
+# How often the gateway half looks for turns Nako runs without telling the adapter.
 TURN_SWEEP = 2
 # A turn's settled admission says how it went; the hub's words for those.
 TURN_OUTCOMES = {"completed": "success", "failed": "failure"}
@@ -142,9 +142,9 @@ def _portal(module):
 
 def _deliver(chat_id, text):
     """Out-of-process sends (cron with no gateway running) wait in the store for the adapter."""
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
 
-    store = _portal("store").Store(get_hermes_home() / "nako-portal" / "portal.db")
+    store = _portal("store").Store(get_nako_home() / "nako-portal" / "portal.db")
     try:
         return store.deliver(str(chat_id or HOME_CHANNEL), str(text))
     finally:
@@ -163,7 +163,7 @@ def _source(chat, profile=None, **fields):
 
 def _own_origins(session_store):
     """Give portal threads stored without their person (plugin releases before PERSON) the one
-    their messages carry. Hermes sets a thread's origin once, when it's created, and rebuilds a
+    their messages carry. Nako sets a thread's origin once, when it's created, and rebuilds a
     finished background process's wake from it; with no person on it the wake doesn't match the
     thread's last message and is refused (``admission_conflict``), so the agent never hears back."""
     import dataclasses
@@ -217,7 +217,7 @@ def _ensure_chat(session_store, chat=HOME_CHANNEL, title=CHAT_TITLE, profile=Non
 
 
 def _plugin_settings():
-    from hermes_cli.config import load_config
+    from nako_cli.config import load_config
 
     return load_config().get("plugins", {}).get("entries", {}).get(PLUGIN, {}).get("settings", {}) or {}
 
@@ -256,7 +256,7 @@ def _mesh(entry, home, origin=None):
     if hub:
         token = os.environ.get("NAKO_MESH_TOKEN") or _env_value(home, "NAKO_MESH_TOKEN")
         if not token:
-            raise RuntimeError("Set NAKO_MESH_TOKEN in .env to the token the hub's `hermes mesh add` printed")
+            raise RuntimeError("Set NAKO_MESH_TOKEN in .env to the token the hub's `nako mesh add` printed")
         hub = hub.rstrip("/")
         if not hub.endswith(MESH_PATH):
             hub += MESH_PATH
@@ -282,7 +282,7 @@ def _plugin_origin(entry):
         return done.stdout.strip() if done.returncode == 0 else ""
 
     source = str(entry.get("mesh_plugin_source") or "").strip()
-    from hermes_cli.plugins import get_bundled_plugins_dir
+    from nako_cli.plugins import get_bundled_plugins_dir
 
     if ROOT.resolve().parent == get_bundled_plugins_dir().resolve():
         return {
@@ -309,10 +309,10 @@ def _env_value(home, key):
 
 
 def _settings():
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
 
     entry = _plugin_settings()
-    home = get_hermes_home().resolve()
+    home = get_nako_home().resolve()
     port = int(entry.get("port") or DEFAULT_PORT)
     origin = str(entry.get("origin") or "").strip().rstrip("/")
     mesh = _mesh(entry, home, origin if origin.startswith("https://") else None)
@@ -335,10 +335,10 @@ def _settings():
     return home, origin.rstrip("/"), port, contact, apps
 
 
-def _hermes_build():
+def _nako_build():
     """Identify the gateway's booted revision, not the checkout's current HEAD."""
     try:
-        from hermes_cli.version_info import get_version_info
+        from nako_cli.version_info import get_version_info
     except ImportError:
         return None
     info = get_version_info()
@@ -346,13 +346,13 @@ def _hermes_build():
         return None
     full = info.derived_version
     if info.commit and not info.dirty:
-        import hermes_cli
+        import nako_cli
 
-        # Hermes's display version measures distance from stable, even on a tagged canary.
+        # Nako's display version measures distance from stable, even on a tagged canary.
         try:
             tags = subprocess.run(
                 ["git", "tag", "--points-at", info.commit, "--list", f"v{info.base_version}+canary.*"], check=False,
-                cwd=Path(hermes_cli.__file__).resolve().parent,
+                cwd=Path(nako_cli.__file__).resolve().parent,
                 capture_output=True, text=True, timeout=3,
             ).stdout.splitlines()
         except (OSError, subprocess.SubprocessError):
@@ -367,9 +367,9 @@ def _server_config(home, origin, port, contact, apps):
     settings, so a server started from anything else is replaced."""
     data = home / "nako-portal"
     # `home`: whose session store the server reads chats from while no gateway is connected.
-    # `hermes`: the command the server runs to restart or update this machine's agent.
+    # `nako`: the command the server runs to restart or update this machine's agent.
     # `agent`: what that agent calls itself, which names its update marker and background service.
-    config = {"data": str(data), "home": str(home), "hermes": _hermes_command(), "agent": AGENT, "origin": origin, "port": port, "contact": contact, **apps}
+    config = {"data": str(data), "home": str(home), "nako": _nako_command(), "agent": AGENT, "origin": origin, "port": port, "contact": contact, **apps}
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode())
     for path in SERVER_CODE:
         digest.update(path.name.encode() + b"\0" + path.read_bytes())
@@ -381,7 +381,7 @@ def _server_config(home, origin, port, contact, apps):
     return path, config
 
 
-def _hermes_command():
+def _nako_command():
     """The agent's command as this machine runs it (argv), for the server; None if not found."""
     found = shutil.which(AGENT)
     return [found] if found else None
@@ -392,7 +392,7 @@ def _spawn_server(config_path, data):
     unit when the gateway is a systemd service (which kills the service's whole cgroup on
     stop), otherwise its own session."""
     command = [sys.executable, str(SERVER), str(config_path)]
-    # The gateway's interpreter finds aiohttp and cryptography through the import path Hermes set
+    # The gateway's interpreter finds aiohttp and cryptography through the import path Nako set
     # up at launch, not through its own site-packages; the server gets the same path.
     path = os.pathsep.join(p for p in sys.path if p and os.path.isabs(p) and os.path.isdir(p))
     if os.environ.get("INVOCATION_ID") and shutil.which("systemd-run"):
@@ -432,8 +432,8 @@ def _local_token(data):
     return path.read_text(encoding="utf-8-sig").strip()
 
 
-class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
-    """The hub's view of Hermes: the gateway's session store and this adapter's inbound path.
+class NakoBackend(_providers.ProviderBackend, _mcp.MCPBackend):
+    """The hub's view of Nako: the gateway's session store and this adapter's inbound path.
 
     The portal shows one profile at a time (Settings). Its chats, history and new threads all
     come from that profile's own home and state.db, and its turns run as that profile, so
@@ -471,7 +471,7 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
             return None
         store = resolve()
         if store is None:
-            raise RuntimeError("Hermes session storage is temporarily unavailable")
+            raise RuntimeError("Nako session storage is temporarily unavailable")
         return store
 
     def _list_sessions(self, *, source=None, exclude_sources=(), limit, offset=0,
@@ -496,8 +496,8 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
     def homes(self):
         """The profiles this gateway serves, by name. Without multiplexing it serves only its own."""
         try:
-            from hermes_cli.config import load_config
-            from hermes_cli.profiles import profiles_to_serve
+            from nako_cli.config import load_config
+            from nako_cli.profiles import profiles_to_serve
 
             multiplex = bool((load_config().get("gateway") or {}).get("multiplex_profiles"))
             served = dict(profiles_to_serve(multiplex=multiplex)) if multiplex else {}
@@ -525,15 +525,15 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
         return self.homes().get(profile or DEFAULT_PROFILE, self.root)
 
     def _scoped(self, fn, *args, profile=None, home=None):
-        """Run ``fn`` with Hermes pointed at one profile's home, so the store reads its state.db.
+        """Run ``fn`` with Nako pointed at one profile's home, so the store reads its state.db.
         Reach ``self.db`` inside ``fn``: it resolves to the profile's store only once scoped."""
-        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+        from nako_constants import reset_nako_home_override, set_nako_home_override
 
-        token = set_hermes_home_override(str(home if home is not None else self._home(profile)))
+        token = set_nako_home_override(str(home if home is not None else self._home(profile)))
         try:
             return fn(*args)
         finally:
-            reset_hermes_home_override(token)
+            reset_nako_home_override(token)
 
     def _read(self, sql, args=(), profile=None):
         state = self._home(profile) / "state.db"
@@ -545,9 +545,9 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
     def _origin(self):
         """The profile whose work is calling in: a turn or cron run is scoped to its profile's
         home; a request from the web app isn't scoped and means the profile on screen."""
-        from hermes_constants import get_hermes_home_override
+        from nako_constants import get_nako_home_override
 
-        override = get_hermes_home_override()
+        override = get_nako_home_override()
         if override:
             here = Path(override).resolve()
             for name, home in self.homes().items():
@@ -615,14 +615,14 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
         ]
 
     def outside_sources(self):
-        """The other ways in this profile has sessions from, by Hermes's source name."""
+        """The other ways in this profile has sessions from, by Nako's source name."""
         try:
             rows = self._read(
                 "SELECT DISTINCT source FROM sessions WHERE source IS NOT NULL AND source NOT IN (?, ?) "
                 "AND COALESCE(hidden, 0)=0 ORDER BY source",
                 NOT_OUTSIDE,
             )
-        except sqlite3.OperationalError:  # a Hermes from before hidden sessions
+        except sqlite3.OperationalError:  # a Nako from before hidden sessions
             rows = self._read(
                 "SELECT DISTINCT source FROM sessions WHERE source IS NOT NULL AND source NOT IN (?, ?) ORDER BY source",
                 NOT_OUTSIDE,
@@ -630,14 +630,14 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
         return [source for (source,) in rows]
 
     def outside_running(self):
-        """Those sessions with a turn Hermes is running right now, by the admission it runs."""
+        """Those sessions with a turn Nako is running right now, by the admission it runs."""
         try:
             rows = self._read(
                 "SELECT DISTINCT s.id FROM sessions s JOIN session_admissions a ON a.target_session_id = s.id "
                 "WHERE a.status='started' AND s.source NOT IN (?, ?)",
                 NOT_OUTSIDE,
             )
-        except sqlite3.OperationalError:  # a Hermes from before the durable queue
+        except sqlite3.OperationalError:  # a Nako from before the durable queue
             return []
         return sorted(sid for (sid,) in rows)
 
@@ -657,7 +657,7 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
             store = self._persistence()
             db = self.db if store is None else None
             # Reading and projecting a long transcript takes the better part of a second, and every
-            # open, refresh and older page reads it again. Hermes's revision moves on any append,
+            # open, refresh and older page reads it again. Nako's revision moves on any append,
             # undo, compaction or in-place rewrite, so the last projection stands while it holds.
             if store is not None:
                 revision = store.messages.conversation_revision(session, include_lineage=True)
@@ -675,7 +675,7 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
                     # Display reads include the turns that compaction summarized.
                     try:
                         history = db.get_messages_as_conversation(session, include_ancestors=True, include_row_ids=True, include_compacted=True)
-                    except TypeError:  # a Hermes from before display reads
+                    except TypeError:  # a Nako from before display reads
                         history = db.get_messages_as_conversation(session, include_ancestors=True, include_row_ids=True)
                     offline = _portal("offline")
                     messages = offline.with_results(_history_to_messages(offline.original_user_messages(home, history), profile_home=home), history)
@@ -758,8 +758,8 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
         return await self.restart_thread(row, 'check') if resume else 'Pause requested'
 
     def running_turns(self):
-        """Every portal chat with a turn Hermes is running right now, in every served profile, by
-        the admission that turn runs: Hermes's own record, so a turn it starts without the adapter
+        """Every portal chat with a turn Nako is running right now, in every served profile, by
+        the admission that turn runs: Nako's own record, so a turn it starts without the adapter
         hearing (a queued message run after the one before it, one held over a restart) counts."""
         running = {}
         for profile in self.homes():
@@ -770,7 +770,7 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
                     (),
                     profile,
                 )
-            except sqlite3.OperationalError:  # a Hermes from before the durable queue: hooks cover every turn
+            except sqlite3.OperationalError:  # a Nako from before the durable queue: hooks cover every turn
                 continue
             running.update(rows)
         return running
@@ -829,7 +829,7 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
 
     def _adopt(self, chat, session):
         """Move another surface's chat (a Desktop thread) into a new portal thread, keeping its id
-        and transcript: the same repoint Hermes's own /handoff does for a messaging platform."""
+        and transcript: the same repoint Nako's own /handoff does for a messaging platform."""
         rows = self._read(
             "SELECT source, ended_at, COALESCE(archived, 0) FROM sessions WHERE id=?", (session,)
         )
@@ -886,7 +886,7 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
 
     def _carrier(self, profile):
         """The adapter the gateway accepts a turn in ``profile`` from: the one that profile owns.
-        Hermes refuses a turn whose profile isn't its adapter's owner, so another profile's
+        Nako refuses a turn whose profile isn't its adapter's owner, so another profile's
         message goes through the portal adapter that profile loaded. Without one (a profile
         that doesn't load this plugin) it stays with this adapter, as before."""
         if profile:
@@ -1016,8 +1016,8 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
         return client.use_reset(provider, account=account, force=force)
 
     def model_options(self, provider, model):
-        from hermes_cli.config import get_compatible_custom_providers, load_config
-        from hermes_cli.model_switch import switch_model
+        from nako_cli.config import get_compatible_custom_providers, load_config
+        from nako_cli.model_switch import switch_model
 
         controls = sys.modules.get("model_controls")
         if controls is None:
@@ -1050,13 +1050,13 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
         return await self._model_client().set_session_model(session, body)
 
     def sign_off_model(self):
-        from hermes_cli.config import load_config
+        from nako_cli.config import load_config
 
         task = (load_config().get("auxiliary") or {}).get("portal_signoff") or {}
         return {"provider": str(task.get("provider") or "auto"), "model": str(task.get("model") or "")}
 
     def set_sign_off_model(self, provider, model):
-        from hermes_cli.config import set_config_value
+        from nako_cli.config import set_config_value
 
         set_config_value("auxiliary.portal_signoff.provider", provider)
         set_config_value("auxiliary.portal_signoff.model", model)
@@ -1068,7 +1068,7 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
         enable_session_yolo(self._scoped(lambda: self.store.get_or_create_session(source, touch_activity=False).session_key))
 
     def processes(self, session):
-        """Background processes a chat's turns started (terminal ``background=true``), from Hermes's
+        """Background processes a chat's turns started (terminal ``background=true``), from Nako's
         process registry, which lives in this gateway process. A portal thread's processes carry its
         gateway key, ``<profile>:portal:dm:<chat>``; finished ones stay listed for a while."""
         from tools.process_registry import process_registry
@@ -1120,7 +1120,7 @@ class HermesBackend(_providers.ProviderBackend, _mcp.MCPBackend):
 
     def commands(self):
         from agent.skill_commands import get_interactive_skill_commands
-        from hermes_cli import commands as registry
+        from nako_cli import commands as registry
 
         listed = [
             {"name": f"/{cmd.name}", "description": registry._build_description(cmd), "skill": False}
@@ -1141,15 +1141,15 @@ FALLBACK_TOOLSETS = [f"{AGENT}-cli"]
 def _fallback_toolsets(home=None):
     """Tools for a portal turn in a profile that doesn't load this plugin.
 
-    Hermes builds a plugin platform's default toolset (`hermes-portal`) only where the plugin is
+    Nako builds a plugin platform's default toolset (`nako-portal`) only where the plugin is
     registered, so in a profile that doesn't load it the bundle is empty and portal turns run
     with no tools. Such a profile gets the standard full toolset instead. A profile that sets
     `platform_toolsets.portal`, or where the bundle exists, is left alone (None)."""
-    from hermes_cli.config import load_config
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from nako_cli.config import load_config
+    from nako_constants import reset_nako_home_override, set_nako_home_override
     from toolsets import resolve_toolset
 
-    token = set_hermes_home_override(str(home)) if home else None
+    token = set_nako_home_override(str(home)) if home else None
     try:
         if "portal" in (load_config().get("platform_toolsets") or {}):
             return None
@@ -1159,11 +1159,11 @@ def _fallback_toolsets(home=None):
         return None
     finally:
         if token is not None:
-            reset_hermes_home_override(token)
+            reset_nako_home_override(token)
 
 
 def _model_providers():
-    """Models Hermes can run on with the credentials in scope, grouped by provider."""
+    """Models Nako can run on with the credentials in scope, grouped by provider."""
     api = sys.modules.get("model_controls")
     return api.providers() if api is not None else []
 
@@ -1202,12 +1202,12 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
 
 
 async def _thread_ready(chat, timeout=None):
-    """`hermes send` mirrors the post into the chat's thread as soon as this returns, and the
+    """`nako send` mirrors the post into the chat's thread as soon as this returns, and the
     gateway opens a Reviews thread only when its first post arrives, so wait for it to be there.
     Without a gateway running it never appears; the post still goes out once one starts."""
-    from hermes_constants import get_hermes_home
+    from nako_constants import get_nako_home
 
-    state = get_hermes_home() / "state.db"
+    state = get_nako_home() / "state.db"
     deadline = time.monotonic() + (CHANNEL_WAIT if timeout is None else timeout)
     while time.monotonic() < deadline:
         if state.exists():
@@ -1221,8 +1221,8 @@ async def _thread_ready(chat, timeout=None):
     return False
 
 
-# A portal chat id as `hermes send --to portal:<id>` and cron name it: the named threads, a new
-# thread, or a thread's own id. Anything else falls through to Hermes's channel directory.
+# A portal chat id as `nako send --to portal:<id>` and cron name it: the named threads, a new
+# thread, or a thread's own id. Anything else falls through to Nako's channel directory.
 TARGET = re.compile(r"^(?:new|[0-9a-f]{16}|" + "|".join(map(re.escape, CHANNELS)) + r")$")
 
 
@@ -1287,7 +1287,7 @@ def _secrets_changed():
 
 
 def _mesh_tools():
-    """The mesh tools and `hermes mesh` command (mesh_tools.py), loaded once under a private name."""
+    """The mesh tools and `nako mesh` command (mesh_tools.py), loaded once under a private name."""
     name = "nako_portal_mesh_tools"
     if name not in sys.modules:
         loaded = _load_sibling(name, "mesh_tools.py")
@@ -1309,13 +1309,13 @@ def _groups_tools():
 
 def _adapter(config):
     return _adapter_module._adapter(config, _adapter_module.AdapterRuntime(
-        backend=HermesBackend,
+        backend=NakoBackend,
         settings=_settings,
         local_token=_local_token,
         server_config=_server_config,
         spawn_server=_spawn_server,
         portal=_portal,
-        hermes_build=_hermes_build,
+        nako_build=_nako_build,
         forward_inbox=_forward_inbox,
         live_tools=_LIVE_TOOLS,
         secrets_api=_secrets_api,
@@ -1336,7 +1336,7 @@ def _adapter(config):
 
 def register(ctx):
     _quiet_display_defaults()
-    # Other machines in this portal's mesh: the agent's tools for them and `hermes mesh`.
+    # Other machines in this portal's mesh: the agent's tools for them and `nako mesh`.
     tools = _mesh_tools()
     if hasattr(ctx, "register_tool"):
         tools.register(ctx)

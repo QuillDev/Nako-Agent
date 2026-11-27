@@ -104,7 +104,7 @@ def _extract_image_block(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _extract_images_from_content(content: Any) -> list[dict[str, Any]]:
-    """Collect ACP image blocks from OpenAI list content or Hermes _multimodal envelopes."""
+    """Collect ACP image blocks from OpenAI list content or Nako _multimodal envelopes."""
     if isinstance(content, dict) and content.get("_multimodal"):
         content = content.get("content")
     if not isinstance(content, list):
@@ -340,7 +340,7 @@ def _format_messages_as_prompt(
     max_prompt_chars: int = _MAX_PROMPT_CHARS,
     max_prompt_bytes: int = _MAX_PROMPT_BYTES,
 ) -> str:
-    """Assemble Hermes message history, system prompt, and tool schemas into a canonical prompt.
+    """Assemble Nako message history, system prompt, and tool schemas into a canonical prompt.
 
     ``rules_in_workspace``: the preamble and system prompt already live in the workspace GEMINI.md
     (see ``soul.py``), so the stdin turn carries only tools and conversation.

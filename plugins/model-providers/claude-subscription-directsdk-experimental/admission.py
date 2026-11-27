@@ -26,7 +26,7 @@ LOOKBACK = 20
 MAX_BREAKPOINTS = 4
 # Longest byte silence after the headers before the stream counts as dead. Anthropic documents no ping
 # cadence ("any number of ping events"); this is native's own byte-level watchdog against api.anthropic.com
-# (180 s, native 2.1.263-2.1.286). Behind this relay native widens its watchdog to 300 s, the same as Hermes'
+# (180 s, native 2.1.263-2.1.286). Behind this relay native widens its watchdog to 300 s, the same as Nako'
 # compression floor and stall detector, so a silent upstream surfaced as a stall instead of this error.
 UPSTREAM_IDLE_SECONDS = 180
 # Probe a quiet upstream socket so a dead path fails in ~30 s instead of waiting on TCP retransmits.
@@ -98,7 +98,7 @@ def keepalive(sock):
 
 
 class QueriedTurnMismatch(ValueError):
-    """The native request could not be reconciled with Hermes' tool results."""
+    """The native request could not be reconciled with Nako' tool results."""
 
 
 # Winsock: shutdown() does not wake a recv blocked in another thread; closesocket() cancels pending calls.
@@ -125,10 +125,10 @@ def _breakpoints(value):
 
 
 def _frame_first(messages, queried):
-    """Send Hermes' first user turn without the context native prepends to it (#77, #195).
+    """Send Nako' first user turn without the context native prepends to it (#77, #195).
 
     On the opening request native puts its per-request context (the account-email reminder,
-    and any CLAUDE.md or auto-memory contents it loaded) *before* the frame Hermes queried; on
+    and any CLAUDE.md or auto-memory contents it loaded) *before* the frame Nako queried; on
     every later request that turn is replayed without it, and later turns' prepended context
     is already dropped by ``stable_request_context``. Kept, that text sat in the user's turn,
     where Claude read Claude Code's own notes as an injection attempt by the user (#195), and
@@ -325,7 +325,7 @@ def pin_message_breakpoint(payload, queried):
     tool round re-writes the whole history (issue #14, second cause).
 
     What does recur is known without reading native's text: everything through the last
-    assistant message, plus the leading blocks of the newest turn that equal the frame Hermes
+    assistant message, plus the leading blocks of the newest turn that equal the frame Nako
     queried. The first block native added or changed ends that span. When that block is a
     tool_result (parallel calls, native's reminder on the last result), a breakpoint on the
     unchanged results before it measured no cache hit even though they replay byte-identical
@@ -382,7 +382,7 @@ def pin_message_breakpoint(payload, queried):
 def drop_message_breakpoints(payload):
     """Remove native's message ``cache_control`` marks from a tool-less one-shot.
 
-    Hermes' auxiliary calls (compression summaries, titles) send one user turn and no tools, and
+    Nako' auxiliary calls (compression summaries, titles) send one user turn and no tools, and
     nothing replays that turn: each summary carries a different transcript and, for LCM-style
     summarizers, a per-call nonce. Native still marks the turn for its 1-hour cache, so every such
     call paid a cache write (2x input) that no later request read. Message marks go; system and
@@ -409,7 +409,7 @@ def stream_tool_input(payload):
 
     Native turns fine-grained tool streaming on only for a first-party base URL, so behind this relay its
     tools go out without the flag and the API holds a large argument (a whole file in one ``write_file``)
-    until it is complete. Hermes' stall detector then sees minutes of silence and cancels a healthy call.
+    until it is complete. Nako' stall detector then sees minutes of silence and cancels a healthy call.
     A value native already set wins, and a payload with no tools or that does not parse forwards as is."""
     try:
         body = json.loads(payload)
@@ -438,7 +438,7 @@ def restore_queried_turn(payload, queried):
         return payload
 
     def unmatched():
-        raise QueriedTurnMismatch('Native request does not uniquely match Hermes tool results')
+        raise QueriedTurnMismatch('Native request does not uniquely match Nako tool results')
 
     def bare_text(block):
         return (isinstance(block, dict) and set(block) == {'type', 'text'}
@@ -601,7 +601,7 @@ class Capture:
             except ValueError:
                 # Streamed tool input is not validated (``eager_input_streaming``): a reply cut off at
                 # max_tokens ends mid-argument. The call is dropped at message_stop, never run with guessed
-                # arguments, and the stop reason (finish ``length``) tells Hermes the reply was cut short.
+                # arguments, and the stop reason (finish ``length``) tells Nako the reply was cut short.
                 self.unparsed.append(index)
 
     def _delta(self, event):
@@ -660,7 +660,7 @@ class _Server(HTTPServer):
     ("Unsupported method") via send_error(); native never reads that body and disconnects
     immediately, so the write raises BrokenPipeError/ConnectionResetError while send_error() is
     still writing it. The 501 itself is expected and harmless to the real request (see the
-    archived hermes-plugin-claude-subscription-directsdk#17); the only bug worth fixing is
+    archived nako-plugin-claude-subscription-directsdk#17); the only bug worth fixing is
     socketserver's default handle_error() dumping a scary-looking traceback to stderr for this
     exact, harmless, every-turn race. Anything else still gets the real traceback.
     """
@@ -806,7 +806,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(error, dict) or error.get('type') != 'authentication_error':
             return False
         gate.auth_retry_used = True
-        gate.error_body = b''  # The retry's own answer is the one Hermes reports.
+        gate.error_body = b''  # The retry's own answer is the one Nako reports.
         return True
 
     def do_POST(self):
@@ -819,7 +819,7 @@ class Handler(BaseHTTPRequestHandler):
         with gate.lock:
             if gate.cancelled or (gate.used and not self._allows_auth_retry()):
                 gate.denied += 1
-                body = b'{"type":"error","error":{"type":"invalid_request_error","message":"HERMES_MODEL_ADMISSION_CONSUMED"}}'
+                body = b'{"type":"error","error":{"type":"invalid_request_error","message":"NAKO_MODEL_ADMISSION_CONSUMED"}}'
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))

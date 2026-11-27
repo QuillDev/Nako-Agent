@@ -1,10 +1,10 @@
 import type { TitleFetchTarget } from './link-title-guard'
 import { decodeWebText } from './web-text-decoder'
 
-const CONTENT_TYPE_MARK = 'hermes-content-type:'
-const URL_EFFECTIVE_MARK = 'hermes-url-effective:'
-const URL_REDIRECT_MARK = 'hermes-url-redirect:'
-const HTTP_CODE_MARK = 'hermes-http-code:'
+const CONTENT_TYPE_MARK = 'nako-content-type:'
+const URL_EFFECTIVE_MARK = 'nako-url-effective:'
+const URL_REDIRECT_MARK = 'nako-url-redirect:'
+const HTTP_CODE_MARK = 'nako-http-code:'
 
 // The curl tier follows redirects manually (#126885) so every hop can be
 // re-admitted by the destination guard before it is dialed; %{redirect_url}

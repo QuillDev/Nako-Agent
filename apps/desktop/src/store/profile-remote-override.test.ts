@@ -12,7 +12,7 @@ import {
 const getConnectionConfig = vi.fn()
 
 beforeEach(() => {
-  Object.defineProperty(window, 'hermesDesktop', {
+  Object.defineProperty(window, 'nakoDesktop', {
     configurable: true,
     value: { getConnectionConfig }
   })
@@ -27,9 +27,9 @@ afterEach(() => {
 
 describe('remoteHostLabel', () => {
   it('keeps a non-default port and drops default ones', () => {
-    expect(remoteHostLabel('https://hermes.example.com:8443/x')).toBe('hermes.example.com:8443')
-    expect(remoteHostLabel('https://hermes.example.com:443')).toBe('hermes.example.com')
-    expect(remoteHostLabel('http://hermes.example.com:80')).toBe('hermes.example.com')
+    expect(remoteHostLabel('https://nako.example.com:8443/x')).toBe('nako.example.com:8443')
+    expect(remoteHostLabel('https://nako.example.com:443')).toBe('nako.example.com')
+    expect(remoteHostLabel('http://nako.example.com:80')).toBe('nako.example.com')
   })
 
   it('returns empty for unparseable input', () => {

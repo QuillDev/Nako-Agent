@@ -1,4 +1,4 @@
-"""Hermes platform adapter, secret request surface, and display defaults."""
+"""Nako platform adapter, secret request surface, and display defaults."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-log = logging.getLogger("hermes.portal")
+log = logging.getLogger("nako.portal")
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class AdapterRuntime:
     server_config: Callable
     spawn_server: Callable
     portal: Callable
-    hermes_build: Callable
+    nako_build: Callable
     forward_inbox: Callable
     live_tools: dict
     secrets_api: Callable
@@ -42,7 +42,7 @@ class AdapterRuntime:
 
 class SecretSurface:
     """The portal as the place agent-secrets asks for a secret: a card with a masked field in the
-    chat that asked. The answer comes back through `HermesBackend.resolve`."""
+    chat that asked. The answer comes back through `NakoBackend.resolve`."""
 
     def __init__(self, adapter, loop):
         self.adapter = adapter
@@ -54,7 +54,7 @@ class SecretSurface:
         try:
             from gateway.session_context import get_session_env
 
-            chat = get_session_env("HERMES_SESSION_CHAT_ID", "")
+            chat = get_session_env("NAKO_SESSION_CHAT_ID", "")
         except ImportError:
             chat = ""
         backend = self.adapter.backend
@@ -100,12 +100,12 @@ def _adapter(config, runtime: AdapterRuntime):
             self._http = None
             self._spawned = 0.0
             # Chats whose turn the gateway announced through the processing hooks, and the turns
-            # the sweep announced itself because Hermes ran them without the hooks (chat -> admission).
+            # the sweep announced itself because Nako ran them without the hooks (chat -> admission).
             self._hooked = set()
             self._swept = {}
 
         # One portal per machine: the default profile's adapter runs the link to the server and
-        # shows every served profile. Hermes still gives each other profile that loads this
+        # shows every served profile. Nako still gives each other profile that loads this
         # plugin its own portal adapter, and only that adapter may carry the profile's turns
         # (the gateway refuses a turn whose profile isn't its adapter's owner). So such a
         # secondary never dials the server; the primary hands it that profile's messages, and it
@@ -147,7 +147,7 @@ def _adapter(config, runtime: AdapterRuntime):
                     token,
                     config["code"],
                     self.backend,
-                    hermes_build=await asyncio.to_thread(runtime.hermes_build),
+                    nako_build=await asyncio.to_thread(runtime.nako_build),
                     on_missing=start_server,
                     on_stale=lambda: start_server(stale=True),
                 )
@@ -292,7 +292,7 @@ def _adapter(config, runtime: AdapterRuntime):
             await self._hub("turn_finished", event.source.chat_id, getattr(outcome, "value", str(outcome)))
 
         async def _sweep_turns(self):
-            """Hermes runs some turns without the processing hooks: a message queued behind a busy
+            """Nako runs some turns without the processing hooks: a message queued behind a busy
             turn runs from its durable queue, and so does one held over a gateway restart. Read
             what it is running and tell the hub, so those chats show as working and finish with a
             reply and a ping like any other turn. A turn is announced once it has run a whole sweep,
@@ -377,7 +377,7 @@ QUIET_DISPLAY = {"tool_progress": "off", "interim_assistant_messages": False}
 
 
 def _quiet_display_defaults():
-    """Hermes's named display tiers can't drop just these two (the low tier also stops streaming),
+    """Nako's named display tiers can't drop just these two (the low tier also stops streaming),
     so the portal's built-in defaults are the high tier minus them. config.yaml still overrides."""
     try:
         from gateway import display_config

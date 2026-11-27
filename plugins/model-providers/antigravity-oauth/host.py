@@ -10,10 +10,10 @@ from __future__ import annotations
 
 def _name() -> str:
     try:
-        import hermes_constants
+        import nako_constants
     except ImportError:  # the flat source tree under test, with no core on sys.path
-        return "hermes"
-    return hermes_constants.__name__.partition("_")[0]
+        return "nako"
+    return nako_constants.__name__.partition("_")[0]
 
 
 NAME = _name()

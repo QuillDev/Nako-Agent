@@ -83,7 +83,7 @@ describe("sidebar control target sizes (WCAG 2.5.8, issue #70983)", () => {
     // runtime can leave localStorage undefined while ThemeProvider reads it
     // on mount. Stub it, as ChatPage.test.tsx does.
     vi.stubGlobal("localStorage", memoryStorage());
-    Object.defineProperty(window, "__HERMES_AUTH_REQUIRED__", {
+    Object.defineProperty(window, "__NAKO_AUTH_REQUIRED__", {
       configurable: true,
       value: true,
     });
@@ -141,7 +141,7 @@ describe("sidebar control target sizes (WCAG 2.5.8, issue #70983)", () => {
     expect(hasClass(btn!, "py-1")).toBe(false);
   });
 
-  it("Nous Research footer link renders a >=24px hit area (min-h 24px)", async () => {
+  it("Quill Dev footer link renders a >=24px hit area (min-h 24px)", async () => {
     await render(
       <I18nProvider>
         <SidebarFooter status={null} />
