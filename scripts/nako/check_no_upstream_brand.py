@@ -39,6 +39,11 @@ _HOST_TEXT_RE = re.compile(
 )
 
 ALLOWED_CONTENT_FILES = frozenset({"README.md"})
+_BRAND_LOWER = _UPSTREAM_BRAND_BYTES.lower()
+_ORG_PREFIX_LOWER = _UPSTREAM_ORG_SLUG_BYTES[:4].lower()
+_ORG_SLUG_LOWER = _UPSTREAM_ORG_SLUG_BYTES.lower()
+_HOST_AGENT_NEEDLE = b"agent." + _ORG_SLUG_LOWER + b".com"
+_HOST_PAGES_NEEDLE = _ORG_SLUG_LOWER + b".github.io"
 
 
 def _is_license_file(rel: str) -> bool:
@@ -61,12 +66,9 @@ def _repo_root(explicit: str | None) -> Path:
     return Path(proc.stdout.strip())
 
 
-def _list_files(repo: Path, include_untracked: bool) -> list[str]:
-    cmd = ["git", "-C", str(repo), "ls-files", "-z", "--cached"]
-    if include_untracked:
-        cmd.extend(["--others", "--exclude-standard"])
+def _git_ls_files(repo: Path, *extra_args: str) -> list[str]:
     proc = subprocess.run(
-        cmd,
+        ["git", "-C", str(repo), "ls-files", "-z", *extra_args],
         capture_output=True,
         stdin=subprocess.DEVNULL,
         check=False,
@@ -77,13 +79,97 @@ def _list_files(repo: Path, include_untracked: bool) -> list[str]:
     return [entry for entry in raw.split("\0") if entry]
 
 
+def _list_files(repo: Path, include_untracked: bool) -> list[str]:
+    args = ["--cached", "--others", "--exclude-standard"] if include_untracked else ["--cached"]
+    return _git_ls_files(repo, *args)
+
+
+def _git_grep_candidates(repo: Path) -> set[str]:
+    """Tracked working-tree files containing any upstream brand/org byte needle."""
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "grep",
+            "--no-recurse-submodules",
+            "-a",
+            "-i",
+            "-l",
+            "-F",
+            "-z",
+            "-e",
+            _UPSTREAM_BRAND,
+            "-e",
+            _UPSTREAM_ORG,
+            "-e",
+            _UPSTREAM_ORG_SLUG,
+        ],
+        capture_output=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        check=False,
+    )
+    if proc.returncode not in (0, 1):
+        raise RuntimeError(f"git grep failed: {proc.stderr.decode('utf-8', 'replace').strip()}")
+    raw = proc.stdout.decode("utf-8", "surrogateescape")
+    return {entry for entry in raw.split("\0") if entry}
+
+
+def _git_ls_tracked_and_symlinks(repo: Path) -> tuple[list[str], set[str]]:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "-s", "-z"],
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"git ls-files failed: {proc.stderr.decode('utf-8', 'replace').strip()}")
+    raw = proc.stdout.decode("utf-8", "surrogateescape")
+    files: list[str] = []
+    symlinks: set[str] = set()
+    for entry in raw.split("\0"):
+        if not entry:
+            continue
+        meta, sep, path = entry.partition("\t")
+        if not sep:
+            continue
+        files.append(path)
+        if meta.startswith("120000 "):
+            symlinks.add(path)
+    return files, symlinks
+
+
 def check_repo(repo: Path, include_untracked: bool = True) -> list[str]:
     violations: list[str] = []
-    files = _list_files(repo, include_untracked=include_untracked)
+    tracked, symlinks = _git_ls_tracked_and_symlinks(repo)
+    untracked = _git_ls_files(repo, "--others", "--exclude-standard") if include_untracked else []
+    files = tracked + untracked if untracked else tracked
+    candidates = _git_grep_candidates(repo) if tracked else set()
+    if untracked:
+        candidates.update(untracked)
+        for rel in untracked:
+            if os.path.islink(repo / rel):
+                symlinks.add(rel)
+
+    any_path_hit = bool(files) and bool(_TEXT_RE.search("\0".join(files)))
 
     for rel in files:
-        if _TEXT_RE.search(rel):
+        if any_path_hit and _TEXT_RE.search(rel):
             violations.append(f"path: {rel}")
+
+        if rel in symlinks:
+            full = repo / rel
+            if os.path.islink(full):
+                target = os.readlink(full)
+                if _TEXT_RE.search(target):
+                    violations.append(f"symlink: {rel} -> {target}")
+            continue
+
+        if rel not in candidates or rel in ALLOWED_CONTENT_FILES:
+            continue
 
         full = repo / rel
         if os.path.islink(full):
@@ -91,18 +177,23 @@ def check_repo(repo: Path, include_untracked: bool = True) -> list[str]:
             if _TEXT_RE.search(target):
                 violations.append(f"symlink: {rel} -> {target}")
             continue
-
         if not full.is_file():
             continue
 
-        if rel in ALLOWED_CONTENT_FILES:
+        data = full.read_bytes()
+        lowered = data.lower()
+        has_brand_needle = _BRAND_LOWER in lowered
+        has_org_prefix = _ORG_PREFIX_LOWER in lowered
+        if not (has_brand_needle or has_org_prefix):
             continue
 
-        data = full.read_bytes()
         check_org = not _is_license_file(rel)
-        hit_brand = bool(_BYTES_RE.search(data))
-        hit_host = bool(_HOST_BYTES_RE.search(data))
-        hit_org = check_org and bool(_ORG_BYTES_RE.search(data))
+        hit_brand = has_brand_needle
+        hit_host = (
+            (_HOST_AGENT_NEEDLE in lowered or _HOST_PAGES_NEEDLE in lowered)
+            and bool(_HOST_BYTES_RE.search(data))
+        )
+        hit_org = check_org and has_org_prefix and bool(_ORG_BYTES_RE.search(data))
         if not (hit_brand or hit_host or hit_org):
             continue
 

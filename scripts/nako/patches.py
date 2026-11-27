@@ -127,17 +127,17 @@ def current_branch(repo: Path) -> str:
     return proc.stdout.strip()
 
 
-def check_branch_worktree(repo: Path, branch: str) -> Path | None:
+def check_branch_worktree(repo: Path, branch: str, allowed_wt: Path | None = None) -> Path | None:
     """Return the other worktree path if `branch` is checked out elsewhere."""
     proc = run_git(repo, "worktree", "list", "--porcelain")
     target_ref = f"refs/heads/{branch}"
     current_wt: Path | None = None
-    repo_resolved = repo.resolve()
+    allowed_resolved = (allowed_wt or repo).resolve()
     for line in proc.stdout.splitlines():
         if line.startswith("worktree "):
             current_wt = Path(line[len("worktree "):]).resolve()
         elif line.startswith("branch ") and current_wt is not None:
-            if line[len("branch "):] == target_ref and current_wt != repo_resolved:
+            if line[len("branch "):] == target_ref and current_wt != allowed_resolved:
                 return current_wt
         elif not line.strip():
             current_wt = None
@@ -145,14 +145,22 @@ def check_branch_worktree(repo: Path, branch: str) -> Path | None:
 
 
 def list_patches(repo: Path, base_ref: str = "upstream/main", branch: str = "HEAD") -> list[PatchInfo]:
-    proc = run_git(repo, "rev-list", "--reverse", f"{base_ref}..{branch}")
-    shas = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    proc = run_git(
+        repo,
+        "log",
+        "--reverse",
+        "--no-renames",
+        "--name-only",
+        "-z",
+        "--format=%x1e%H%x00%h%x00%s%x1f",
+        f"{base_ref}..{branch}",
+    )
     patches: list[PatchInfo] = []
-    for idx, sha in enumerate(shas, 1):
-        meta = run_git(repo, "show", "-s", "--format=%h%x00%s", sha).stdout.rstrip("\n")
-        short_sha, _, subject = meta.partition("\0")
-        files_out = run_git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", sha).stdout
-        files = tuple(f for f in files_out.splitlines() if f)
+    for idx, rec in enumerate((r for r in proc.stdout.split("\x1e") if r), 1):
+        header, _, files_part = rec.partition("\x1f")
+        sha, short_sha, subject = header.split("\x00", 2)
+        files_raw = files_part.lstrip("\x00\n")
+        files = tuple(entry for entry in files_raw.split("\x00") if entry)
         patches.append(PatchInfo(idx, sha, short_sha, subject, files))
     return patches
 
@@ -182,15 +190,30 @@ def _render_stack(repo: Path, base_ref: str, branch: str, out_dir: Path) -> str:
     return base
 
 
-def _patch_files(directory: Path) -> dict[str, bytes]:
-    return {f.name: f.read_bytes() for f in sorted(directory.glob("*.patch"))}
+def _patch_dirs_equal(left: Path, right: Path) -> bool:
+    left_files = sorted(left.glob("*.patch"))
+    right_files = sorted(right.glob("*.patch"))
+    if [f.name for f in left_files] != [f.name for f in right_files]:
+        return False
+    for a, b in zip(left_files, right_files):
+        if a.stat().st_size != b.stat().st_size:
+            return False
+    for a, b in zip(left_files, right_files):
+        if a.read_bytes() != b.read_bytes():
+            return False
+    return True
 
 
 def exported_matches(repo: Path, base_ref: str = "upstream/main", branch: str = "patches") -> bool:
     """True when `patches/` and the pin already describe the stack on `branch`."""
+    if not PIN_FILE.is_file() or not PATCH_DIR.is_dir():
+        return False
+    base = run_git(repo, "merge-base", branch, base_ref).stdout.strip()
+    if read_pin() != base:
+        return False
     with tempfile.TemporaryDirectory() as tmp:
-        base = _render_stack(repo, base_ref, branch, Path(tmp))
-        return PIN_FILE.is_file() and read_pin() == base and _patch_files(Path(tmp)) == _patch_files(PATCH_DIR)
+        run_git(repo, *_FORMAT_PATCH, "-o", tmp, f"{base}..{branch}")
+        return _patch_dirs_equal(Path(tmp), PATCH_DIR)
 
 
 def export_patches(repo: Path, base_ref: str = "upstream/main", branch: str = "patches") -> None:
@@ -623,8 +646,12 @@ def _run_internal_seq_edit(todo_path: Path) -> int:
     out: list[str] = []
     for line in lines:
         parts = line.split()
-        if len(parts) >= 2 and parts[0] == "pick" and parts[1].lower().startswith(target_sha):
-            out.append("edit " + line[5:])
+        cmd = parts[0] if parts else ""
+        token = parts[1].lower() if len(parts) >= 2 else ""
+        if cmd in ("pick", "p") and len(token) >= 4 and (
+            target_sha.startswith(token) or token.startswith(target_sha)
+        ):
+            out.append("edit" + line[len(cmd):])
             matched = True
         else:
             out.append(line)
@@ -662,15 +689,14 @@ def cmd_status(repo: Path, args: argparse.Namespace) -> int:
         return 1 if info["state"] == "conflict" else 0
 
     branch = current_branch(repo)
-    upstream_sha = run_git(repo, "rev-parse", "--short", args.base).stdout.strip()
-    patches_sha = run_git(repo, "rev-parse", "--short", args.patches_branch).stdout.strip()
+    revs = run_git(repo, "rev-parse", args.base, args.patches_branch, args.target_branch).stdout.splitlines()
+    upstream_full, patches_full, main_full = revs[0].strip(), revs[1].strip(), revs[2].strip()
+    upstream_sha, patches_sha, main_sha = upstream_full[:10], patches_full[:10], main_full[:10]
     behind = int(run_git(repo, "rev-list", "--count", f"{args.patches_branch}..{args.base}").stdout.strip())
     pinned_sha = run_git(repo, "merge-base", args.patches_branch, args.base).stdout.strip()[:10]
     patches = list_patches(repo, base_ref=args.base, branch=args.patches_branch)
 
-    main_sha = run_git(repo, "rev-parse", "--short", args.target_branch).stdout.strip()
     main_parent_proc = run_git(repo, "rev-parse", f"{args.target_branch}^", check=False)
-    patches_full = run_git(repo, "rev-parse", args.patches_branch).stdout.strip()
     main_in_sync = main_parent_proc.returncode == 0 and main_parent_proc.stdout.strip() == patches_full
     dirty = bool(run_git(repo, "status", "--porcelain").stdout.strip())
     exported = exported_matches(repo, args.base, args.patches_branch)
@@ -719,6 +745,14 @@ def cmd_apply(repo: Path, args: argparse.Namespace) -> int:
         if run_git(repo, "status", "--porcelain").stdout.strip():
             print(f"{repo} is dirty; commit or discard the changes before applying.", file=sys.stderr)
             return 2
+    other_wt = check_branch_worktree(SOURCE_ROOT, "patches", allowed_wt=repo)
+    if other_wt is not None:
+        print(
+            f"Branch `patches` is checked out in another worktree: {other_wt}\n"
+            "Switch that worktree to a different branch (or remove it) before applying.",
+            file=sys.stderr,
+        )
+        return 2
     has_branch = run_git(SOURCE_ROOT, "rev-parse", "-q", "--verify", "refs/heads/patches", check=False).returncode == 0
     if has_branch and not args.force and not exported_matches(SOURCE_ROOT, args.base):
         print(
@@ -834,7 +868,7 @@ def cmd_edit(repo: Path, args: argparse.Namespace) -> int:
         _stack_base(repo, args.base),
         check=False,
         capture=True,
-        env_extra={"GIT_SEQUENCE_EDITOR": seq_editor, "NAKO_EDIT_SHA": target.short_sha},
+        env_extra={"GIT_SEQUENCE_EDITOR": seq_editor, "NAKO_EDIT_SHA": target.sha},
     )
     if rebase_dir(repo) is not None:
         report_rebase_conflict(repo, stream=sys.stdout)
