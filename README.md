@@ -1,3 +1,5 @@
+> **Deprecated:** this Python agent is no longer the target for new features. The Bun agent and Portal are moving into [the unified Nako repository](https://github.com/QuillDev/nako). Existing installs remain available; this is not an instruction to uninstall or migrate live data.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/QuillDev/nako-agent/main/assets/banner.png" alt="nako agent" width="100%">
 </p>
